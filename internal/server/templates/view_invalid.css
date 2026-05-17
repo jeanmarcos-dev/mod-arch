@@ -1,0 +1,31 @@
+:root {
+  --amber: #ffb547;
+  --bg: #07090e;
+  --dim: #8b8675;
+}
+
+body {
+  font-family: 'JetBrains Mono', monospace;
+  background: var(--bg);
+  color: var(--amber);
+  padding: 48px 24px;
+  text-align: center;
+}
+
+h1 {
+  font-size: 18px;
+  letter-spacing: 3px;
+  margin-bottom: 16px;
+}
+
+p {
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 1.6;
+  max-width: 480px;
+  margin: 0 auto 16px;
+}
+
+a {
+  color: #6ad4ff;
+}

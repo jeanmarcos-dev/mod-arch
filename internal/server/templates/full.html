@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Capacidad llena · MODOS_CPU</title>
+  <link href="https://fonts.googleapis.com/css2?family=Major+Mono+Display&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/_assets/full.css">
+</head>
+<body>
+  <div class="container">
+    <h1>▸ Capacidad temporal alcanzada</h1>
+    <p class="lead">
+      <span class="stat">{{.Full}} / {{.MaxPublic}} sesiones</span>
+      Hay {{.Full}} sesiones activas en este servidor (cap configurado: {{.MaxPublic}}).
+      Espere unos minutos y refresque, o únase a una sesión existente como espectador:
+    </p>
+    {{if .Sessions}}
+    <ul class="session-list">
+      {{range .Sessions}}
+      <li class="session">
+        <div class="session-info">
+          <strong>{{.Label}}</strong>
+          <div class="session-meta">{{.ViewersCount}} viewers · creada hace {{.AgeMinutes}} min</div>
+        </div>
+        <a class="btn" href="/v/{{.ViewToken}}">VER →</a>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}
+    <p class="empty">
+      Por ahora ningún propietario activó el compartido, así que no hay sesiones
+      públicas que visualizar. Refresque esta página cuando alguien lo haga,
+      o intente más tarde para crear su propia sesión.
+    </p>
+    {{end}}
+    <p class="footer">
+      ◆ Demo SO · UCV · <a href="/api/health">api/health</a>
+    </p>
+  </div>
+  <script>setTimeout(function(){ location.reload(); }, 20000);</script>
+</body>
+</html>

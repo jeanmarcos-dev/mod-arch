@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard · MODOS_CPU</title>
+  <link href="https://fonts.googleapis.com/css2?family=Major+Mono+Display&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/_assets/admin_dashboard.css">
+</head>
+<body>
+  <header>
+    <h1>▸ ADMIN · DASHBOARD</h1>
+    <div class="who">
+      ◉ {{.User}}
+      <span class="refresh">· auto-refresh 5s</span>
+      <form method="post" action="/admin/logout" style="display:inline">
+        <a href="#" onclick="this.closest('form').submit(); return false">⏻ logout</a>
+      </form>
+    </div>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><div class="stat-label">Sesiones públicas</div><div class="stat-val"><span id="cnt-full">{{.Full}}</span> / {{.MaxPublic}}</div></div>
+    <div class="stat priv"><div class="stat-label">Privilegiadas</div><div class="stat-val"><span id="cnt-priv">{{.Privileged}}</span> / {{.MaxPrivileged}}</div></div>
+    <div class="stat inv"><div class="stat-label">Invites pendientes</div><div class="stat-val"><span id="cnt-inv">0</span></div></div>
+    <div class="stat"><div class="stat-label">Total creadas</div><div class="stat-val" style="color:var(--text-dim)">{{.TotalCreated}}</div></div>
+    <div class="stat"><div class="stat-label">Pico simultáneas</div><div class="stat-val" style="color:var(--text-dim)">{{.Peak}}</div></div>
+  </div>
+
+  <h2>▤ Sesiones activas</h2>
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Modo</th><th>Alias</th><th>Compartida</th><th>Creada</th><th>Actividad</th><th>Acciones</th></tr>
+    </thead>
+    <tbody id="rows"><tr><td colspan="7" class="empty">cargando…</td></tr></tbody>
+  </table>
+
+  <h2>⚡ Invites privilegiados</h2>
+  <div class="invite-form">
+    <input id="inv-label" type="text" maxlength="32" placeholder="Alias del invitado (ej. Prof. Carlos)…" />
+    <button id="inv-create">⚡ Generar invite</button>
+  </div>
+  <table>
+    <thead>
+      <tr><th>Token</th><th>Alias</th><th>Creado hace</th><th>Acciones</th></tr>
+    </thead>
+    <tbody id="invs"><tr><td colspan="4" class="empty">cargando…</td></tr></tbody>
+  </table>
+
+  <p class="footer">◆ Demo SO · UCV · <a href="/">← Volver al simulador</a></p>
+
+  <div id="toast" class="toast" style="display:none"></div>
+
+  <script src="/_assets/dashboard.js" defer></script>
+</body>
+</html>
