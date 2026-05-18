@@ -1,0 +1,76 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - revive
+    - gocyclo
+    - gocognit
+    - misspell
+    - unconvert
+    - bodyclose
+    - errorlint
+    - nilerr
+    - nolintlint
+
+  settings:
+    gocyclo:
+      min-complexity: 15
+    gocognit:
+      min-complexity: 20
+    revive:
+      rules:
+        - name: exported
+          disabled: false
+        - name: package-comments
+          disabled: false
+        - name: var-naming
+        - name: receiver-naming
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: superfluous-else
+        - name: unexported-return
+        - name: unreachable-code
+        - name: var-declaration
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+    misspell:
+      locale: US
+      ignore-rules:
+        - persistente
+        - comando
+        - comandos
+        - clientes
+        - sesion
+        - sesiones
+
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gocyclo
+          - gocognit
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/jeanmarcos/modos-cpu
