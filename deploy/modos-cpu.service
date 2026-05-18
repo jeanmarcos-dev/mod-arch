@@ -1,0 +1,22 @@
+[Unit]
+Description=MODOS_CPU OS visualizer
+After=network.target
+
+[Service]
+Type=simple
+User=modos
+Group=modos
+WorkingDirectory=/opt/modos-cpu
+ExecStart=/opt/modos-cpu/modos-cpu -addr 127.0.0.1:8080
+Restart=on-failure
+RestartSec=3
+
+# Basic systemd hardening.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/modos-cpu
+
+[Install]
+WantedBy=multi-user.target
