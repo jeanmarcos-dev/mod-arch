@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { usePreferencesStore, type PresentationMode } from '../../stores/preferences';
+import { useCpuStore } from '../../stores/cpu';
+import SimulationControls from './SimulationControls.vue';
+import ShareModal from '../ShareModal.vue';
 
 withDefaults(
   defineProps<{
@@ -13,11 +16,34 @@ withDefaults(
 
 const route = useRoute();
 const prefs = usePreferencesStore();
+const cpu = useCpuStore();
 
 const sectionTitle = computed(() => {
   if (typeof route.meta.title === 'string') return route.meta.title;
   return '';
 });
+
+// Simulation routes get the load/run controls inline. Tools routes
+// (/perfil, /preferencias, etc.) hide them to keep the bar uncluttered.
+const isSimRoute = computed(() => {
+  const p = route.path;
+  return p === '/' || p === '/procesos' || p === '/memoria' || p === '/interrupciones';
+});
+
+// Share button shows for owners only (not viewers, not anonymous w/o session).
+const canShare = computed(() => {
+  const role = cpu.sessionInfo?.role ?? 'none';
+  return role === 'owner';
+});
+
+const isShared = computed(() => Boolean(cpu.sessionInfo?.view_token));
+const shareOpen = ref(false);
+
+function openShare() {
+  // The modal handles share/unshare + URL copy. Showing it on every click
+  // means the owner can always re-read the link without remembering it.
+  shareOpen.value = true;
+}
 
 const modes: { id: PresentationMode; label: string; help: string }[] = [
   { id: 'compact', label: 'Compacto', help: 'Densidad alta, sin animaciones' },
@@ -34,8 +60,22 @@ const modes: { id: PresentationMode; label: string; help: string }[] = [
       <span class="topbar__section">{{ crumb ?? sectionTitle }}</span>
     </div>
 
+    <SimulationControls v-if="isSimRoute" class="topbar__sim" />
+
     <div class="topbar__actions">
+      <button
+        v-if="canShare"
+        type="button"
+        :class="['topbar__share', { 'topbar__share--on': isShared }]"
+        :title="isShared ? 'Sesión compartida — clic para gestionarla' : 'Generar un enlace para que otros vean la sesión en modo lectura'"
+        @click="openShare"
+      >
+        {{ isShared ? '⏹ Compartiendo' : '⤴ Compartir' }}
+      </button>
+
       <slot name="actions" />
+
+      <ShareModal :open="shareOpen" @close="shareOpen = false" />
 
       <div class="topbar__modes" role="radiogroup" aria-label="Modo de presentación">
         <button
@@ -96,10 +136,44 @@ const modes: { id: PresentationMode; label: string; help: string }[] = [
   font-size: 11px;
 }
 
+.topbar__sim {
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
+}
+
 .topbar__actions {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
+}
+
+.topbar__share {
+  font-family: inherit;
+  background: rgba(255, 179, 71, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+  white-space: nowrap;
+}
+
+.topbar__share:hover {
+  background: rgba(255, 179, 71, 0.12);
+  color: var(--amber);
+  border-color: var(--border-strong);
+}
+
+.topbar__share--on {
+  background: rgba(127, 255, 170, 0.10);
+  color: var(--green);
+  border-color: var(--green);
+  box-shadow: var(--shadow-glow-green);
 }
 
 .topbar__modes {

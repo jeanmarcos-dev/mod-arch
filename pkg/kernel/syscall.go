@@ -101,7 +101,10 @@ func (k *Kernel) sysWrite(fd, bufAddr, count uint32) (uint32, []cpu.Event) {
 
 	bytes := make([]byte, count)
 	for i := range count {
-		b, err := k.CPU.Mem.Read8(nil, bufAddr+i, cpu.ModeKernel)
+		// Pass k.CPU (not nil) so mem_read events are emitted while the
+		// kernel reads the user's buffer. The narrator layer relies on
+		// these to draw bytes flying from user memory into the console.
+		b, err := k.CPU.Mem.Read8(k.CPU, bufAddr+i, cpu.ModeKernel)
 		if err != nil {
 			// Real Linux returns -EFAULT here.
 			return ^uint32(0), nil

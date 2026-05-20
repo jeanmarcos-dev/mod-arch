@@ -56,6 +56,8 @@ function defaultTarget(addr: number): Element | null {
 
 const narrators = useNarrators();
 
+const MAX_FLIGHTS = 12;
+
 function launch(kind: 'write' | 'read', addr: number, value: number, seq: number) {
   const from = rectCenter(document.querySelector(props.sourceSelector));
   const to = rectCenter(props.target ? props.target(addr) : defaultTarget(addr));
@@ -64,6 +66,12 @@ function launch(kind: 'write' | 'read', addr: number, value: number, seq: number
   // Slow the flight down in pedagogic and projector modes so the audience
   // can actually trace it.
   const ttl = Math.round(props.ttlMs / prefs.animationSpeed);
+
+  // Cap the in-flight set so a burst (e.g. sys_write reading 8 bytes) doesn't
+  // turn into visual noise. Drop the oldest when over the cap.
+  if (flights.value.length >= MAX_FLIGHTS) {
+    flights.value.shift();
+  }
 
   flights.value.push({
     id: seq,

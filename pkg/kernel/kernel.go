@@ -170,6 +170,11 @@ func (k *Kernel) Step() ([]cpu.Event, error) {
 			continue
 		}
 		schedEvs := k.runHandlerLogic(irq.Vector, irq.Source)
+		// The handler may have called cpu.Emit (e.g. mem_read while reading
+		// the user buffer in sys_write). CPU.Step has already returned its
+		// own slice, so drain whatever the handler accumulated and merge.
+		handlerEvs := k.CPU.DrainEvents()
+		evs = append(evs, handlerEvs...)
 		evs = append(evs, schedEvs...)
 	}
 	return evs, nil

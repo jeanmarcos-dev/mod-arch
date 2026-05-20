@@ -9,11 +9,9 @@ import ConsolePanel from '../components/ConsolePanel.vue';
 import GlossaryModal from '../components/GlossaryModal.vue';
 import MemoryPanel from '../components/MemoryPanel.vue';
 import CodePanel from '../components/CodePanel.vue';
-import ShareModal from '../components/ShareModal.vue';
 
 const cpu = useCpuStore();
 const glossaryOpen = ref(false);
-const shareOpen = ref(false);
 
 // En desktop hay 3 paneles siempre visibles (CPU izq, middle, Procs der) y el
 // middleTab controla qué panel del centro se ve.
@@ -91,7 +89,7 @@ onUnmounted(() => {
       en modo <strong>solo lectura</strong> — los controles los maneja el propietario
     </div>
 
-    <TopBar @open-glossary="cpu.openGlossary()" @open-share="shareOpen = true" />
+    <TopBar @open-glossary="cpu.openGlossary()" />
 
     <!-- Tab bar mobile-only — controla todo el layout. Sólo visible <= 768px (CSS) -->
     <nav class="mobile-tabs" :aria-hidden="!isMobile">
@@ -135,7 +133,6 @@ onUnmounted(() => {
     </main>
 
     <GlossaryModal :open="glossaryOpen" :initial-search="cpu.glossarySearch" @close="glossaryOpen = false" />
-    <ShareModal :open="shareOpen" @close="shareOpen = false" />
 
     <div class="credit" title="Demo de Sistemas Operativos">
       <span class="credit-tag">DEMO_SO · UCV</span>

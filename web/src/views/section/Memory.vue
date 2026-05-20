@@ -101,23 +101,16 @@ const presets: Preset[] = [
 ];
 function jumpTo(p: Preset) { baseAddr.value = p.resolve(); }
 
-// Tiny in-section driver so the audience can run a demo without leaving
-// the Memory perspective. The full set lives in Vista general; here we
-// expose the few most relevant to memory traffic.
-const demoChoice = ref<'pushpop' | 'hello' | 'counter' | 'add'>('pushpop');
-function loadDemo() {
-  cpu.load(demoChoice.value);
-  // pushpop touches the stack near ESP; everything else fits in the
-  // program region. The Stack preset is dynamic (follows ESP) so just call
-  // it instead of pinning a literal address.
-  if (demoChoice.value === 'pushpop') {
-    setTimeout(() => jumpTo(presets[1]), 250);
-  } else {
-    baseAddr.value = 0x200000;
+// Auto-follow ESP when a stack-touching demo is loaded. Detection runs on
+// the loaded event (procs reset) — when the new program is `pushpop` or
+// any stack-heavy demo, jump the window to the stack so the audience does
+// not have to click "Stack" manually.
+cpu.subscribe((ev) => {
+  if (ev.type === 'loaded' && (ev.name === 'pushpop' || ev.name === 'callret')) {
+    // Defer one tick so cpu.regs.ESP reflects the post-load value.
+    setTimeout(() => { jumpTo(presets[1]); }, 200);
   }
-}
-function step() { cpu.step(); }
-function run() { cpu.run(cpu.stepHz); }
+});
 
 const rows = computed(() => {
   const out: { addr: number; cells: number[] }[] = [];
@@ -162,50 +155,6 @@ function ageOf(ts: number): number {
         >{{ p.label }}</button>
       </div>
 
-      <div class="memory-page__drive">
-        <select
-          v-model="demoChoice"
-          aria-label="Demo a ejecutar"
-          class="memory-page__demo-select"
-          :disabled="cpu.isViewer()"
-        >
-          <option value="pushpop">pushpop — push/pop al stack</option>
-          <option value="hello">hello — sys_write a consola</option>
-          <option value="counter">counter — INC + CMP + JNE</option>
-          <option value="add">add — MOV + ADD (sólo registros)</option>
-        </select>
-        <button
-          type="button"
-          :disabled="cpu.isViewer()"
-          class="memory-page__drive-btn"
-          @click="loadDemo"
-        >▸ Cargar</button>
-        <button
-          type="button"
-          :disabled="cpu.isViewer() || cpu.halted"
-          class="memory-page__drive-btn"
-          @click="step"
-        >⏵ Paso</button>
-        <button
-          v-if="!cpu.running"
-          type="button"
-          :disabled="cpu.isViewer() || cpu.halted"
-          class="memory-page__drive-btn"
-          @click="run"
-        >⏩ Correr</button>
-        <button
-          v-else
-          type="button"
-          class="memory-page__drive-btn"
-          @click="cpu.pause()"
-        >⏸ Pausa</button>
-        <button
-          type="button"
-          class="memory-page__drive-btn"
-          :disabled="cpu.isViewer()"
-          @click="cpu.reset()"
-        >↻ Reset</button>
-      </div>
       <div
         v-if="!prefs.narratorsEnabled"
         class="memory-page__hint"
@@ -356,47 +305,6 @@ function ageOf(ts: number): number {
   font-size: 11px;
   color: var(--text-dim);
   letter-spacing: 0.5px;
-}
-
-.memory-page__drive {
-  display: flex;
-  gap: var(--space-1);
-  align-items: stretch;
-}
-
-.memory-page__demo-select {
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--border);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 11px;
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
-  max-width: 220px;
-}
-
-.memory-page__drive-btn {
-  background: rgba(255, 179, 71, 0.08);
-  border: 1px solid var(--border-strong);
-  color: var(--amber);
-  font-family: inherit;
-  font-size: 11px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  padding: 4px 10px;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  transition: background var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-.memory-page__drive-btn:hover:not(:disabled) {
-  background: rgba(255, 179, 71, 0.18);
-  box-shadow: var(--shadow-glow-amber);
-}
-
-.memory-page__drive-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 .memory-page__body {

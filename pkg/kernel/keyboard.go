@@ -90,7 +90,9 @@ func (k *Kernel) handleKeyboard() []cpu.Event {
 	k.KeyboardBuf = k.KeyboardBuf[n:]
 
 	for i, b := range delivered {
-		_ = k.CPU.Mem.Write8(nil, req.BufAddr+uint32(i), b, cpu.ModeKernel)
+		// Pass k.CPU so the narrator sees the kernel copying keyboard
+		// bytes into the user's buffer — mirrors the sys_write side.
+		_ = k.CPU.Mem.Write8(k.CPU, req.BufAddr+uint32(i), b, cpu.ModeKernel)
 	}
 
 	// Set the pending syscall result in the PCB. When the process resumes
@@ -142,7 +144,7 @@ func (k *Kernel) sysRead(fd, bufAddr, count uint32) (uint32, []cpu.Event) {
 	if uint32(len(k.KeyboardBuf)) > 0 {
 		n := min(count, uint32(len(k.KeyboardBuf)))
 		for i := range n {
-			_ = k.CPU.Mem.Write8(nil, bufAddr+i, k.KeyboardBuf[i], cpu.ModeKernel)
+			_ = k.CPU.Mem.Write8(k.CPU, bufAddr+i, k.KeyboardBuf[i], cpu.ModeKernel)
 		}
 		k.KeyboardBuf = k.KeyboardBuf[n:]
 		return n, nil

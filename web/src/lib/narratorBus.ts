@@ -49,18 +49,11 @@ type AnyHandler = (...args: unknown[]) => void;
 
 export interface NarratorOptions {
   /**
-   * Maximum events per second to forward. Lower values keep heavy workloads
-   * (sieve, dining_philosophers) visually digestible. 0 disables throttling.
-   */
-  maxHz?: number;
-  /**
    * When true, the bus listens regardless of the preferences flag. Use only
    * for diagnostics — production narrators must respect the user toggle.
    */
   force?: boolean;
 }
-
-const DEFAULT_MAX_HZ = 30;
 
 /**
  * useNarrators subscribes to the cpu store for the lifetime of the calling
@@ -80,22 +73,18 @@ export function useNarrators(opts: NarratorOptions = {}) {
   };
 
   let seq = 0;
-  const maxHz = opts.maxHz ?? DEFAULT_MAX_HZ;
-  const minIntervalMs = maxHz > 0 ? 1000 / maxHz : 0;
-  let lastTickMs = 0;
 
-  function shouldEmit(): boolean {
-    if (!opts.force && !prefs.narratorsEnabled) return false;
-    if (minIntervalMs <= 0) return true;
-    const now = performance.now();
-    if (now - lastTickMs < minIntervalMs) return false;
-    lastTickMs = now;
-    return true;
+  function isEnabled(): boolean {
+    return opts.force === true || prefs.narratorsEnabled;
   }
 
   function fire(channel: keyof typeof handlers, payload: unknown) {
     if (handlers[channel].size === 0) return;
-    if (!shouldEmit()) return;
+    if (!isEnabled()) return;
+    // Narrators receive every event; rate limiting belongs to each narrator
+    // visual layer (e.g. ByteFlight caps in-flight animations rather than
+    // dropping events). This avoids syscalls that emit a quick burst (8
+    // mem_reads back-to-back in sys_write) being silently swallowed.
     for (const fn of handlers[channel]) {
       try { fn(payload); } catch { /* narrators must never crash the bus */ }
     }

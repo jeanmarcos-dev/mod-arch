@@ -3,7 +3,6 @@ import { useCpuStore } from '../stores/cpu';
 import { useAuthStore } from '../stores/auth';
 import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import ProgramPicker from './ProgramPicker.vue';
 
 const cpu = useCpuStore();
 const auth = useAuthStore();
@@ -31,11 +30,7 @@ async function doLogout() {
   await auth.logout();
 }
 
-function onLoad() {
-  if (cpu.selectedProgram) cpu.load(cpu.selectedProgram);
-}
-
-defineEmits<{ (e: 'open-glossary'): void; (e: 'open-share'): void }>();
+defineEmits<{ (e: 'open-glossary'): void }>();
 </script>
 
 <template>
@@ -72,18 +67,13 @@ defineEmits<{ (e: 'open-glossary'): void; (e: 'open-share'): void }>();
         <button class="btn-login-mini" @click.prevent="goToLogin" title="Iniciar sesión con nombre y correo (opcional)">⤴</button>
       </label>
 
-      <ProgramPicker />
+      <!-- Program picker + LOAD/STEP/RUN/RESET + Compartir now live in the
+           shell topbar so they stay reachable from every SIMULACIÓN route.
+           The simulator panel keeps Hz/Quantum/CLEAR/GLOSARIO since those
+           are specific to the Vista general workflow. -->
 
       <div class="actions">
-        <button @click="onLoad" :disabled="!cpu.selectedProgram || cpu.isViewer()" title="Carga el demo seleccionado en el simulador. Reinicia el kernel y arranca los procesos del demo.">▸ LOAD</button>
-        <button @click="cpu.step" :disabled="cpu.halted || cpu.running || cpu.isViewer()" title="Ejecuta UNA instrucción (o el dispatch de la IRQ si hay alguna pendiente). Avanza Tick en 1.">⏵ STEP</button>
-        <button v-if="!cpu.running" @click="cpu.run(cpu.stepHz)" :disabled="cpu.halted || cpu.isViewer()" title="Ejecuta steps automáticamente a Hz pasos por segundo.">⏩ RUN</button>
-        <button v-else @click="cpu.pause" :disabled="cpu.isViewer()" title="Detiene el RUN automático. El STEP manual sigue disponible.">⏸ PAUSE</button>
-        <button @click="cpu.reset" :disabled="cpu.isViewer()" class="btn-reset" title="Borra TODO: kernel, procesos, log, consola. Vuelve al estado inicial sin programa cargado.">↻ RESET</button>
         <button @click="cpu.clearLog" class="btn-clear" title="Limpia el log de eventos y la consola, sin tocar el programa cargado ni el estado del CPU.">⌧ CLEAR</button>
-        <button v-if="!cpu.isViewer()" @click="$emit('open-share')" class="btn-share" :class="{ 'is-sharing': cpu.sessionInfo.view_token }" title="Comparta esta sesión en modo solo lectura. Genera un enlace que cualquiera puede abrir para ver lo que usted hace.">
-          {{ cpu.sessionInfo.view_token ? '🔗 COMPARTIDA' : '🔗 COMPARTIR' }}
-        </button>
         <button @click="$emit('open-glossary')" class="btn-glossary" title="Glosario: definiciones de IRQ, PL, flags, registros, scheduler, etc.">? GLOSARIO</button>
       </div>
 

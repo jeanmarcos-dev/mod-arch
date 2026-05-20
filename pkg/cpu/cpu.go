@@ -108,6 +108,16 @@ func (c *CPU) Emit(e Event) {
 	c.events = append(c.events, e)
 }
 
+// DrainEvents returns and clears the pending event slice. Used by the kernel
+// after it runs handler logic (sys_write, sys_read, scheduler) so the events
+// the handler emitted via Emit make it out of the step boundary — Step has
+// already returned its own slice by the time the handler runs.
+func (c *CPU) DrainEvents() []Event {
+	out := c.events
+	c.events = nil
+	return out
+}
+
 // SetReg32 writes a 32-bit register by name and emits the matching event.
 func (c *CPU) SetReg32(name string, val uint32) error {
 	old, p, err := c.regPtr(name)
