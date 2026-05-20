@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { useCpuStore } from '../stores/cpu';
@@ -13,6 +13,14 @@ const cpu = useCpuStore();
 const prefs = usePreferencesStore();
 const route = useRoute();
 const router = useRouter();
+
+// openGlossary in the shell takes the student to the full glossary page with
+// the term prefilled. The viewer (/v/:token) still uses the modal because the
+// shell isn't present there.
+watch(() => cpu.glossaryOpenSignal, (n, prev) => {
+  if (n === prev) return;
+  router.push({ name: 'glossary', query: cpu.glossarySearch ? { q: cpu.glossarySearch } : {} });
+});
 
 // Connect once when the shell mounts. The shell lives for the whole student
 // session, so child route changes don't trigger a reconnect. cpu.connect is
