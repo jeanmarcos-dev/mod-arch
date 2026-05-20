@@ -156,7 +156,11 @@ const modes: { id: PresentationMode; label: string; help: string }[] = [
   font-size: 10px;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  padding: 6px 10px;
+  height: 32px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
   cursor: pointer;
   border-radius: var(--radius-sm);
   transition: background var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
@@ -177,10 +181,13 @@ const modes: { id: PresentationMode; label: string; help: string }[] = [
 }
 
 .topbar__modes {
-  display: flex;
+  display: inline-flex;
+  align-items: stretch;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   overflow: hidden;
+  height: 32px;
+  box-sizing: border-box;
 }
 
 .topbar__mode {
@@ -192,7 +199,9 @@ const modes: { id: PresentationMode; label: string; help: string }[] = [
   font-size: 10px;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  padding: 6px 10px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
 }

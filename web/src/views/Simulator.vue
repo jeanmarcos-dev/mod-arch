@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { useCpuStore } from '../stores/cpu';
 import TopBar from '../components/TopBar.vue';
 import CpuPanel from '../components/CpuPanel.vue';
@@ -11,7 +12,13 @@ import MemoryPanel from '../components/MemoryPanel.vue';
 import CodePanel from '../components/CodePanel.vue';
 
 const cpu = useCpuStore();
+const route = useRoute();
 const glossaryOpen = ref(false);
+
+// Only mount the local modal when Simulator is the standalone view (the
+// viewer route /v/:token). Inside AppShell the shell owns the modal and
+// mounting another instance here would open two modals on glossaryOpenSignal.
+const standalone = computed(() => route.path.startsWith('/v/'));
 
 // En desktop hay 3 paneles siempre visibles (CPU izq, middle, Procs der) y el
 // middleTab controla qué panel del centro se ve.
@@ -89,7 +96,7 @@ onUnmounted(() => {
       en modo <strong>solo lectura</strong> — los controles los maneja el propietario
     </div>
 
-    <TopBar @open-glossary="cpu.openGlossary()" />
+    <TopBar />
 
     <!-- Tab bar mobile-only — controla todo el layout. Sólo visible <= 768px (CSS) -->
     <nav class="mobile-tabs" :aria-hidden="!isMobile">
@@ -132,7 +139,12 @@ onUnmounted(() => {
       <ProcessesPanel v-show="visible.procs" class="col-right" />
     </main>
 
-    <GlossaryModal :open="glossaryOpen" :initial-search="cpu.glossarySearch" @close="glossaryOpen = false" />
+    <GlossaryModal
+      v-if="standalone"
+      :open="glossaryOpen"
+      :initial-search="cpu.glossarySearch"
+      @close="glossaryOpen = false"
+    />
 
     <div class="credit" title="Demo de Sistemas Operativos">
       <span class="credit-tag">DEMO_SO · UCV</span>

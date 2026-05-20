@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { useCpuStore } from '../stores/cpu';
@@ -7,6 +7,7 @@ import { usePreferencesStore } from '../stores/preferences';
 import Sidebar from '../components/shell/Sidebar.vue';
 import Topbar from '../components/shell/Topbar.vue';
 import SimulationMinibar from '../components/shell/SimulationMinibar.vue';
+import GlossaryModal from '../components/GlossaryModal.vue';
 
 const auth = useAuthStore();
 const cpu = useCpuStore();
@@ -14,12 +15,13 @@ const prefs = usePreferencesStore();
 const route = useRoute();
 const router = useRouter();
 
-// openGlossary in the shell takes the student to the full glossary page with
-// the term prefilled. The viewer (/v/:token) still uses the modal because the
-// shell isn't present there.
+// Any cpu.openGlossary('EIP') call from a panel opens the popup right where
+// the student clicked. The full /glosario page is still reachable from the
+// sidebar for browse-the-whole-thing scenarios.
+const glossaryOpen = ref(false);
 watch(() => cpu.glossaryOpenSignal, (n, prev) => {
   if (n === prev) return;
-  router.push({ name: 'glossary', query: cpu.glossarySearch ? { q: cpu.glossarySearch } : {} });
+  glossaryOpen.value = true;
 });
 
 // Connect once when the shell mounts. The shell lives for the whole student
@@ -53,7 +55,7 @@ async function logout() {
 
 <template>
   <div :class="['shell', `shell--mode-${prefs.mode}`]">
-    <Sidebar :items="items" heading="MODOS-CPU" />
+    <Sidebar :items="items" />
     <div class="shell__main">
       <Topbar>
         <template #actions>
@@ -78,6 +80,12 @@ async function logout() {
         </RouterView>
       </main>
     </div>
+
+    <GlossaryModal
+      :open="glossaryOpen"
+      :initial-search="cpu.glossarySearch"
+      @close="glossaryOpen = false"
+    />
   </div>
 </template>
 
@@ -113,7 +121,11 @@ async function logout() {
   font-size: 10px;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  padding: 6px 10px;
+  height: 32px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
   cursor: pointer;
   text-decoration: none;
   border-radius: var(--radius-sm);

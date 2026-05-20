@@ -29,8 +29,6 @@ function goToLogin() {
 async function doLogout() {
   await auth.logout();
 }
-
-defineEmits<{ (e: 'open-glossary'): void }>();
 </script>
 
 <template>
@@ -69,12 +67,13 @@ defineEmits<{ (e: 'open-glossary'): void }>();
 
       <!-- Program picker + LOAD/STEP/RUN/RESET + Compartir now live in the
            shell topbar so they stay reachable from every SIMULACIÓN route.
-           The simulator panel keeps Hz/Quantum/CLEAR/GLOSARIO since those
-           are specific to the Vista general workflow. -->
+           Tooltips on clickable terms (EAX, PCB, ...) keep firing the
+           glossary modal globally via cpu.openGlossary(), so we don't need a
+           dedicated button on the toolbar. The sidebar still has a /glosario
+           link for the full-page browse experience. -->
 
       <div class="actions">
         <button @click="cpu.clearLog" class="btn-clear" title="Limpia el log de eventos y la consola, sin tocar el programa cargado ni el estado del CPU.">⌧ CLEAR</button>
-        <button @click="$emit('open-glossary')" class="btn-glossary" title="Glosario: definiciones de IRQ, PL, flags, registros, scheduler, etc.">? GLOSARIO</button>
       </div>
 
       <div class="config">

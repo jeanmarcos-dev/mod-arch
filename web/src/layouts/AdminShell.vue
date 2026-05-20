@@ -47,7 +47,7 @@ onUnmounted(() => {
 
 <template>
   <div class="admin-shell">
-    <Sidebar :items="items" heading="ADMIN" />
+    <Sidebar :items="items" />
     <div class="admin-shell__main">
       <Topbar>
         <template #actions>

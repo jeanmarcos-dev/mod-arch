@@ -12,15 +12,10 @@ interface NavItem {
   soon?: boolean;
 }
 
-withDefaults(
-  defineProps<{
-    /** Items to render. Sections precede tools; both share the same shape. */
-    items: NavItem[];
-    /** Heading shown when the sidebar is expanded. */
-    heading: string;
-  }>(),
-  {},
-);
+defineProps<{
+  /** Items to render. Sections precede tools; both share the same shape. */
+  items: NavItem[];
+}>();
 
 const prefs = usePreferencesStore();
 const auth = useAuthStore();
@@ -36,19 +31,6 @@ function isActive(to: string): boolean {
 
 <template>
   <aside class="sidebar" :class="{ 'sidebar--collapsed': collapsed }">
-    <header class="sidebar__head">
-      <button
-        type="button"
-        class="sidebar__toggle"
-        :title="collapsed ? 'Expandir menú' : 'Contraer menú'"
-        :aria-label="collapsed ? 'Expandir menú' : 'Contraer menú'"
-        @click="prefs.toggleSidebar()"
-      >
-        <span aria-hidden="true">{{ collapsed ? '»' : '«' }}</span>
-      </button>
-      <h1 class="sidebar__brand">{{ heading }}</h1>
-    </header>
-
     <nav class="sidebar__nav" aria-label="Navegación principal">
       <template v-for="(item, idx) in items" :key="item.to">
         <div
@@ -84,11 +66,22 @@ function isActive(to: string): boolean {
         <span class="sidebar__user-name">{{ auth.user.name }}</span>
       </div>
     </footer>
+
+    <button
+      type="button"
+      class="sidebar__toggle"
+      :title="collapsed ? 'Expandir menú' : 'Contraer menú'"
+      :aria-label="collapsed ? 'Expandir menú' : 'Contraer menú'"
+      @click="prefs.toggleSidebar()"
+    >
+      <span aria-hidden="true">{{ collapsed ? '»' : '«' }}</span>
+    </button>
   </aside>
 </template>
 
 <style scoped>
 .sidebar {
+  position: relative;
   display: flex;
   flex-direction: column;
   background: var(--surface-1);
@@ -96,37 +89,26 @@ function isActive(to: string): boolean {
   width: 220px;
   flex-shrink: 0;
   transition: width var(--transition-base);
-  overflow: hidden;
-  /* Everything that contracts when the rail folds shares this curve so the
-     animation reads as one motion (label squeezes while icon grows). */
+  /* Allow the bottom toggle handle to overhang onto the seam between this
+     panel and the main content. Inner children that need clipping (nav, foot)
+     manage their own overflow. */
 }
 
 .sidebar--collapsed {
   width: 56px;
 }
 
-.sidebar__head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  border-bottom: 1px dashed var(--border);
-  min-height: 48px;
-  transition: padding var(--transition-base);
-  overflow: hidden;
-}
-
-.sidebar--collapsed .sidebar__head {
-  padding: var(--space-3) 0;
-  justify-content: center;
-}
-
+/* Toggle handle straddles the right border so it sits on the seam between
+   sidebar and main content. Bottom-anchored as the user requested. */
 .sidebar__toggle {
-  background: transparent;
-  border: 1px solid var(--border);
+  position: absolute;
+  right: -13px;
+  bottom: var(--space-4);
+  width: 26px;
+  height: 26px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
   color: var(--amber);
-  width: 28px;
-  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -134,46 +116,24 @@ function isActive(to: string): boolean {
   font-family: inherit;
   font-size: 13px;
   border-radius: var(--radius-sm);
-  transition: background var(--transition-fast), box-shadow var(--transition-fast);
-  flex-shrink: 0;
+  z-index: 10;
+  transition: background var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
 }
 
 .sidebar__toggle:hover {
-  background: rgba(255, 179, 71, 0.12);
+  background: rgba(255, 179, 71, 0.18);
+  border-color: var(--amber);
   box-shadow: var(--shadow-glow-amber);
-}
-
-.sidebar__brand {
-  font-family: 'Major Mono Display', monospace;
-  font-size: 13px;
-  letter-spacing: 3px;
-  color: var(--amber);
-  text-shadow: var(--shadow-glow-amber);
-  font-weight: normal;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 200px;
-  opacity: 1;
-  transition:
-    max-width var(--transition-base),
-    opacity var(--transition-fast),
-    margin var(--transition-base);
-}
-
-.sidebar--collapsed .sidebar__brand {
-  max-width: 0;
-  opacity: 0;
-  margin: 0;
 }
 
 .sidebar__nav {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: var(--space-2) 0;
+  padding: 0 0 var(--space-2);
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .sidebar__group {
@@ -334,8 +294,12 @@ function isActive(to: string): boolean {
 .sidebar__foot {
   border-top: 1px dashed var(--border);
   padding: var(--space-3);
+  /* Leave room above the absolute-positioned toggle handle so the user chip
+     never overlaps it. */
+  padding-bottom: calc(var(--space-3) + 26px + var(--space-3));
   font-size: 11px;
   min-height: 36px;
+  overflow: hidden;
 }
 
 .sidebar__user {
