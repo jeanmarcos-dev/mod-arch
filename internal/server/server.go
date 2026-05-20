@@ -114,18 +114,23 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if s.staticFS != nil {
-		// HTML paths other than "/" (e.g. /login) belong to the SPA. Serve
-		// index.html so vue-router can resolve them on the client.
-		if isHTMLPath(path) && path != "/" {
-			r2 := r.Clone(r.Context())
-			r2.URL.Path = "/"
-			http.FileServer(http.FS(s.staticFS)).ServeHTTP(w, r2)
-			return
-		}
-		http.FileServer(http.FS(s.staticFS)).ServeHTTP(w, r)
+		s.serveSPA(w, r, path)
 		return
 	}
 	s.handlePlaceholder(w, r)
+}
+
+// serveSPA hands the request to the embedded FileServer. HTML-shaped paths
+// other than "/" (e.g. /login) are rewritten to "/" so vue-router can take
+// over on the client.
+func (s *Server) serveSPA(w http.ResponseWriter, r *http.Request, path string) {
+	if isHTMLPath(path) && path != "/" {
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/"
+		http.FileServer(http.FS(s.staticFS)).ServeHTTP(w, r2)
+		return
+	}
+	http.FileServer(http.FS(s.staticFS)).ServeHTTP(w, r)
 }
 
 // consumePrivInvite tries to consume a privileged invite. On success it
