@@ -4,6 +4,7 @@ import { useCpuStore, type CpuEvent } from '../../stores/cpu';
 import { usePreferencesStore } from '../../stores/preferences';
 import ModeFlipNarrator from '../../components/narrators/ModeFlipNarrator.vue';
 import InterruptNarrator from '../../components/narrators/InterruptNarrator.vue';
+import Term from '../../components/glossary/Term.vue';
 
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
@@ -107,13 +108,23 @@ const narratorHint = computed(() =>
           data-narrator-anchor="cpu"
         >
           <span class="ints-page__mode-caption">CPU en</span>
-          <span class="ints-page__mode-value">{{ modeLabel }}</span>
+          <Term
+            :term="cpu.mode === 3 ? 'USER MODE (PL3)' : 'KERNEL MODE (PL0)'"
+            mode="label"
+            class="ints-page__mode-value"
+          >{{ modeLabel }}</Term>
         </div>
         <div class="ints-page__hero-text">
-          <h2 class="ints-page__title">Interrupciones</h2>
+          <h2 class="ints-page__title">
+            <Term term="IRQ" mode="title">Interrupciones</Term>
+          </h2>
           <p class="ints-page__tagline">
-            La CPU vive en <strong>USER</strong> hasta que algo la fuerza a entrar al kernel:
-            un <code>int 0x80</code> (syscall), el timer del PIT, una tecla o una falla.
+            La CPU vive en <Term term="USER MODE (PL3)"><strong>USER</strong></Term>
+            hasta que algo la fuerza a entrar al <Term term="KERNEL MODE (PL0)">kernel</Term>:
+            un <Term term="INT N" as="code">int 0x80</Term> (<Term term="Syscall">syscall</Term>),
+            el <Term term="IRQ 0x20">timer</Term> del PIT, una
+            <Term term="IRQ 0x21">tecla</Term> o una
+            <Term term="Page fault">falla</Term>.
             Cargue un programa con syscalls (hello, syscall_test, sleep) y avance paso a paso
             para ver el salto.
           </p>
@@ -124,15 +135,15 @@ const narratorHint = computed(() =>
       <div class="ints-page__grid">
         <section class="ints-page__panel">
           <header class="ints-page__panel-head">
-            <h3>IDT</h3>
+            <h3><Term term="IDT" mode="title">IDT</Term></h3>
             <span class="ints-page__panel-hint">Tabla de descriptores de interrupción</span>
           </header>
           <table class="ints-table">
             <thead>
               <tr>
-                <th>Vec</th>
+                <th><Term term="INT N" mode="label">Vec</Term></th>
                 <th>Nombre</th>
-                <th>Origen</th>
+                <th><Term term="IRQ" mode="label">Origen</Term></th>
                 <th>Último disparo</th>
               </tr>
             </thead>
@@ -143,7 +154,9 @@ const narratorHint = computed(() =>
                 :class="['ints-table__row', { 'ints-table__row--active': rowActive(r) }]"
                 :data-narrator-anchor="`idt-${r.vec}`"
               >
-                <td class="ints-table__vec">{{ r.hex }}</td>
+                <td class="ints-table__vec">
+                  <Term :term="`IRQ ${r.hex}`" as="code">{{ r.hex }}</Term>
+                </td>
                 <td>{{ r.name }}</td>
                 <td>
                   <span :class="['ints-table__src', `ints-table__src--${r.source.toLowerCase()}`]">
@@ -160,17 +173,28 @@ const narratorHint = computed(() =>
 
         <section class="ints-page__panel">
           <header class="ints-page__panel-head">
-            <h3>Últimas transiciones</h3>
-            <span class="ints-page__panel-hint">USER ↔ KERNEL en vivo</span>
+            <h3><Term term="Mode switch" mode="title">Últimas transiciones</Term></h3>
+            <span class="ints-page__panel-hint">
+              <Term term="USER MODE (PL3)">USER</Term> ↔
+              <Term term="KERNEL MODE (PL0)">KERNEL</Term> en vivo
+            </span>
           </header>
           <div v-if="switches.length === 0" class="ints-feed__empty">
             Sin transiciones aún. Avance la simulación con un programa que invoque syscalls.
           </div>
           <ol v-else class="ints-feed">
             <li v-for="s in switches" :key="s.id" class="ints-feed__row">
-              <span :class="['ints-feed__chip', `ints-feed__chip--${s.from.toLowerCase()}`]">{{ s.from }}</span>
+              <Term
+                :term="s.from === 'USER' ? 'USER MODE (PL3)' : 'KERNEL MODE (PL0)'"
+                mode="label"
+                :class="['ints-feed__chip', `ints-feed__chip--${s.from.toLowerCase()}`]"
+              >{{ s.from }}</Term>
               <span class="ints-feed__arrow">→</span>
-              <span :class="['ints-feed__chip', `ints-feed__chip--${s.to.toLowerCase()}`]">{{ s.to }}</span>
+              <Term
+                :term="s.to === 'USER' ? 'USER MODE (PL3)' : 'KERNEL MODE (PL0)'"
+                mode="label"
+                :class="['ints-feed__chip', `ints-feed__chip--${s.to.toLowerCase()}`]"
+              >{{ s.to }}</Term>
               <span class="ints-feed__cause">{{ s.cause }}</span>
               <span class="ints-feed__time">{{ timeAgo(s.ts) }}</span>
             </li>

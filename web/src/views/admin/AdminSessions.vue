@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { RotateCw, Monitor } from '@lucide/vue';
 import { useAdminStore, type SessionRow } from '../../stores/admin';
 import { useToastStore } from '../../stores/toast';
 import Card from '../../components/ui/Card.vue';
@@ -45,7 +46,10 @@ async function togglePublic(id: string, makePublic: boolean) {
 <template>
   <Card title="Sesiones activas">
     <template #header>
-      <Btn variant="ghost" size="sm" @click="admin.refresh()">↻ Refrescar</Btn>
+      <Btn variant="ghost" size="sm" @click="admin.refresh()">
+        <RotateCw :size="13" :stroke-width="2" />
+        <span>Refrescar</span>
+      </Btn>
     </template>
 
     <DataTable
@@ -53,7 +57,7 @@ async function togglePublic(id: string, makePublic: boolean) {
       :rows="admin.sessions"
       initial-sort="last_active"
       search-placeholder="Buscar por id, alias o modo…"
-      empty-icon="◉"
+      :empty-icon="Monitor"
       empty-title="Sin sesiones activas"
       empty-message="Cuando un alumno abra el simulador aparecerá aquí en tiempo real."
     >

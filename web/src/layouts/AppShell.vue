@@ -1,19 +1,28 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
-import { useAuthStore } from '../stores/auth';
+import { useRoute } from 'vue-router';
+import {
+  LayoutDashboard,
+  ListOrdered,
+  MemoryStick,
+  Zap,
+  Layers,
+  Cpu,
+  FolderClock,
+  BookOpen,
+  Settings,
+  UserRound,
+} from '@lucide/vue';
 import { useCpuStore } from '../stores/cpu';
 import { usePreferencesStore } from '../stores/preferences';
 import Sidebar from '../components/shell/Sidebar.vue';
 import Topbar from '../components/shell/Topbar.vue';
-import SimulationMinibar from '../components/shell/SimulationMinibar.vue';
+import SimBar from '../components/shell/SimBar.vue';
 import GlossaryModal from '../components/GlossaryModal.vue';
 
-const auth = useAuthStore();
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
 const route = useRoute();
-const router = useRouter();
 
 // Any cpu.openGlossary('EIP') call from a panel opens the popup right where
 // the student clicked. The full /glosario page is still reachable from the
@@ -32,46 +41,51 @@ onMounted(() => {
   cpu.connect();
 });
 
+// The breadcrumb was removed from the topbar, so the section name now lives
+// only in document.title (and in the active sidebar item). This avoids a
+// redundant chrome row.
+watch(
+  () => route.meta.title,
+  (title) => {
+    const t = typeof title === 'string' && title ? `${title} · modos-cpu` : 'modos-cpu';
+    if (typeof document !== 'undefined') document.title = t;
+  },
+  { immediate: true },
+);
+
 const items = [
-  { to: '/', label: 'Vista general', icon: '▶', group: 'SIMULACIÓN' },
-  { to: '/procesos', label: 'Procesos', icon: '●', group: 'SIMULACIÓN' },
-  { to: '/memoria', label: 'Memoria', icon: '▤', group: 'SIMULACIÓN' },
-  { to: '/interrupciones', label: 'Interrupciones', icon: '◈', group: 'SIMULACIÓN' },
-  { to: '/concurrencia', label: 'Concurrencia', icon: '◫', group: 'SIMULACIÓN', soon: true },
-  { to: '/x86', label: 'x86 real', icon: '▣', group: 'SIMULACIÓN', soon: true },
-  { to: '/sesiones', label: 'Mis sesiones', icon: '◇', group: 'HERRAMIENTAS' },
-  { to: '/glosario', label: 'Glosario', icon: '?', group: 'HERRAMIENTAS' },
-  { to: '/preferencias', label: 'Preferencias', icon: '⚙', group: 'HERRAMIENTAS' },
-  { to: '/perfil', label: 'Perfil', icon: '◐', group: 'HERRAMIENTAS' },
+  { to: '/', label: 'Vista general', icon: LayoutDashboard, group: 'SIMULACIÓN' },
+  { to: '/procesos', label: 'Procesos', icon: ListOrdered, group: 'SIMULACIÓN' },
+  { to: '/memoria', label: 'Memoria', icon: MemoryStick, group: 'SIMULACIÓN' },
+  { to: '/interrupciones', label: 'Interrupciones', icon: Zap, group: 'SIMULACIÓN' },
+  { to: '/concurrencia', label: 'Concurrencia', icon: Layers, group: 'SIMULACIÓN' },
+  { to: '/x86', label: 'x86 real', icon: Cpu, group: 'SIMULACIÓN', soon: true },
+  { to: '/sesiones', label: 'Mis sesiones', icon: FolderClock, group: 'HERRAMIENTAS' },
+  { to: '/glosario', label: 'Glosario', icon: BookOpen, group: 'HERRAMIENTAS' },
+  { to: '/preferencias', label: 'Preferencias', icon: Settings, group: 'HERRAMIENTAS' },
+  { to: '/perfil', label: 'Perfil', icon: UserRound, group: 'HERRAMIENTAS' },
 ];
 
-const showMinibar = computed(() => route.path !== '/' && route.meta.section === true);
-
-async function logout() {
-  await auth.logout();
-  router.replace('/login');
-}
+// Routes where the SimBar (controls + status chips) is meaningful. Tool
+// routes like /perfil, /preferencias, /glosario, /sesiones don't drive the
+// simulator, so the bar is hidden to give them full vertical space.
+const isSimRoute = computed(() => {
+  const p = route.path;
+  return p === '/'
+    || p === '/procesos'
+    || p === '/memoria'
+    || p === '/interrupciones'
+    || p === '/concurrencia'
+    || p === '/x86';
+});
 </script>
 
 <template>
   <div :class="['shell', `shell--mode-${prefs.mode}`]">
     <Sidebar :items="items" />
     <div class="shell__main">
-      <Topbar>
-        <template #actions>
-          <button
-            v-if="auth.user"
-            type="button"
-            class="shell__logout"
-            title="Cerrar sesión"
-            @click="logout"
-          >
-            ↩ Salir
-          </button>
-          <RouterLink v-else to="/login" class="shell__login-link">⤴ Identificarse</RouterLink>
-        </template>
-      </Topbar>
-      <SimulationMinibar v-if="showMinibar" />
+      <SimBar v-if="isSimRoute" />
+      <Topbar v-else />
       <main class="shell__content">
         <RouterView v-slot="{ Component }">
           <Transition name="route" mode="out-in">
@@ -110,32 +124,6 @@ async function logout() {
   display: flex;
   flex-direction: column;
   min-height: 0;
-}
-
-.shell__logout,
-.shell__login-link {
-  font-family: inherit;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  font-size: 10px;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  height: 32px;
-  padding: 0 12px;
-  display: inline-flex;
-  align-items: center;
-  box-sizing: border-box;
-  cursor: pointer;
-  text-decoration: none;
-  border-radius: var(--radius-sm);
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-
-.shell__logout:hover,
-.shell__login-link:hover {
-  background: rgba(255, 179, 71, 0.08);
-  color: var(--amber);
 }
 
 /* Mode-driven density and font-size knobs. Sections opt in by referencing the

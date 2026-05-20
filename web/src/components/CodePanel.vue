@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useCpuStore } from '../stores/cpu';
 import { computed, ref, watch } from 'vue';
+import { MousePointerClick } from '@lucide/vue';
 
 const cpu = useCpuStore();
 
@@ -41,7 +42,8 @@ function pickProc(pid: number) {
     <div class="panel-title">
       <span class="title-text">CÓDIGO C · FUENTE DE LOS PROCESOS</span>
       <span class="title-hint" v-if="cpu.procs.length > 1">
-        ⌕ click en una pestaña para fijar; en blanco sigue al RUN
+        <MousePointerClick :size="12" :stroke-width="2" />
+        click en una pestaña para fijar; en blanco sigue al RUN
       </span>
     </div>
 

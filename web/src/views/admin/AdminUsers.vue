@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Users } from '@lucide/vue';
 import { useAdminStore, type UserRow } from '../../stores/admin';
 import { useToastStore } from '../../stores/toast';
 import Card from '../../components/ui/Card.vue';
@@ -35,7 +36,7 @@ async function kickUser(id: string, name: string) {
       :rows="admin.users"
       initial-sort="last_login_at"
       search-placeholder="Buscar por nombre, correo o ID estudiante…"
-      empty-icon="☖"
+      :empty-icon="Users"
       empty-title="Sin usuarios identificados"
       empty-message="Cuando un alumno se identifique con su nombre y correo aparecerá aquí."
     >

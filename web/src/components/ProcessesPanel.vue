@@ -92,7 +92,7 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
         class="pcb-section-title clickable-label"
         title="Process Control Block: estructura del kernel que guarda el estado completo de un proceso.&#10;&#10;— click para más info —"
         @click="cpu.openGlossary('PCB')"
-      >⌕ PCB DEL PROCESO ACTUAL</div>
+      >PCB DEL PROCESO ACTUAL</div>
       <div class="pcb-meta">
         <span class="pid-tag">P{{ currentPCB.pid }}</span>
         <span class="pcb-name">{{ currentPCB.name }}</span>

@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, type Component } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
+import { ChevronLeft, ChevronRight, UserRound } from '@lucide/vue';
 import { usePreferencesStore } from '../../stores/preferences';
 import { useAuthStore } from '../../stores/auth';
 
 interface NavItem {
   to: string;
   label: string;
-  icon: string;
+  icon: Component;
   group?: string;
   soon?: boolean;
 }
@@ -51,7 +52,9 @@ function isActive(to: string): boolean {
           :aria-disabled="item.soon ? 'true' : undefined"
           @click="(e) => item.soon && e.preventDefault()"
         >
-          <span class="sidebar__icon" aria-hidden="true">{{ item.icon }}</span>
+          <span class="sidebar__icon" aria-hidden="true">
+            <component :is="item.icon" :size="collapsed ? 20 : 16" :stroke-width="2" />
+          </span>
           <span class="sidebar__label">
             {{ item.label }}
             <span v-if="item.soon" class="sidebar__soon">Próx.</span>
@@ -62,7 +65,7 @@ function isActive(to: string): boolean {
 
     <footer class="sidebar__foot">
       <div v-if="auth.user" class="sidebar__user">
-        <span class="sidebar__user-icon" aria-hidden="true">[👤]</span>
+        <UserRound :size="14" :stroke-width="2" class="sidebar__user-icon" />
         <span class="sidebar__user-name">{{ auth.user.name }}</span>
       </div>
     </footer>
@@ -74,7 +77,7 @@ function isActive(to: string): boolean {
       :aria-label="collapsed ? 'Expandir menú' : 'Contraer menú'"
       @click="prefs.toggleSidebar()"
     >
-      <span aria-hidden="true">{{ collapsed ? '»' : '«' }}</span>
+      <component :is="collapsed ? ChevronRight : ChevronLeft" :size="14" :stroke-width="2" />
     </button>
   </aside>
 </template>
@@ -234,17 +237,16 @@ function isActive(to: string): boolean {
 }
 
 .sidebar__icon {
-  font-family: 'JetBrains Mono', 'Major Mono Display', monospace;
   width: 22px;
-  text-align: center;
-  font-size: 16px;
-  line-height: 1;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
   color: inherit;
-  transition:
-    font-size var(--transition-base),
-    width var(--transition-base);
+  transition: width var(--transition-base);
 }
+.sidebar__icon svg { display: block; }
 
 .sidebar__label {
   display: flex;
@@ -312,8 +314,6 @@ function isActive(to: string): boolean {
 
 .sidebar__user-icon {
   color: var(--amber);
-  font-family: 'Major Mono Display', monospace;
-  font-size: 11px;
   flex-shrink: 0;
 }
 

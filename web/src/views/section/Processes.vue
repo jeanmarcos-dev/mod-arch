@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue';
+import { Hourglass } from '@lucide/vue';
 import { useCpuStore, type CpuEvent, type PCBInfo } from '../../stores/cpu';
 import { usePreferencesStore } from '../../stores/preferences';
 import PCBCopyNarrator from '../../components/narrators/PCBCopyNarrator.vue';
+import Term from '../../components/glossary/Term.vue';
 
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
@@ -18,18 +20,27 @@ function hex(n: number, w = 6): string {
 // "execution context" the kernel actually saves and restores.
 const SHOWN_REGS = ['EIP', 'ESP', 'EAX', 'EBX'] as const;
 
+// coreRunning returns the CoreInfo currently executing pid, or undefined if
+// the process is READY/BLOCKED/ZOMBIE. With multicore several processes are
+// RUN simultaneously (one per core), so checking cpu.currentPID alone would
+// miss every PID running outside the core the user happens to be viewing.
+function coreRunning(pid: number) {
+  return cpu.cores.find(c => c.current_pid === pid);
+}
+
 function pcbValue(p: PCBInfo, reg: string): number {
-  // For the RUN process the PCB snapshot is stale until the next pcb_save —
-  // the live truth lives in cpu.regs. We display the live value but flag it
-  // visually as "live" so the student sees the difference.
-  if (p.pid === cpu.currentPID && p.state === 'RUN') {
-    return cpu.regs[reg] ?? 0;
+  // For RUN processes the PCB snapshot is stale until the next pcb_save —
+  // the live truth lives in the core executing it. We pull the live value
+  // from that core's register file and flag it as "live" in the UI.
+  const core = coreRunning(p.pid);
+  if (core && p.state === 'RUN') {
+    return core.regs[reg] ?? 0;
   }
   return p.regs[reg] ?? 0;
 }
 
 function isLive(p: PCBInfo): boolean {
-  return p.pid === cpu.currentPID && p.state === 'RUN';
+  return p.state === 'RUN' && coreRunning(p.pid) !== undefined;
 }
 
 // Context switch feed: tap sched_decision via the store subscribe channel.
@@ -95,29 +106,42 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
 
     <div class="procs-page__content">
       <header class="procs-page__hero">
-        <h2 class="procs-page__title">Procesos</h2>
+        <h2 class="procs-page__title">
+          <Term term="PCB" mode="title">Procesos</Term>
+        </h2>
         <p class="procs-page__tagline">
-          La CPU sólo ejecuta uno a la vez. Cuando el scheduler decide cambiar
+          La CPU sólo ejecuta uno a la vez. Cuando el
+          <Term term="Round-Robin">scheduler</Term> decide cambiar
           (por timer o por bloqueo), el kernel <strong>copia</strong> los
-          registros del CPU al <code>PCB</code> del proceso saliente y carga
+          registros del CPU al <Term term="PCB" as="code">PCB</Term> del proceso saliente y carga
           los del entrante. Cargue <code>two_procs</code>, <code>three_procs</code>
           o <code>sleep</code> y avance para ver el viaje.
         </p>
         <p v-if="narratorHint" class="procs-page__hint">{{ narratorHint }}</p>
       </header>
 
-      <section class="cpu-strip" data-narrator-anchor="cpu">
-        <div class="cpu-strip__head">
-          <span class="cpu-strip__label">CPU en uso</span>
-          <span v-if="cpu.currentPID" class="cpu-strip__pid">P{{ cpu.currentPID }}</span>
-          <span v-else class="cpu-strip__pid cpu-strip__pid--idle">— sin proceso —</span>
-        </div>
-        <div class="cpu-strip__regs">
-          <div v-for="r in cpuRegsForStrip" :key="r" class="cpu-strip__reg">
-            <span class="cpu-strip__reg-name">{{ r }}</span>
-            <span class="cpu-strip__reg-val">{{ hex(cpu.regs[r] ?? 0, 8) }}</span>
+      <section
+        :class="['cpu-strip-grid', { 'cpu-strip-grid--multi': cpu.numCores > 1 }]"
+        data-narrator-anchor="cpu"
+      >
+        <article
+          v-for="core in cpu.cores"
+          :key="`core-${core.id}`"
+          :class="['cpu-strip', { 'cpu-strip--idle': core.current_pid === 0, 'cpu-strip--halted': core.halted }]"
+        >
+          <div class="cpu-strip__head">
+            <span class="cpu-strip__label">{{ cpu.numCores > 1 ? `CORE C${core.id}` : 'CPU en uso' }}</span>
+            <span v-if="core.current_pid" class="cpu-strip__pid">P{{ core.current_pid }}</span>
+            <span v-else class="cpu-strip__pid cpu-strip__pid--idle">— ocioso —</span>
+            <span v-if="core.halted" class="cpu-strip__tag cpu-strip__tag--halt">HALT</span>
           </div>
-        </div>
+          <div class="cpu-strip__regs">
+            <div v-for="r in cpuRegsForStrip" :key="r" class="cpu-strip__reg">
+              <Term :term="r" mode="label" class="cpu-strip__reg-name">{{ r }}</Term>
+              <span class="cpu-strip__reg-val">{{ hex(core.regs[r] ?? 0, 8) }}</span>
+            </div>
+          </div>
+        </article>
       </section>
 
       <section class="pcb-grid" v-if="sortedProcs.length > 0">
@@ -132,13 +156,13 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
           ]"
         >
           <header class="pcb-card__head">
-            <span class="pcb-card__pid">P{{ p.pid }}</span>
-            <span class="pcb-card__state">{{ p.state }}</span>
+            <Term term="PID" mode="label" class="pcb-card__pid">P{{ p.pid }}</Term>
+            <Term :term="p.state" mode="label" class="pcb-card__state">{{ p.state }}</Term>
           </header>
           <div class="pcb-card__name">{{ p.name }}</div>
           <ul class="pcb-card__regs">
             <li v-for="r in SHOWN_REGS" :key="r">
-              <span class="pcb-card__reg-name">{{ r }}</span>
+              <Term :term="r" mode="label" class="pcb-card__reg-name">{{ r }}</Term>
               <span
                 :class="['pcb-card__reg-val', { 'pcb-card__reg-val--live': isLive(p) }]"
                 :title="isLive(p) ? 'Valor live del CPU — la copia del PCB se actualiza en el próximo pcb_save' : 'Valor congelado: snapshot guardado por el kernel'"
@@ -149,7 +173,7 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
           </ul>
           <footer class="pcb-card__foot">
             <span title="Base del segmento de código de este proceso.">{{ hex(p.code_base) }}</span>
-            <span v-if="p.blocked_on" class="pcb-card__blocked">↻ {{ p.blocked_on }}</span>
+            <span v-if="p.blocked_on" class="pcb-card__blocked"><Hourglass :size="11" :stroke-width="2" /> {{ p.blocked_on }}</span>
           </footer>
         </article>
       </section>
@@ -160,18 +184,21 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
       <div class="procs-page__grid">
         <section class="procs-page__panel">
           <header class="procs-page__panel-head">
-            <h3>Scheduler</h3>
-            <span class="procs-page__panel-hint">Round-Robin · quantum={{ cpu.timerQuantum }}</span>
+            <h3><Term term="Round-Robin" mode="title">Scheduler</Term></h3>
+            <span class="procs-page__panel-hint">
+              <Term term="Round-Robin">Round-Robin</Term> ·
+              <Term term="Quantum" as="code">quantum={{ cpu.timerQuantum }}</Term>
+            </span>
           </header>
           <div class="sched-row">
-            <span class="sched-row__label">READY</span>
+            <Term term="Ready queue" mode="label" class="sched-row__label">READY</Term>
             <div class="sched-row__pills">
               <span v-if="cpu.readyQueue.length === 0" class="sched-row__empty">— vacía —</span>
               <span v-for="pid in cpu.readyQueue" :key="`r-${pid}`" class="sched-pill sched-pill--ready">P{{ pid }}</span>
             </div>
           </div>
           <div class="sched-row">
-            <span class="sched-row__label">WAIT</span>
+            <Term term="Waiting queue" mode="label" class="sched-row__label">WAIT</Term>
             <div class="sched-row__pills">
               <span v-if="cpu.waitQueue.length === 0" class="sched-row__empty">— vacía —</span>
               <span
@@ -188,8 +215,10 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
 
         <section class="procs-page__panel">
           <header class="procs-page__panel-head">
-            <h3>Últimos cambios de contexto</h3>
-            <span class="procs-page__panel-hint">sched_decision en vivo</span>
+            <h3><Term term="Context switch" mode="title">Últimos cambios de contexto</Term></h3>
+            <span class="procs-page__panel-hint">
+              <Term term="Preemption">sched_decision</Term> en vivo
+            </span>
           </header>
           <div v-if="switches.length === 0" class="ctx-feed__empty">
             Sin cambios de contexto aún. Cargue un demo multi-proceso o avance hasta que el timer dispare.
@@ -274,6 +303,15 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
   align-self: flex-start;
 }
 
+.cpu-strip-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+}
+.cpu-strip-grid--multi {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
 .cpu-strip {
   background: var(--surface-1);
   border: 1px solid var(--border-strong);
@@ -281,6 +319,27 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
   padding: var(--space-3) var(--space-4);
   box-shadow: var(--shadow-glow-amber);
 }
+.cpu-strip--idle {
+  box-shadow: none;
+  border-color: var(--border);
+  opacity: 0.85;
+}
+.cpu-strip--halted {
+  box-shadow: none;
+  border-color: var(--red-soft, #ff7a7a);
+  background: rgba(255, 122, 122, 0.04);
+}
+
+.cpu-strip__tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  margin-left: auto;
+}
+.cpu-strip__tag--halt { color: var(--red-soft, #ff7a7a); }
 
 .cpu-strip__head {
   display: flex;

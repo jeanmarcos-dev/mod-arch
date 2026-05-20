@@ -35,7 +35,7 @@ export const router = createRouter({
         { path: 'procesos', name: 'processes', component: Processes, meta: { title: 'Procesos', section: true } },
         { path: 'memoria', name: 'memory', component: Memory, meta: { title: 'Memoria', section: true } },
         { path: 'interrupciones', name: 'interrupts', component: Interrupts, meta: { title: 'Interrupciones', section: true } },
-        { path: 'concurrencia', name: 'concurrency', component: Concurrency, meta: { title: 'Concurrencia', section: true } },
+        { path: 'concurrencia', name: 'concurrency', component: Concurrency, meta: { title: 'Concurrencia', section: true, category: 'concurrencia' } },
         { path: 'x86', name: 'x86-real', component: X86Real, meta: { title: 'x86 real', section: true } },
         { path: 'sesiones', name: 'my-sessions', component: MySessions, meta: { title: 'Mis sesiones', section: false } },
         { path: 'glosario', name: 'glossary', component: GlossaryPage, meta: { title: 'Glosario', section: false } },

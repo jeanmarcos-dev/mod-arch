@@ -1,14 +1,26 @@
 <script setup lang="ts">
 import { useCpuStore } from '../stores/cpu';
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
+import { useRoute } from 'vue-router';
+import { ChevronDown } from '@lucide/vue';
 
 const cpu = useCpuStore();
+const route = useRoute();
 const open = ref(false);
 const root = ref<HTMLElement | null>(null);
 
 const selectedProgram = computed(() =>
   cpu.programs.find(p => p.name === cpu.selectedProgram)
 );
+
+// Routes can constrain the picker to a single demo category by setting
+// `meta.category` (e.g. /concurrencia → 'concurrencia'). Without it, every
+// loaded demo is offered.
+const visiblePrograms = computed(() => {
+  const cat = typeof route.meta.category === 'string' ? route.meta.category : '';
+  if (!cat) return cpu.programs;
+  return cpu.programs.filter(p => (p.category ?? '') === cat);
+});
 
 function toggle() {
   open.value = !open.value;
@@ -48,12 +60,12 @@ onBeforeUnmount(() => {
       <span v-if="selectedProgram?.procs && selectedProgram.procs.length > 1" class="sel-procs">
         {{ selectedProgram.procs.length }} proc
       </span>
-      <span class="arrow">▾</span>
+      <ChevronDown :size="14" :stroke-width="2" class="arrow" />
     </button>
 
     <div v-if="open" class="dropdown">
       <div
-        v-for="p in cpu.programs"
+        v-for="p in visiblePrograms"
         :key="p.name"
         class="opt"
         :class="{ selected: p.name === cpu.selectedProgram }"

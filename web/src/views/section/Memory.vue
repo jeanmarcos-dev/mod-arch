@@ -5,6 +5,7 @@ import { usePreferencesStore } from '../../stores/preferences';
 import { useNarrators, type MemWrite, type MemRead } from '../../lib/narratorBus';
 import ByteFlightNarrator from '../../components/narrators/ByteFlightNarrator.vue';
 import Card from '../../components/ui/Card.vue';
+import Term from '../../components/glossary/Term.vue';
 
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
@@ -141,7 +142,7 @@ function ageOf(ts: number): number {
 
     <header class="memory-page__head">
       <div class="memory-page__title">
-        <span class="memory-page__title-main">Memoria</span>
+        <Term term="MMU" mode="title" class="memory-page__title-main">Memoria</Term>
         <span class="memory-page__title-sub">
           Ventana <code>{{ fmtAddr(baseAddr) }}</code> · <code>{{ wndSize }} B</code>
         </span>
@@ -172,10 +173,10 @@ function ageOf(ts: number): number {
           <div class="cpu-chip__label">CPU</div>
           <div class="cpu-chip__pid">PID {{ cpu.currentPID || '—' }}</div>
           <dl class="cpu-chip__regs">
-            <div><dt>EIP</dt><dd>{{ fmtAddr(cpu.regs.EIP) }}</dd></div>
-            <div><dt>EAX</dt><dd>{{ fmtAddr(cpu.regs.EAX) }}</dd></div>
-            <div><dt>EBX</dt><dd>{{ fmtAddr(cpu.regs.EBX) }}</dd></div>
-            <div><dt>ESP</dt><dd>{{ fmtAddr(cpu.regs.ESP) }}</dd></div>
+            <div><dt><Term term="EIP" mode="label">EIP</Term></dt><dd>{{ fmtAddr(cpu.regs.EIP) }}</dd></div>
+            <div><dt><Term term="EAX" mode="label">EAX</Term></dt><dd>{{ fmtAddr(cpu.regs.EAX) }}</dd></div>
+            <div><dt><Term term="EBX" mode="label">EBX</Term></dt><dd>{{ fmtAddr(cpu.regs.EBX) }}</dd></div>
+            <div><dt><Term term="ESP" mode="label">ESP</Term></dt><dd>{{ fmtAddr(cpu.regs.ESP) }}</dd></div>
           </dl>
         </div>
       </aside>

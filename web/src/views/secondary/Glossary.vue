@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import { Search } from '@lucide/vue';
 import {
   GLOSSARY_ENTRIES,
   listCategories,
@@ -79,7 +80,7 @@ const totalEntries = GLOSSARY_ENTRIES.length;
       </p>
       <div class="gloss-page__controls">
         <label class="gloss-page__search">
-          <span class="gloss-page__search-icon" aria-hidden="true">⌕</span>
+          <Search :size="14" :stroke-width="2" class="gloss-page__search-icon" aria-hidden="true" />
           <input
             v-model="search"
             type="search"

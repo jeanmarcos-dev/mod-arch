@@ -535,6 +535,7 @@ func (m *Manager) Programs() []map[string]any {
 		list = append(list, map[string]any{
 			"name":        d.Name,
 			"description": d.Description,
+			"category":    d.Category,
 			"size":        totalSize,
 			"procs":       procNames,
 		})

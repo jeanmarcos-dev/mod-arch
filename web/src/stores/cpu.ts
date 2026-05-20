@@ -2,15 +2,19 @@ import { defineStore } from 'pinia';
 import { reactive, ref } from 'vue';
 
 // Tipos de eventos que llegan por WS (espejo de internal/cpu/events.go).
+// Todos los eventos generados por la CPU llevan core_id: con multicore el
+// store mantiene un CoreInfo por core y sólo "espejea" al estado top-level
+// (regs, mode, halted, currentPID) cuando el evento viene del core que el
+// usuario eligió ver en la SimBar.
 export type CpuEvent =
-  | { type: 'instruction'; pid: number; eip: number; mnemonic: string; bytes: number[] }
-  | { type: 'reg_write'; reg: string; old: number; new: number }
-  | { type: 'mem_read'; addr: number; value: number; size: number }
-  | { type: 'mem_write'; addr: number; old: number; new: number; size: number }
-  | { type: 'mode_switch'; from: number; to: number; cause: string }
-  | { type: 'irq_fire'; vector: number; source: string }
-  | { type: 'page_fault'; addr: number; mode: number; perm_needed: string }
-  | { type: 'halt'; pid?: number }
+  | { type: 'instruction'; core_id: number; pid: number; eip: number; mnemonic: string; bytes: number[] }
+  | { type: 'reg_write'; core_id: number; reg: string; old: number; new: number }
+  | { type: 'mem_read'; core_id: number; addr: number; value: number; size: number }
+  | { type: 'mem_write'; core_id: number; addr: number; old: number; new: number; size: number }
+  | { type: 'mode_switch'; core_id: number; from: number; to: number; cause: string }
+  | { type: 'irq_fire'; core_id: number; vector: number; source: string }
+  | { type: 'page_fault'; core_id: number; addr: number; mode: number; perm_needed: string }
+  | { type: 'halt'; core_id: number; pid?: number }
   | { type: 'tick'; value: number }
   | { type: 'state'; halted?: boolean; running?: boolean; hz?: number }
   | { type: 'snapshot'; regs: Record<string, number>; segments: Record<string, number>; mode: number; halted: boolean; tick: number; timer_quantum?: number; current_pid?: number; ready_queue?: number[]; wait_queue?: WaitInfo[]; procs?: PCBInfo[]; sources?: Record<string, string>; cores?: CoreInfo[]; num_cores?: number }
@@ -133,10 +137,56 @@ export const useCpuStore = defineStore('cpu', () => {
   // cores tracks per-core state. numCores comes from the snapshot. mutexes
   // and semaphores are kept up-to-date via the mutex_op / sem_op events so
   // the /concurrencia view can render the lock tables without re-querying.
+  //
+  // selectedCoreId controls which core's state shows up in the top-level
+  // regs/mode/halted/currentPID refs. Existing panels and the SimBar read
+  // those refs unchanged; with multicore the user picks which core to
+  // mirror through a selector in the SimBar. Without this routing, events
+  // from every core would overwrite a single global register file and the
+  // UI would flicker between processes — the bug that motivated the whole
+  // refactor.
   const cores = ref<CoreInfo[]>([]);
   const numCores = ref(1);
+  const selectedCoreId = ref(0);
   const mutexes = ref<MutexState[]>([]);
   const semaphores = ref<SemaphoreState[]>([]);
+
+  function ensureCoreSlot(id: number): CoreInfo {
+    let c = cores.value.find(x => x.id === id);
+    if (!c) {
+      c = {
+        id,
+        regs: Object.fromEntries(REGISTERS.map(r => [r, 0])),
+        segments: { CS: 0, DS: 0, SS: 0 },
+        mode: 3,
+        halted: false,
+        tick: 0,
+        current_pid: 0,
+      };
+      cores.value.push(c);
+      cores.value.sort((a, b) => a.id - b.id);
+    }
+    return c;
+  }
+
+  function isSelected(coreId: number): boolean {
+    return coreId === selectedCoreId.value;
+  }
+
+  function setSelectedCore(id: number) {
+    if (id === selectedCoreId.value) return;
+    selectedCoreId.value = id;
+    // Re-populate the top-level refs from the newly-selected core so
+    // panels that read cpu.regs/mode/etc switch instantly without
+    // waiting for the next event.
+    const c = cores.value.find(x => x.id === id);
+    if (!c) return;
+    for (const k of Object.keys(regs)) regs[k] = c.regs[k] ?? 0;
+    for (const k of Object.keys(segments)) segments[k] = c.segments[k] ?? 0;
+    mode.value = c.mode;
+    halted.value = c.halted;
+    currentPID.value = c.current_pid;
+  }
   // Fuente C (escrita a mano) por PID, para mostrar en el panel CÓDIGO.
   const procSources = ref<Record<number, string>>({});
   // PIDs que cambiaron en el último evento (para animación flash)
@@ -225,13 +275,31 @@ export const useCpuStore = defineStore('cpu', () => {
   function applyEvent(ev: CpuEvent) {
     switch (ev.type) {
       case 'snapshot':
-        for (const k of Object.keys(regs)) regs[k] = ev.regs[k] ?? 0;
-        for (const k of Object.keys(segments)) segments[k] = ev.segments[k] ?? 0;
-        mode.value = ev.mode;
-        halted.value = ev.halted;
+        if (ev.cores) cores.value = ev.cores;
+        if (ev.num_cores !== undefined) numCores.value = ev.num_cores;
+        if (selectedCoreId.value >= (ev.num_cores ?? cores.value.length)) {
+          selectedCoreId.value = 0;
+        }
+        // Mirror the selected core's view into the top-level refs so the
+        // panels that read cpu.regs/mode/etc keep working. Falls back to
+        // the payload's boot-core copy if cores[] is missing for some
+        // reason (legacy snapshot format).
+        const sel = cores.value.find(x => x.id === selectedCoreId.value);
+        if (sel) {
+          for (const k of Object.keys(regs)) regs[k] = sel.regs[k] ?? 0;
+          for (const k of Object.keys(segments)) segments[k] = sel.segments[k] ?? 0;
+          mode.value = sel.mode;
+          halted.value = sel.halted;
+          currentPID.value = sel.current_pid;
+        } else {
+          for (const k of Object.keys(regs)) regs[k] = ev.regs[k] ?? 0;
+          for (const k of Object.keys(segments)) segments[k] = ev.segments[k] ?? 0;
+          mode.value = ev.mode;
+          halted.value = ev.halted;
+          if (ev.current_pid !== undefined) currentPID.value = ev.current_pid;
+        }
         tick.value = ev.tick;
         if (ev.timer_quantum !== undefined) timerQuantum.value = ev.timer_quantum;
-        if (ev.current_pid !== undefined) currentPID.value = ev.current_pid;
         if (ev.ready_queue) readyQueue.value = ev.ready_queue;
         if (ev.wait_queue) waitQueue.value = ev.wait_queue;
         if (ev.procs) procs.value = ev.procs;
@@ -241,41 +309,61 @@ export const useCpuStore = defineStore('cpu', () => {
             procSources.value[Number(pid)] = src;
           }
         }
-        if (ev.cores) cores.value = ev.cores;
-        if (ev.num_cores !== undefined) numCores.value = ev.num_cores;
         changedRegs.clear();
         break;
       case 'programs':
         programs.value = ev.list;
         if (!selectedProgram.value && ev.list[0]) selectedProgram.value = ev.list[0].name;
         break;
-      case 'reg_write':
-        regs[ev.reg] = ev.new;
-        flashReg(ev.reg);
+      case 'reg_write': {
+        const c = ensureCoreSlot(ev.core_id);
+        c.regs[ev.reg] = ev.new;
+        if (isSelected(ev.core_id)) {
+          regs[ev.reg] = ev.new;
+          flashReg(ev.reg);
+        }
         break;
-      case 'instruction':
-        pushLog(`[${ev.eip.toString(16).padStart(6, '0')}]  ${ev.mnemonic}`, 'amber');
-        regs.EIP = ev.eip + ev.bytes.length;
+      }
+      case 'instruction': {
+        const c = ensureCoreSlot(ev.core_id);
+        const nextEIP = ev.eip + ev.bytes.length;
+        c.regs.EIP = nextEIP;
+        const prefix = numCores.value > 1 ? `[C${ev.core_id}] ` : '';
+        pushLog(`${prefix}[${ev.eip.toString(16).padStart(6, '0')}]  ${ev.mnemonic}`, 'amber');
+        if (isSelected(ev.core_id)) regs.EIP = nextEIP;
         break;
+      }
       case 'tick':
         tick.value = ev.value;
         break;
-      case 'mode_switch':
-        mode.value = ev.to;
-        pushLog(`▸ mode ${ev.from === 3 ? 'USER' : 'KERNEL'} → ${ev.to === 3 ? 'USER' : 'KERNEL'} (${ev.cause})`, 'red');
+      case 'mode_switch': {
+        const c = ensureCoreSlot(ev.core_id);
+        c.mode = ev.to;
+        const prefix = numCores.value > 1 ? `[C${ev.core_id}] ` : '';
+        pushLog(`${prefix}▸ mode ${ev.from === 3 ? 'USER' : 'KERNEL'} → ${ev.to === 3 ? 'USER' : 'KERNEL'} (${ev.cause})`, 'red');
+        if (isSelected(ev.core_id)) mode.value = ev.to;
         break;
-      case 'irq_fire':
-        pushLog(`◉ IRQ 0x${ev.vector.toString(16).padStart(2, '0')} (${ev.source})`, 'yellow');
+      }
+      case 'irq_fire': {
+        const prefix = numCores.value > 1 ? `[C${ev.core_id}] ` : '';
+        pushLog(`${prefix}◉ IRQ 0x${ev.vector.toString(16).padStart(2, '0')} (${ev.source})`, 'yellow');
         break;
-      case 'page_fault':
-        pushLog(`✗ PAGE FAULT @ 0x${ev.addr.toString(16)} (need ${ev.perm_needed} in PL${ev.mode})`, 'red');
+      }
+      case 'page_fault': {
+        const prefix = numCores.value > 1 ? `[C${ev.core_id}] ` : '';
+        pushLog(`${prefix}✗ PAGE FAULT @ 0x${ev.addr.toString(16)} (need ${ev.perm_needed} in PL${ev.mode})`, 'red');
         faultShake.value = true;
         setTimeout(() => { faultShake.value = false; }, 500);
         break;
-      case 'halt':
-        halted.value = true;
-        pushLog('▸ HALT', 'red');
+      }
+      case 'halt': {
+        const c = ensureCoreSlot(ev.core_id);
+        c.halted = true;
+        const prefix = numCores.value > 1 ? `[C${ev.core_id}] ` : '';
+        pushLog(`${prefix}▸ HALT`, 'red');
+        if (isSelected(ev.core_id)) halted.value = true;
         break;
+      }
       case 'state':
         if (ev.halted !== undefined) halted.value = ev.halted;
         if (ev.running !== undefined) running.value = ev.running;
@@ -302,6 +390,22 @@ export const useCpuStore = defineStore('cpu', () => {
         procSources.value = {};
         mutexes.value = [];
         semaphores.value = [];
+        // Reset per-core register/state caches so the next snapshot starts
+        // from a clean slate. Without this, stale values from the previous
+        // demo would survive a reset on cores that the new demo does not
+        // touch (smaller process count than core count).
+        for (const c of cores.value) {
+          for (const k of Object.keys(c.regs)) c.regs[k] = 0;
+          for (const k of Object.keys(c.segments)) c.segments[k] = 0;
+          c.mode = 3;
+          c.halted = false;
+          c.tick = 0;
+          c.current_pid = 0;
+        }
+        for (const k of Object.keys(regs)) regs[k] = 0;
+        for (const k of Object.keys(segments)) segments[k] = 0;
+        mode.value = 3;
+        halted.value = false;
         break;
       case 'procs':
         procs.value = ev.procs;
@@ -321,7 +425,10 @@ export const useCpuStore = defineStore('cpu', () => {
         break;
       }
       case 'sched_decision':
-        currentPID.value = ev.to_pid;
+        // currentPID top-level is owned by core_assign/core_release so the
+        // SimBar mirrors the *selected* core only. Updating it here would
+        // pull the PID of whichever core just scheduled, regardless of
+        // which one the user is watching.
         readyQueue.value = ev.ready_queue;
         pushLog(`⇄ schedule: P${ev.from_pid} → P${ev.to_pid}  ready=[${ev.ready_queue.join(',')}]`, 'yellow');
         break;
@@ -374,15 +481,17 @@ export const useCpuStore = defineStore('cpu', () => {
         // counter for it because that would grow unbounded across runs.
         break;
       case 'core_assign': {
-        const c = cores.value.find(x => x.id === ev.core_id);
-        if (c) c.current_pid = ev.pid;
+        const c = ensureCoreSlot(ev.core_id);
+        c.current_pid = ev.pid;
         pushLog(`◈ core ${ev.core_id} ← P${ev.pid}`, 'amber');
+        if (isSelected(ev.core_id)) currentPID.value = ev.pid;
         break;
       }
       case 'core_release': {
-        const c = cores.value.find(x => x.id === ev.core_id);
-        if (c) c.current_pid = 0;
+        const c = ensureCoreSlot(ev.core_id);
+        c.current_pid = 0;
         pushLog(`◇ core ${ev.core_id} ↛ P${ev.pid}${ev.reason ? ' (' + ev.reason + ')' : ''}`, 'amber');
+        if (isSelected(ev.core_id)) currentPID.value = 0;
         break;
       }
       case 'mutex_op': {
@@ -496,6 +605,7 @@ export const useCpuStore = defineStore('cpu', () => {
   function share() { send({ cmd: 'share' }); }
   function unshare() { send({ cmd: 'unshare' }); }
   function setAlias(alias: string) { send({ cmd: 'set_alias', alias }); }
+  function setNumCores(n: number) { send({ cmd: 'set_num_cores', cores: n }); }
 
   // viewerLink arma la URL completa que el owner puede copiar para compartir.
   function viewerLink(): string {
@@ -509,12 +619,12 @@ export const useCpuStore = defineStore('cpu', () => {
     changedRegs,
     programs, selectedProgram, log, connected, lastError,
     procs, currentPID, readyQueue, waitQueue, flashingPIDs, procSources,
-    cores, numCores, mutexes, semaphores,
+    cores, numCores, selectedCoreId, setSelectedCore, mutexes, semaphores,
     subscribe,
     consoleChunks, faultShake,
     glossarySearch, glossaryOpenSignal,
     sessionInfo, isViewer, viewerLink,
     connect, load, step, run, pause, reset, clearLog, setQuantum, pushKey, openGlossary,
-    share, unshare, setAlias,
+    share, unshare, setAlias, setNumCores,
   };
 });

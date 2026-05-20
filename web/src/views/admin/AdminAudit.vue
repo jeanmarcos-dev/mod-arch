@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ScrollText } from '@lucide/vue';
 import { useAdminStore, type AuditRow } from '../../stores/admin';
 import Card from '../../components/ui/Card.vue';
 import DataTable, { type Column } from '../../components/ui/DataTable.vue';
@@ -22,7 +23,7 @@ const columns: Column<AuditRow>[] = [
       :rows="admin.audit"
       initial-sort="ts"
       search-placeholder="Buscar por actor, acción u objetivo…"
-      empty-icon="☰"
+      :empty-icon="ScrollText"
       empty-title="El registro está vacío"
       empty-message="Cada acción privilegiada (cerrar sesión, expulsar usuario, cambiar política de acceso, etc.) deja un rastro aquí."
     >

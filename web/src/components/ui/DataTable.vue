@@ -1,5 +1,6 @@
 <script setup lang="ts" generic="T extends Record<string, unknown>">
-import { computed, ref } from 'vue';
+import { computed, ref, type Component } from 'vue';
+import { ChevronUp, ChevronDown, Inbox } from '@lucide/vue';
 import EmptyState from './EmptyState.vue';
 
 export interface Column<R> {
@@ -25,7 +26,7 @@ const props = withDefaults(
     showEmpty?: boolean;
     emptyTitle?: string;
     emptyMessage?: string;
-    emptyIcon?: string;
+    emptyIcon?: Component;
     stickyHeader?: boolean;
   }>(),
   {
@@ -35,10 +36,11 @@ const props = withDefaults(
     showEmpty: true,
     emptyTitle: 'Sin datos',
     emptyMessage: '',
-    emptyIcon: '◌',
     stickyHeader: true,
   },
 );
+
+const resolvedEmptyIcon = computed<Component>(() => props.emptyIcon ?? Inbox);
 
 const search = ref('');
 const sortCol = ref<string>(props.initialSort);
@@ -124,7 +126,7 @@ const filtered = computed<T[]>(() => {
                 class="dtable__sort"
                 aria-hidden="true"
               >
-                <template v-if="sortCol === col.id">{{ sortDir === 'asc' ? '▴' : '▾' }}</template>
+                <component v-if="sortCol === col.id" :is="sortDir === 'asc' ? ChevronUp : ChevronDown" :size="12" :stroke-width="2" />
               </span>
             </th>
             <th v-if="$slots.actions" class="dtable__th dtable__th--right" />
@@ -151,7 +153,7 @@ const filtered = computed<T[]>(() => {
 
     <EmptyState
       v-if="!filtered.length && showEmpty"
-      :icon="emptyIcon"
+      :icon="resolvedEmptyIcon"
       :title="search ? 'Sin coincidencias' : emptyTitle"
       :message="search ? `Ningún resultado para «${search}».` : emptyMessage"
     />

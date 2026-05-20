@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router';
+import { ArrowLeft, LogIn } from '@lucide/vue';
 
 const route = useRoute();
 </script>
@@ -11,8 +12,8 @@ const route = useRoute();
       <p class="path">{{ route.fullPath }}</p>
       <p class="hint">La página que buscaba no existe.</p>
       <div class="links">
-        <a href="/">↩ ir al simulador</a>
-        <a href="/login">↪ iniciar sesión</a>
+        <a href="/"><ArrowLeft :size="12" :stroke-width="2" /><span>ir al simulador</span></a>
+        <a href="/login"><LogIn :size="12" :stroke-width="2" /><span>iniciar sesión</span></a>
       </div>
     </div>
   </div>
@@ -75,6 +76,9 @@ h1 {
 .links a {
   color: var(--text-dim, #888);
   text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .links a:hover {

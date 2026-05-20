@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { Share2, X, Zap, Copy, Check, Square } from '@lucide/vue';
 import { useCpuStore } from '../stores/cpu';
 
 const cpu = useCpuStore();
@@ -45,8 +46,8 @@ function deactivate() {
     <div v-if="props.open" class="modal-overlay" @click.self="emit('close')">
       <div class="modal" role="dialog" aria-modal="true">
         <header class="modal-head">
-          <span class="modal-title">▸ COMPARTIR SESIÓN</span>
-          <button class="close-btn" @click="emit('close')" title="Cerrar (Esc)">✕</button>
+          <span class="modal-title"><Share2 :size="14" :stroke-width="2" /> COMPARTIR SESIÓN</span>
+          <button class="close-btn" @click="emit('close')" title="Cerrar (Esc)" aria-label="Cerrar"><X :size="16" :stroke-width="2" /></button>
         </header>
 
         <div class="modal-body">
@@ -58,7 +59,8 @@ function deactivate() {
 
           <template v-if="!isShared">
             <button class="cta primary" @click="activate">
-              ⚡ Activar compartido
+              <Zap :size="14" :stroke-width="2" />
+              <span>Activar compartido</span>
             </button>
             <p class="muted">Se generará un enlace único. Puede desactivarlo cuando lo desee.</p>
           </template>
@@ -68,7 +70,8 @@ function deactivate() {
             <div class="link-row">
               <input class="link-input" name="share_link" aria-label="Enlace de la sesión compartida" readonly :value="link" @click="($event.target as HTMLInputElement).select()" />
               <button class="copy-btn" @click="copyLink">
-                {{ copied ? '✓ COPIADO' : '⎘ COPIAR' }}
+                <component :is="copied ? Check : Copy" :size="14" :stroke-width="2" />
+                <span>{{ copied ? 'COPIADO' : 'COPIAR' }}</span>
               </button>
             </div>
             <p class="muted">
@@ -79,7 +82,8 @@ function deactivate() {
 
             <div class="actions-row">
               <button class="cta danger" @click="deactivate">
-                ✕ Detener compartido
+                <Square :size="14" :stroke-width="2" />
+                <span>Detener compartido</span>
               </button>
             </div>
           </template>
@@ -125,15 +129,23 @@ function deactivate() {
   font-size: 13px;
   letter-spacing: 3px;
   color: var(--amber);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .close-btn {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-dim);
-  padding: 4px 10px;
+  width: 28px;
+  height: 28px;
   cursor: pointer;
   font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
 }
 
 .close-btn:hover {
@@ -195,6 +207,9 @@ function deactivate() {
   letter-spacing: 2px;
   cursor: pointer;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .copy-btn:hover {
@@ -213,6 +228,10 @@ function deactivate() {
   cursor: pointer;
   width: 100%;
   margin-bottom: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .cta:hover {

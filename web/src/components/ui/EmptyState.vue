@@ -1,14 +1,19 @@
 <script setup lang="ts">
+import type { Component } from 'vue';
+
 defineProps<{
   title: string;
   message?: string;
-  icon?: string;
+  /** Optional Lucide icon component to display above the title. */
+  icon?: Component;
 }>();
 </script>
 
 <template>
   <div class="empty">
-    <div v-if="icon" class="empty__icon" aria-hidden="true">{{ icon }}</div>
+    <div v-if="icon" class="empty__icon" aria-hidden="true">
+      <component :is="icon" :size="36" :stroke-width="1.5" />
+    </div>
     <h3 class="empty__title">{{ title }}</h3>
     <p v-if="message" class="empty__message">{{ message }}</p>
     <div v-if="$slots.default" class="empty__action"><slot /></div>
@@ -28,11 +33,11 @@ defineProps<{
 }
 
 .empty__icon {
-  font-family: 'Major Mono Display', monospace;
-  font-size: 32px;
   color: var(--amber);
   opacity: 0.7;
-  letter-spacing: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .empty__title {

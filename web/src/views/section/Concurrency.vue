@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue';
 import { useCpuStore } from '../../stores/cpu';
-import SectionPlaceholder from './SectionPlaceholder.vue';
+import Term from '../../components/glossary/Term.vue';
 
 const cpu = useCpuStore();
 
@@ -11,13 +11,6 @@ function hex(n: number, w = 8) {
   return '0x' + (n >>> 0).toString(16).padStart(w, '0').toUpperCase();
 }
 function modeName(m: number) { return m === 0 ? 'KERNEL' : 'USER'; }
-
-// Concurrency demos are filtered by the Category field the backend now
-// includes in each ProgramInfo. Other categories appear in the standard
-// picker but not here.
-const concurrencyDemos = computed(() =>
-  cpu.programs.filter(p => (p.category ?? '') === 'concurrencia'),
-);
 
 // When only one core is provisioned the demos that need real parallelism
 // won't shine — we still let the student load them (the kernel handles
@@ -39,7 +32,6 @@ const cores = computed(() => {
   }];
 });
 
-function loadDemo(name: string) { cpu.load(name); }
 function pidName(pid: number) {
   const p = cpu.procs.find(x => x.pid === pid);
   return p ? `P${pid} ${p.name}` : `P${pid}`;
@@ -51,25 +43,9 @@ function pidShort(pid: number) {
 </script>
 
 <template>
-  <!-- If the backend never sent any concurrency demos (older deploy?) we
-       still show the placeholder. Otherwise render the live view. -->
-  <SectionPlaceholder
-    v-if="concurrencyDemos.length === 0"
-    title="Concurrencia"
-    tagline="Cuando el backend exponga demos de concurrencia esta sección se llenará automáticamente."
-    status="soon"
-    :preview="[
-      'Dos columnas CPU0 / CPU1 con timeline paralela',
-      'Demos pedagógicos: race_counter sin lock vs safe_counter con mutex',
-      'Visualización de la ReadyQueue compartida (lock acquire/release)',
-      'Producer-consumer con semáforos animado',
-      'Dining philosophers con visual de deadlock',
-    ]"
-  />
-
-  <section v-else class="conc">
+  <section class="conc">
     <header class="conc__head">
-      <h1>Concurrencia</h1>
+      <h1><Term term="Critical section" mode="title">Concurrencia</Term></h1>
       <div class="conc__hint" v-if="singleCoreHint">
         Hoy este simulador está corriendo con <strong>{{ cpu.numCores }}</strong> core.
         Para activar las animaciones de competencia real entre cores, el operador
@@ -79,22 +55,8 @@ function pidShort(pid: number) {
       </div>
       <div class="conc__hint" v-else>
         Cores activos: <strong>{{ cpu.numCores }}</strong>. Los workers de cada
-        demo se reparten entre los cores; el mutex serializa la sección crítica
-        cuando lo piden.
-      </div>
-
-      <div class="conc__demos">
-        <span class="conc__demos-label">Demos disponibles:</span>
-        <button
-          v-for="d in concurrencyDemos"
-          :key="d.name"
-          class="conc__demo-btn"
-          :class="{ active: cpu.selectedProgram === d.name }"
-          :title="d.description"
-          @click="loadDemo(d.name)"
-        >
-          {{ d.name }}
-        </button>
+        demo se reparten entre los cores; el <Term term="Mutex">mutex</Term> serializa
+        la <Term term="Critical section">sección crítica</Term> cuando lo piden.
       </div>
     </header>
 
@@ -109,28 +71,44 @@ function pidShort(pid: number) {
         >
           <header>
             <span class="core-id">CORE {{ c.id }}</span>
-            <span class="core-state">{{ c.halted ? 'HALT' : (c.current_pid === 0 ? 'IDLE' : 'RUN') }}</span>
-            <span class="core-mode" :class="`mode-${c.mode}`">{{ modeName(c.mode) }}</span>
+            <Term
+              :term="c.halted ? 'HLT' : (c.current_pid === 0 ? 'Ready queue' : 'RUN')"
+              mode="label"
+              class="core-state"
+            >{{ c.halted ? 'HALT' : (c.current_pid === 0 ? 'IDLE' : 'RUN') }}</Term>
+            <Term
+              :term="c.mode === 0 ? 'KERNEL MODE (PL0)' : 'USER MODE (PL3)'"
+              mode="label"
+              class="core-mode"
+              :class="`mode-${c.mode}`"
+            >{{ modeName(c.mode) }}</Term>
             <span class="core-pid">{{ pidShort(c.current_pid) }}</span>
           </header>
           <div class="core-regs">
-            <div class="reg-row"><span>EAX</span><code>{{ hex(c.regs.EAX ?? 0) }}</code></div>
-            <div class="reg-row"><span>EBX</span><code>{{ hex(c.regs.EBX ?? 0) }}</code></div>
-            <div class="reg-row"><span>ECX</span><code>{{ hex(c.regs.ECX ?? 0) }}</code></div>
-            <div class="reg-row"><span>EDX</span><code>{{ hex(c.regs.EDX ?? 0) }}</code></div>
-            <div class="reg-row separator"><span>EIP</span><code>{{ hex(c.regs.EIP ?? 0) }}</code></div>
-            <div class="reg-row"><span>ESP</span><code>{{ hex(c.regs.ESP ?? 0) }}</code></div>
+            <div class="reg-row"><Term term="EAX" mode="label">EAX</Term><code>{{ hex(c.regs.EAX ?? 0) }}</code></div>
+            <div class="reg-row"><Term term="EBX" mode="label">EBX</Term><code>{{ hex(c.regs.EBX ?? 0) }}</code></div>
+            <div class="reg-row"><Term term="ECX" mode="label">ECX</Term><code>{{ hex(c.regs.ECX ?? 0) }}</code></div>
+            <div class="reg-row"><Term term="EDX" mode="label">EDX</Term><code>{{ hex(c.regs.EDX ?? 0) }}</code></div>
+            <div class="reg-row separator"><Term term="EIP" mode="label">EIP</Term><code>{{ hex(c.regs.EIP ?? 0) }}</code></div>
+            <div class="reg-row"><Term term="ESP" mode="label">ESP</Term><code>{{ hex(c.regs.ESP ?? 0) }}</code></div>
           </div>
         </article>
       </div>
 
       <aside class="conc__locks">
         <section class="lock-block">
-          <h2>Mutexes</h2>
-          <p v-if="cpu.mutexes.length === 0" class="empty">Ningún mutex activo. Carga <code>safe_counter</code> para crear uno.</p>
+          <h2><Term term="Mutex" mode="title">Mutexes</Term></h2>
+          <p v-if="cpu.mutexes.length === 0" class="empty">
+            Ningún <Term term="Mutex">mutex</Term> activo. Cargue
+            <Term term="safe_counter" as="code">safe_counter</Term> para crear uno.
+          </p>
           <table v-else>
             <thead>
-              <tr><th>ID</th><th>Holder</th><th>Cola</th></tr>
+              <tr>
+                <th>ID</th>
+                <th><Term term="Mutex" mode="label">Holder</Term></th>
+                <th><Term term="Waiting queue" mode="label">Cola</Term></th>
+              </tr>
             </thead>
             <tbody>
               <tr
@@ -151,11 +129,17 @@ function pidShort(pid: number) {
         </section>
 
         <section class="lock-block">
-          <h2>Semáforos</h2>
-          <p v-if="cpu.semaphores.length === 0" class="empty">Ningún semáforo activo todavía.</p>
+          <h2><Term term="Semaphore" mode="title">Semáforos</Term></h2>
+          <p v-if="cpu.semaphores.length === 0" class="empty">
+            Ningún <Term term="Semaphore">semáforo</Term> activo todavía.
+          </p>
           <table v-else>
             <thead>
-              <tr><th>ID</th><th>Count</th><th>Cola</th></tr>
+              <tr>
+                <th>ID</th>
+                <th><Term term="Semaphore" mode="label">Count</Term></th>
+                <th><Term term="Waiting queue" mode="label">Cola</Term></th>
+              </tr>
             </thead>
             <tbody>
               <tr v-for="s in cpu.semaphores" :key="s.id" :data-narrator-anchor="`sem-${s.id}`">
@@ -171,16 +155,27 @@ function pidShort(pid: number) {
         </section>
 
         <section class="lock-block">
-          <h2>Procesos · estado</h2>
+          <h2><Term term="PCB" mode="title">Procesos · estado</Term></h2>
           <table>
             <thead>
-              <tr><th>PID</th><th>Nombre</th><th>Estado</th><th>Bloqueado en</th></tr>
+              <tr>
+                <th><Term term="PID" mode="label">PID</Term></th>
+                <th>Nombre</th>
+                <th>Estado</th>
+                <th><Term term="BLOCKED" mode="label">Bloqueado en</Term></th>
+              </tr>
             </thead>
             <tbody>
               <tr v-for="p in cpu.procs" :key="p.pid">
                 <td>P{{ p.pid }}</td>
                 <td>{{ p.name }}</td>
-                <td><span :class="['state-tag', `state-${p.state.toLowerCase()}`]">{{ p.state }}</span></td>
+                <td>
+                  <Term
+                    :term="p.state"
+                    mode="label"
+                    :class="['state-tag', `state-${p.state.toLowerCase()}`]"
+                  >{{ p.state }}</Term>
+                </td>
                 <td><code v-if="p.blocked_on">{{ p.blocked_on }}</code><span v-else class="muted">—</span></td>
               </tr>
             </tbody>
@@ -225,37 +220,6 @@ function pidShort(pid: number) {
   padding: 0 4px;
   border-radius: var(--radius-sm);
   color: var(--amber);
-}
-
-.conc__demos { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-.conc__demos-label {
-  font-size: 10px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.conc__demo-btn {
-  font-family: inherit;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  font-size: 11px;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  text-transform: lowercase;
-  letter-spacing: 0.5px;
-  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
-}
-.conc__demo-btn:hover {
-  background: rgba(255, 179, 71, 0.08);
-  color: var(--amber);
-  border-color: var(--border-strong);
-}
-.conc__demo-btn.active {
-  background: rgba(255, 179, 71, 0.16);
-  color: var(--amber);
-  border-color: var(--amber);
 }
 
 .conc__body {

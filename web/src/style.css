@@ -56,6 +56,7 @@
   --shadow-glow-red: 0 0 12px rgba(255, 58, 58, 0.35);
   --shadow-elevation-1: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-elevation-2: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-elevation-floating: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 179, 71, 0.18);
 
   /* Focus ring: an inner solid + outer glow so it reads on every surface. */
   --focus-ring-inner: 0 0 0 1px var(--amber);
@@ -66,6 +67,7 @@
   --z-base: 0;
   --z-dropdown: 100;
   --z-sticky: 200;
+  --z-floating-toolbar: 250;
   --z-overlay: 500;
   --z-modal: 600;
   --z-toast: 700;

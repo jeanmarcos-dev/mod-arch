@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import { Cpu, Code2, ListTree, MemoryStick, Boxes, Terminal } from '@lucide/vue';
 import { useCpuStore } from '../stores/cpu';
-import TopBar from '../components/TopBar.vue';
 import CpuPanel from '../components/CpuPanel.vue';
 import EventsLog from '../components/EventsLog.vue';
 import ProcessesPanel from '../components/ProcessesPanel.vue';
@@ -96,16 +96,14 @@ onUnmounted(() => {
       en modo <strong>solo lectura</strong> — los controles los maneja el propietario
     </div>
 
-    <TopBar />
-
     <!-- Tab bar mobile-only — controla todo el layout. Sólo visible <= 768px (CSS) -->
     <nav class="mobile-tabs" :aria-hidden="!isMobile">
-      <button :class="{ active: mobileTab === 'cpu' }" @click="mobileTab = 'cpu'" title="Registros del CPU">⚙ CPU</button>
-      <button :class="{ active: mobileTab === 'code' }" @click="mobileTab = 'code'" title="Código C">⎇ CÓD</button>
-      <button :class="{ active: mobileTab === 'events' }" @click="mobileTab = 'events'" title="Log de eventos">▤ LOG</button>
-      <button :class="{ active: mobileTab === 'memory' }" @click="mobileTab = 'memory'" title="Memoria">▦ MEM</button>
-      <button :class="{ active: mobileTab === 'procs' }" @click="mobileTab = 'procs'" title="Procesos y PCB">⎯ PROC</button>
-      <button :class="{ active: mobileTab === 'console' }" @click="mobileTab = 'console'" title="Consola + teclado">▷ CONS</button>
+      <button :class="{ active: mobileTab === 'cpu' }" @click="mobileTab = 'cpu'" title="Registros del CPU"><Cpu :size="14" :stroke-width="2" /><span>CPU</span></button>
+      <button :class="{ active: mobileTab === 'code' }" @click="mobileTab = 'code'" title="Código C"><Code2 :size="14" :stroke-width="2" /><span>CÓD</span></button>
+      <button :class="{ active: mobileTab === 'events' }" @click="mobileTab = 'events'" title="Log de eventos"><ListTree :size="14" :stroke-width="2" /><span>LOG</span></button>
+      <button :class="{ active: mobileTab === 'memory' }" @click="mobileTab = 'memory'" title="Memoria"><MemoryStick :size="14" :stroke-width="2" /><span>MEM</span></button>
+      <button :class="{ active: mobileTab === 'procs' }" @click="mobileTab = 'procs'" title="Procesos y PCB"><Boxes :size="14" :stroke-width="2" /><span>PROC</span></button>
+      <button :class="{ active: mobileTab === 'console' }" @click="mobileTab = 'console'" title="Consola + teclado"><Terminal :size="14" :stroke-width="2" /><span>CONS</span></button>
     </nav>
 
     <main class="layout">
@@ -117,19 +115,19 @@ onUnmounted(() => {
             :class="{ active: middleTab === 'code' }"
             @click="middleTab = 'code'"
             title="Código fuente C de los procesos cargados. El kernel los compiló (manualmente) a binarios x86 antes de cargarlos."
-          >⎇ CÓDIGO C</button>
+          ><Code2 :size="14" :stroke-width="2" /><span>CÓDIGO C</span></button>
           <button
             class="tab"
             :class="{ active: middleTab === 'events' }"
             @click="middleTab = 'events'"
             title="Stream cronológico de eventos del simulador: instrucciones, mode switches, syscalls, etc."
-          >▤ EVENT LOG</button>
+          ><ListTree :size="14" :stroke-width="2" /><span>EVENT LOG</span></button>
           <button
             class="tab"
             :class="{ active: middleTab === 'memory' }"
             @click="middleTab = 'memory'"
             title="Vista hex dump de la memoria física. Puede saltar al EIP, al stack, o a cualquier dirección."
-          >▦ MEMORIA</button>
+          ><MemoryStick :size="14" :stroke-width="2" /><span>MEMORIA</span></button>
         </div>
         <CodePanel v-show="visible.code" />
         <EventsLog v-show="visible.events" />
@@ -183,7 +181,12 @@ onUnmounted(() => {
   color: var(--text-dim);
   border-color: var(--border);
   background: rgba(0, 0, 0, 0.3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
+.tab > svg { flex-shrink: 0; }
 
 .tab.active {
   color: var(--amber);
@@ -245,7 +248,7 @@ onUnmounted(() => {
   animation: shake-anim 500ms cubic-bezier(.36,.07,.19,.97) both;
 }
 
-/* Banner viewer — fija pero suave, no compite con el TopBar. */
+/* Banner viewer — fija pero suave, no compite con la SimBar. */
 .viewer-banner {
   background: rgba(255, 213, 79, 0.12);
   border-bottom: 1px solid var(--yellow);
@@ -297,6 +300,10 @@ onUnmounted(() => {
     color: var(--text-dim);
     border: 1px solid var(--border);
     background: rgba(0, 0, 0, 0.5);
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
     min-height: 42px;
     text-transform: uppercase;
   }

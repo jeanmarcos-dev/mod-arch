@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import { Mail } from '@lucide/vue';
 import { useAdminStore } from '../../stores/admin';
 import { useToastStore } from '../../stores/toast';
 import Card from '../../components/ui/Card.vue';
@@ -95,7 +96,7 @@ async function revokeInvite(token: string) {
     </table>
     <EmptyState
       v-else
-      icon="✉"
+      :icon="Mail"
       title="Sin invitaciones pendientes"
       message="Genere un enlace privilegiado para que un colaborador externo abra una sesión con permisos elevados."
     />

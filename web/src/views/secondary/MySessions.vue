@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { RotateCw, FolderClock } from '@lucide/vue';
 import { apiFetch } from '../../lib/api';
 import { useAuthStore } from '../../stores/auth';
 import { useToastStore } from '../../stores/toast';
@@ -68,7 +69,10 @@ onMounted(load);
   <div class="my-sessions">
     <Card title="Mis sesiones" :elevation="1" class="my-sessions__card">
       <template #header>
-        <Btn variant="ghost" size="sm" :loading="loading" @click="load">↻ Refrescar</Btn>
+        <Btn variant="ghost" size="sm" :loading="loading" @click="load">
+          <RotateCw :size="13" :stroke-width="2" />
+          <span>Refrescar</span>
+        </Btn>
       </template>
 
       <div v-if="errMsg" class="my-sessions__err">{{ errMsg }}</div>
@@ -115,7 +119,7 @@ onMounted(load);
 
       <EmptyState
         v-else-if="!auth.user"
-        icon="◐"
+        :icon="FolderClock"
         title="No ha iniciado sesión"
         message="Identifíquese para que sus sesiones queden asociadas a su nombre y pueda recuperarlas más adelante."
       >
@@ -124,7 +128,7 @@ onMounted(load);
 
       <EmptyState
         v-else
-        icon="⎙"
+        :icon="FolderClock"
         title="Aún no tiene sesiones"
         message="Al abrir el simulador y permanecer un instante quedará registrada su sesión. Sólo aparecen las creadas mientras estaba identificado."
       />

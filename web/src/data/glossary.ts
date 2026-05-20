@@ -10,6 +10,11 @@ export interface GlossaryEntry {
   category: string;
   short: string;
   detail: string;
+  // Alternate keys that should resolve to this entry via findEntry().
+  // Useful when the canonical term is in English ("Mutex") but the markup
+  // surfaces a Spanish label ("semáforo"), or to map ad-hoc tokens like
+  // "interbloqueo" → "Deadlock".
+  aliases?: string[];
 }
 
 export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
@@ -111,6 +116,12 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
 
   // ─── Interrupciones ─────────────────────────────────────────────────────
   {
+    term: 'IRQ 0x00 — Divide error',
+    category: 'Interrupciones',
+    short: 'Excepción cuando una división entera intenta dividir por cero (o desborda).',
+    detail: 'La emite el propio CPU al ejecutar DIV o IDIV con divisor cero, o cuando el cociente no entra en el registro destino. Es una excepción de tipo fault: EIP apunta a la instrucción ofensora, no a la siguiente. El kernel suele terminar el proceso responsable.',
+  },
+  {
     term: 'IRQ — Interrupt Request',
     category: 'Interrupciones',
     short: 'Señal externa al CPU pidiéndole atención.',
@@ -133,6 +144,13 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     category: 'Interrupciones',
     short: 'Convención Linux: el user pide servicio al kernel.',
     detail: 'No es un IRQ HW: es una instrucción `int 0x80` que el user ejecuta. El HW cambia a kernel mode (igual que con cualquier INT), el kernel dispatcha por EAX al syscall correspondiente. Linux moderno usa `sysenter`/`syscall` por performance, pero `int 0x80` sigue funcionando.',
+  },
+  {
+    term: 'IRQ 0x81 — Mutex/Semáforo',
+    category: 'Interrupciones',
+    short: 'Syscall del simulador para operaciones de mutex y semáforo.',
+    detail: 'No es estándar Linux — es una convención de este simulador. EAX selecciona la operación (mutex_lock=1, mutex_unlock=2, sem_wait=3, sem_signal=4); EBX trae el ID del recurso. El handler vive en el kernel y manipula las listas de mutexes y semáforos que usted ve en /concurrencia.',
+    aliases: ['int 0x81'],
   },
   {
     term: 'IRQ 0x0E — Page Fault',
@@ -233,6 +251,83 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     category: 'Scheduler',
     short: 'El kernel le saca el CPU al proceso aunque no haya querido cederlo.',
     detail: 'En preemptive multitasking, el timer fuerza el switch. Lo opuesto es "cooperative" donde el proceso debe ceder voluntariamente (yield) — riesgoso, un loop infinito cuelga el sistema.',
+  },
+
+  // ─── Concurrencia y sincronización ──────────────────────────────────────
+  {
+    term: 'Critical section',
+    category: 'Concurrencia',
+    short: 'Sección crítica: tramo de código que NO debe ejecutarse por dos hilos a la vez.',
+    detail: 'Si dos hilos modifican la misma variable sin proteger el acceso, los resultados se corrompen (race condition). La sección crítica es el bloque que toca el recurso compartido; debe estar custodiada por un mecanismo de exclusión mutua (mutex, semáforo, instrucción atómica). Manténgala lo más corta posible: cuanto más larga, más contención.',
+    aliases: ['sección crítica', 'seccion critica'],
+  },
+  {
+    term: 'Race condition',
+    category: 'Concurrencia',
+    short: 'Condición de carrera: el resultado depende del orden de ejecución de los hilos.',
+    detail: 'Aparece cuando dos hilos acceden al mismo recurso sin sincronización y al menos uno escribe. El demo race_counter lo ilustra: dos workers incrementando un contador compartido pierden incrementos porque la secuencia load-modify-store del CPU no es atómica. Se previene encerrando el acceso en una sección crítica.',
+    aliases: ['condición de carrera', 'condicion de carrera'],
+  },
+  {
+    term: 'Mutex',
+    category: 'Sincronización',
+    short: 'Mutual exclusion lock: garantiza que solo un hilo entra a la sección crítica.',
+    detail: 'Tiene dos estados: libre o tomado por un único holder. El syscall mutex_lock bloquea al hilo si el mutex ya está tomado (lo manda a BLOCKED encolado al mutex); mutex_unlock lo libera y despierta al primer waiter. En este simulador cada mutex aparece en /concurrencia con su holder y su cola de espera.',
+    aliases: ['mutex'],
+  },
+  {
+    term: 'Semaphore',
+    category: 'Sincronización',
+    short: 'Semáforo: contador con operaciones atómicas wait (P) y signal (V).',
+    detail: 'Generaliza al mutex: el contador permite hasta N hilos simultáneos en la sección protegida. wait decrementa el contador (bloquea al hilo si está en 0); signal incrementa (despierta a un waiter si lo hay). Útil para limitar acceso a un pool de recursos o coordinar productor-consumidor.',
+    aliases: ['semáforo', 'semaforo'],
+  },
+  {
+    term: 'Atomic operation',
+    category: 'Sincronización',
+    short: 'Operación atómica: el hardware garantiza que se ejecuta sin ser interrumpida.',
+    detail: 'En x86, instrucciones como LOCK XADD, LOCK CMPXCHG o XCHG bloquean el bus durante el load-modify-store. Son la primitiva sobre la que se construyen los mutexes, spinlocks y contadores lock-free. Sin atomicidad, el incremento i++ se descompone en MOV/INC/MOV — interrumpible y por ende inseguro entre hilos.',
+    aliases: ['operación atómica', 'operacion atomica'],
+  },
+  {
+    term: 'Deadlock',
+    category: 'Concurrencia',
+    short: 'Bloqueo mutuo: dos o más hilos se esperan circularmente y ninguno avanza.',
+    detail: 'Las cuatro condiciones de Coffman deben cumplirse en simultáneo: exclusión mutua, hold-and-wait, no preemption y espera circular. El demo dining_philosophers reproduce el caso clásico — cada filósofo toma un tenedor y espera el otro, formando un ciclo. Se previene rompiendo cualquiera de las cuatro (por ejemplo, tomando los tenedores en orden global).',
+    aliases: ['interbloqueo', 'bloqueo mutuo'],
+  },
+  {
+    term: 'Lock contention',
+    category: 'Concurrencia',
+    short: 'Contención: varios hilos compiten por el mismo lock y se serializan.',
+    detail: 'Cada vez que un hilo encuentra el mutex tomado, se bloquea y va a la cola — eso es overhead puro. Una sección crítica corta reduce la contención; un lock por recurso fino la distribuye. En /concurrencia, la cola de waiters de cada mutex es el termómetro visual de cuánta contención hay.',
+    aliases: ['contención', 'contencion'],
+  },
+  {
+    term: 'Producer-consumer',
+    category: 'Concurrencia',
+    short: 'Patrón productor-consumidor: un hilo produce datos, otro los procesa, comparten un buffer.',
+    detail: 'El buffer compartido necesita protección (mutex) y coordinación (dos semáforos: empty y full). El productor espera empty antes de escribir; el consumidor espera full antes de leer. Es la base de pipelines, message queues y muchas APIs de I/O asíncrono.',
+    aliases: ['productor-consumidor', 'productor consumidor'],
+  },
+  {
+    term: 'Dining philosophers',
+    category: 'Concurrencia',
+    short: 'Cena de los filósofos: ejemplo canónico de deadlock con N hilos compartiendo N recursos.',
+    detail: 'Cinco filósofos comparten una mesa con cinco tenedores; cada uno necesita dos tenedores para comer. Si todos toman el de la izquierda al mismo tiempo, esperan por siempre el de la derecha (deadlock). Soluciones clásicas: ordenar los tenedores globalmente, o limitar a 4 filósofos comiendo en simultáneo. El demo dining_philosophers muestra ambas variantes.',
+    aliases: ['filósofos comensales', 'filosofos comensales', 'filósofos', 'filosofos'],
+  },
+  {
+    term: 'safe_counter',
+    category: 'Demos',
+    short: 'Demo de incremento protegido por mutex — el contador termina exacto.',
+    detail: 'Dos workers ejecutan en paralelo un loop que toma un mutex, incrementa un contador compartido y libera. Comparado con race_counter, aquí el resultado final es determinístico (siempre 2 × iteraciones) porque la sección crítica está protegida.',
+  },
+  {
+    term: 'race_counter',
+    category: 'Demos',
+    short: 'Demo SIN protección — el contador pierde incrementos por race condition.',
+    detail: 'Mismo loop que safe_counter pero sin mutex. Como el load-modify-store no es atómico, dos workers pueden leer el mismo valor antes de que el otro lo escriba, perdiendo el incremento. El total final varía entre corridas; el delta hasta el resultado teórico mide cuántos incrementos se perdieron.',
   },
 
   // ─── Memoria ────────────────────────────────────────────────────────────
@@ -339,4 +434,41 @@ export function groupByCategory(entries: GlossaryEntry[]): Record<string, Glossa
     (out[e.category] ??= []).push(e);
   }
   return out;
+}
+
+// Index built once at module load. Each lookup is O(1).
+// Resolution order (first match wins, so exact entries never get clobbered):
+//   1. Exact term (case-insensitive).
+//   2. Prefix before " — " (so "PL" resolves to "PL — Privilege Level").
+//   3. Comma-separated tokens (so "EBX" resolves to "EAX, EBX, ECX, EDX").
+//      Parenthetical suffixes are stripped ("sys_write (4)" → "sys_write").
+//   4. Explicit aliases.
+const lookupIndex = new Map<string, GlossaryEntry>();
+
+function normalize(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+function indexKey(key: string, entry: GlossaryEntry): void {
+  const k = normalize(key);
+  if (!k) return;
+  if (!lookupIndex.has(k)) lookupIndex.set(k, entry);
+}
+
+function buildIndex(): void {
+  for (const e of GLOSSARY_ENTRIES) {
+    indexKey(e.term, e);
+    const dashPart = e.term.split('—')[0];
+    if (dashPart && dashPart !== e.term) indexKey(dashPart, e);
+    for (const tok of e.term.split(',')) {
+      const cleaned = tok.replace(/\s*\(.*\)\s*$/, '');
+      indexKey(cleaned, e);
+    }
+    for (const a of e.aliases ?? []) indexKey(a, e);
+  }
+}
+buildIndex();
+
+export function findEntry(term: string): GlossaryEntry | null {
+  return lookupIndex.get(normalize(term)) ?? null;
 }

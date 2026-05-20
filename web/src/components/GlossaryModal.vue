@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
+import { BookOpen, X, ChevronDown, ChevronRight } from '@lucide/vue';
 import {
   GLOSSARY_ENTRIES,
   listCategories,
@@ -38,7 +39,7 @@ void GLOSSARY_ENTRIES;
   <div v-if="open" class="backdrop" @click.self="emit('close')">
     <div class="modal">
       <div class="modal-head">
-        <h2>⌕ GLOSARIO</h2>
+        <h2><BookOpen :size="16" :stroke-width="2" /> GLOSARIO</h2>
         <input
           v-model="search"
           name="glossary_search"
@@ -47,7 +48,7 @@ void GLOSSARY_ENTRIES;
           placeholder="buscar (IRQ, PL, PCB, scheduler...)"
           autofocus
         />
-        <button class="close-btn" @click="emit('close')">✕</button>
+        <button class="close-btn" @click="emit('close')" aria-label="Cerrar"><X :size="16" :stroke-width="2" /></button>
       </div>
 
       <div class="modal-body">
@@ -64,7 +65,7 @@ void GLOSSARY_ENTRIES;
               <div class="entry-row">
                 <span class="entry-term">{{ e.term }}</span>
                 <span class="entry-short">{{ e.short }}</span>
-                <span class="entry-arrow">{{ expanded.has(e.term) ? '▾' : '▸' }}</span>
+                <component :is="expanded.has(e.term) ? ChevronDown : ChevronRight" :size="14" :stroke-width="2" class="entry-arrow" />
               </div>
               <div v-if="expanded.has(e.term)" class="entry-detail">
                 {{ e.detail }}
@@ -118,6 +119,9 @@ void GLOSSARY_ENTRIES;
   letter-spacing: 4px;
   text-transform: uppercase;
   margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .search {

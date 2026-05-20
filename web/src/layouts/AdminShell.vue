@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
+import { Gauge, Monitor, Users, Mail, Lock, ScrollText, ExternalLink, LogOut } from '@lucide/vue';
 import { useAdminStore } from '../stores/admin';
 import { useToastStore } from '../stores/toast';
 import Sidebar from '../components/shell/Sidebar.vue';
@@ -12,12 +13,12 @@ const router = useRouter();
 const toast = useToastStore();
 
 const items = [
-  { to: '/admin', label: 'Resumen', icon: '◉', group: 'ADMINISTRACIÓN' },
-  { to: '/admin/sesiones', label: 'Sesiones', icon: '▶', group: 'ADMINISTRACIÓN' },
-  { to: '/admin/usuarios', label: 'Usuarios', icon: '☖', group: 'ADMINISTRACIÓN' },
-  { to: '/admin/invitaciones', label: 'Invitaciones', icon: '✉', group: 'ADMINISTRACIÓN' },
-  { to: '/admin/accesos', label: 'Accesos', icon: '⚿', group: 'ADMINISTRACIÓN' },
-  { to: '/admin/auditoria', label: 'Auditoría', icon: '☰', group: 'ADMINISTRACIÓN' },
+  { to: '/admin', label: 'Resumen', icon: Gauge, group: 'ADMINISTRACIÓN' },
+  { to: '/admin/sesiones', label: 'Sesiones', icon: Monitor, group: 'ADMINISTRACIÓN' },
+  { to: '/admin/usuarios', label: 'Usuarios', icon: Users, group: 'ADMINISTRACIÓN' },
+  { to: '/admin/invitaciones', label: 'Invitaciones', icon: Mail, group: 'ADMINISTRACIÓN' },
+  { to: '/admin/accesos', label: 'Accesos', icon: Lock, group: 'ADMINISTRACIÓN' },
+  { to: '/admin/auditoria', label: 'Auditoría', icon: ScrollText, group: 'ADMINISTRACIÓN' },
 ];
 
 let refreshTimer: number | undefined;
@@ -52,7 +53,8 @@ onUnmounted(() => {
       <Topbar>
         <template #actions>
           <RouterLink to="/" class="admin-shell__link" title="Volver al simulador">
-            ↗ Simulador
+            <ExternalLink :size="14" :stroke-width="2" />
+            <span>Simulador</span>
           </RouterLink>
           <button
             type="button"
@@ -60,7 +62,8 @@ onUnmounted(() => {
             title="Cerrar sesión de admin"
             @click="logout"
           >
-            ↩ Salir
+            <LogOut :size="14" :stroke-width="2" />
+            <span>Salir</span>
           </button>
         </template>
       </Topbar>
@@ -109,10 +112,15 @@ onUnmounted(() => {
   font-size: 10px;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  padding: 6px 10px;
+  padding: 0 10px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   cursor: pointer;
   text-decoration: none;
   border-radius: var(--radius-sm);
+  box-sizing: border-box;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
 

@@ -1,123 +1,98 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import { useRoute } from 'vue-router';
-import { usePreferencesStore, type PresentationMode } from '../../stores/preferences';
+import { computed, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
+import { Share2, Square, UserRound, LogIn, LogOut } from '@lucide/vue';
 import { useCpuStore } from '../../stores/cpu';
-import SimulationControls from './SimulationControls.vue';
+import { useAuthStore } from '../../stores/auth';
 import ShareModal from '../ShareModal.vue';
 
-withDefaults(
-  defineProps<{
-    /** Section title shown next to the breadcrumb chevron. */
-    crumb?: string;
-  }>(),
-  {},
-);
-
-const route = useRoute();
-const prefs = usePreferencesStore();
 const cpu = useCpuStore();
+const auth = useAuthStore();
+const router = useRouter();
 
-const sectionTitle = computed(() => {
-  if (typeof route.meta.title === 'string') return route.meta.title;
-  return '';
-});
-
-// Simulation routes get the load/run controls inline. Tools routes
-// (/perfil, /preferencias, etc.) hide them to keep the bar uncluttered.
-const isSimRoute = computed(() => {
-  const p = route.path;
-  return p === '/' || p === '/procesos' || p === '/memoria' || p === '/interrupciones';
-});
-
-// Share button shows for owners only (not viewers, not anonymous w/o session).
-const canShare = computed(() => {
-  const role = cpu.sessionInfo?.role ?? 'none';
-  return role === 'owner';
-});
-
+const canShare = computed(() => (cpu.sessionInfo?.role ?? 'none') === 'owner');
 const isShared = computed(() => Boolean(cpu.sessionInfo?.view_token));
-const shareOpen = ref(false);
+const loggedIn = computed(() => Boolean(cpu.sessionInfo.user_name));
+const viewer = computed(() => cpu.isViewer());
 
-function openShare() {
-  // The modal handles share/unshare + URL copy. Showing it on every click
-  // means the owner can always re-read the link without remembering it.
-  shareOpen.value = true;
+const aliasInput = ref(cpu.sessionInfo.label);
+watch(() => cpu.sessionInfo.label, (lab) => { aliasInput.value = lab; });
+function commitAlias() {
+  const v = aliasInput.value.trim().slice(0, 32);
+  if (v !== cpu.sessionInfo.label) cpu.setAlias(v);
 }
 
-const modes: { id: PresentationMode; label: string; help: string }[] = [
-  { id: 'compact', label: 'Compacto', help: 'Densidad alta, sin animaciones' },
-  { id: 'pedagogic', label: 'Pedagógico', help: 'Animaciones y tooltips' },
-  { id: 'projector', label: 'Demo', help: 'Tamaño grande, ritmo lento' },
-];
+const shareOpen = ref(false);
+function openShare() { shareOpen.value = true; }
+async function goLogin() { await router.push('/login'); }
+async function doLogout() { await auth.logout(); }
 </script>
 
 <template>
-  <header class="topbar">
-    <div class="topbar__crumb" aria-label="Ubicación">
-      <span class="topbar__brand">MODOS-CPU</span>
-      <span class="topbar__sep" aria-hidden="true">›</span>
-      <span class="topbar__section">{{ crumb ?? sectionTitle }}</span>
-    </div>
+  <header class="mini-bar" role="banner">
+    <span class="mini-bar__brand">MODOS-CPU</span>
 
-    <SimulationControls v-if="isSimRoute" class="topbar__sim" />
+    <div class="mini-bar__spacer"></div>
 
-    <div class="topbar__actions">
-      <button
-        v-if="canShare"
-        type="button"
-        :class="['topbar__share', { 'topbar__share--on': isShared }]"
-        :title="isShared ? 'Sesión compartida — clic para gestionarla' : 'Generar un enlace para que otros vean la sesión en modo lectura'"
-        @click="openShare"
-      >
-        {{ isShared ? '⏹ Compartiendo' : '⤴ Compartir' }}
+    <div
+      v-if="loggedIn"
+      class="mini-bar__user"
+      :title="cpu.sessionInfo.user_email ? `Conectado como ${cpu.sessionInfo.user_name} · ${cpu.sessionInfo.user_email}` : `Conectado como ${cpu.sessionInfo.user_name}`"
+    >
+      <UserRound :size="14" :stroke-width="2" class="mini-bar__user-icon" />
+      <span class="mini-bar__user-name">{{ cpu.sessionInfo.user_name }}</span>
+      <button type="button" class="mini-bar__ghost-btn" title="Cerrar sesión" @click="doLogout">
+        <LogOut :size="14" :stroke-width="2" />
       </button>
-
-      <slot name="actions" />
-
-      <ShareModal :open="shareOpen" @close="shareOpen = false" />
-
-      <div class="topbar__modes" role="radiogroup" aria-label="Modo de presentación">
-        <button
-          v-for="m in modes"
-          :key="m.id"
-          type="button"
-          role="radio"
-          :aria-checked="prefs.mode === m.id"
-          :class="['topbar__mode', { 'topbar__mode--on': prefs.mode === m.id }]"
-          :title="m.help"
-          @click="prefs.setMode(m.id)"
-        >
-          {{ m.label }}
-        </button>
-      </div>
     </div>
+    <label v-else-if="!viewer" class="mini-bar__alias">
+      <UserRound :size="14" :stroke-width="2" class="mini-bar__user-icon" />
+      <input
+        v-model="aliasInput"
+        class="mini-bar__alias-input"
+        type="text"
+        maxlength="32"
+        placeholder="su alias…"
+        autocomplete="off"
+        aria-label="Alias visible para los espectadores"
+        @blur="commitAlias"
+        @keydown.enter="commitAlias"
+      />
+      <button type="button" class="mini-bar__ghost-btn" title="Iniciar sesión con correo" @click="goLogin">
+        <LogIn :size="14" :stroke-width="2" />
+      </button>
+    </label>
+
+    <button
+      v-if="canShare"
+      type="button"
+      :class="['mini-bar__share', { 'mini-bar__share--on': isShared }]"
+      :title="isShared ? 'Sesión compartida — clic para gestionarla' : 'Generar un enlace para que otros vean la sesión en modo lectura'"
+      @click="openShare"
+    >
+      <component :is="isShared ? Square : Share2" :size="14" :stroke-width="2" />
+      <span>{{ isShared ? 'Compartiendo' : 'Compartir' }}</span>
+    </button>
+
+    <slot name="actions" />
+
+    <ShareModal :open="shareOpen" @close="shareOpen = false" />
   </header>
 </template>
 
 <style scoped>
-.topbar {
+.mini-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: 0 var(--space-4);
-  height: 48px;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  height: 44px;
   background: var(--surface-1);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
-.topbar__crumb {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.topbar__brand {
+.mini-bar__brand {
   font-family: 'Major Mono Display', monospace;
   letter-spacing: 3px;
   color: var(--amber);
@@ -125,30 +100,48 @@ const modes: { id: PresentationMode; label: string; help: string }[] = [
   font-size: 12px;
 }
 
-.topbar__sep {
-  color: var(--text-muted);
-}
+.mini-bar__spacer { flex: 1; }
 
-.topbar__section {
-  color: var(--text);
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  font-size: 11px;
-}
-
-.topbar__sim {
-  flex: 1;
-  min-width: 0;
-  justify-content: center;
-}
-
-.topbar__actions {
-  display: flex;
+.mini-bar__user,
+.mini-bar__alias {
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 6px;
+  background: rgba(255, 179, 71, 0.06);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 6px 0 8px;
+  height: 28px;
+  color: var(--text);
 }
+.mini-bar__user-icon { color: var(--amber); }
+.mini-bar__user-name { font-size: 11px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini-bar__ghost-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  padding: 0;
+}
+.mini-bar__ghost-btn:hover { background: rgba(255, 179, 71, 0.10); color: var(--amber); }
+.mini-bar__alias-input {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  width: 120px;
+  outline: none;
+}
+.mini-bar__alias-input::placeholder { color: var(--text-muted); }
 
-.topbar__share {
+.mini-bar__share {
   font-family: inherit;
   background: rgba(255, 179, 71, 0.05);
   border: 1px solid var(--border);
@@ -160,69 +153,22 @@ const modes: { id: PresentationMode; label: string; help: string }[] = [
   padding: 0 12px;
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   box-sizing: border-box;
   cursor: pointer;
   border-radius: var(--radius-sm);
   transition: background var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
   white-space: nowrap;
 }
-
-.topbar__share:hover {
-  background: rgba(255, 179, 71, 0.12);
-  color: var(--amber);
-  border-color: var(--border-strong);
-}
-
-.topbar__share--on {
+.mini-bar__share:hover { background: rgba(255, 179, 71, 0.12); color: var(--amber); border-color: var(--border-strong); }
+.mini-bar__share--on {
   background: rgba(127, 255, 170, 0.10);
   color: var(--green);
   border-color: var(--green);
   box-shadow: var(--shadow-glow-green);
 }
 
-.topbar__modes {
-  display: inline-flex;
-  align-items: stretch;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  height: 32px;
-  box-sizing: border-box;
-}
-
-.topbar__mode {
-  background: transparent;
-  border: none;
-  border-right: 1px solid var(--border);
-  color: var(--text-dim);
-  font-family: inherit;
-  font-size: 10px;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  padding: 0 12px;
-  display: inline-flex;
-  align-items: center;
-  cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-
-.topbar__mode:last-child {
-  border-right: none;
-}
-
-.topbar__mode:hover {
-  background: rgba(255, 179, 71, 0.08);
-  color: var(--amber);
-}
-
-.topbar__mode--on {
-  background: rgba(255, 179, 71, 0.18);
-  color: var(--amber);
-  text-shadow: var(--shadow-glow-amber);
-}
-
-@media (max-width: 768px) {
-  .topbar__brand { display: none; }
-  .topbar__mode { padding: 6px 7px; font-size: 9px; }
+@media (max-width: 700px) {
+  .mini-bar__brand { display: none; }
 }
 </style>
