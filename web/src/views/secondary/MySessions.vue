@@ -6,6 +6,7 @@ import { useToastStore } from '../../stores/toast';
 import Card from '../../components/ui/Card.vue';
 import Btn from '../../components/ui/Btn.vue';
 import EmptyState from '../../components/ui/EmptyState.vue';
+import Skeleton from '../../components/ui/Skeleton.vue';
 
 interface MySession {
   id: string;
@@ -71,6 +72,8 @@ onMounted(load);
       </template>
 
       <div v-if="errMsg" class="my-sessions__err">{{ errMsg }}</div>
+
+      <Skeleton v-else-if="loading && !sessions.length" :rows="4" />
 
       <table v-else-if="sessions.length" class="grid">
         <thead>

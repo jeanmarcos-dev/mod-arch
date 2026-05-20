@@ -65,7 +65,11 @@ onUnmounted(() => {
         </template>
       </Topbar>
       <main class="admin-shell__content">
-        <RouterView />
+        <RouterView v-slot="{ Component }">
+          <Transition name="route" mode="out-in">
+            <component :is="Component" />
+          </Transition>
+        </RouterView>
       </main>
     </div>
     <Toast />
@@ -117,4 +121,9 @@ onUnmounted(() => {
   background: rgba(255, 179, 71, 0.08);
   color: var(--amber);
 }
+
+.route-enter-from { opacity: 0; transform: translateY(8px); }
+.route-leave-to   { opacity: 0; transform: translateY(-6px); }
+.route-enter-active,
+.route-leave-active { transition: opacity var(--transition-base), transform var(--transition-base); }
 </style>

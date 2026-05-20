@@ -53,7 +53,11 @@ async function logout() {
       </Topbar>
       <SimulationMinibar v-if="showMinibar" />
       <main class="shell__content">
-        <RouterView />
+        <RouterView v-slot="{ Component }">
+          <Transition name="route" mode="out-in">
+            <component :is="Component" />
+          </Transition>
+        </RouterView>
       </main>
     </div>
   </div>
@@ -108,4 +112,11 @@ async function logout() {
    --row-density variable and font-size: inherit. */
 .shell--mode-pedagogic { --row-density: 1.15; font-size: 16px; }
 .shell--mode-projector { --row-density: 1.4; font-size: 18px; }
+
+/* Route transition: gentle slide+fade so changing sections feels light but
+   noticeable. Honors prefers-reduced-motion via the global rule in style.css. */
+.route-enter-from { opacity: 0; transform: translateY(8px); }
+.route-leave-to   { opacity: 0; transform: translateY(-6px); }
+.route-enter-active,
+.route-leave-active { transition: opacity var(--transition-base), transform var(--transition-base); }
 </style>
