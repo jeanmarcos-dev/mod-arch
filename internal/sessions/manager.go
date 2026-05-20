@@ -106,6 +106,7 @@ type Session struct {
 	viewToken    string // empty means share is disabled
 	label        string
 	public       bool
+	userID       string // empty when no user is attached
 	lastActiveAt time.Time
 }
 
@@ -147,6 +148,23 @@ func (s *Session) SetPublic(p bool) {
 	s.mu.Unlock()
 	if s.mgr != nil {
 		s.mgr.persistPublic(s.ID, p)
+	}
+}
+
+// UserID returns the attached user identifier ("" when none).
+func (s *Session) UserID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.userID
+}
+
+// SetUserID ties the session to a user (or detaches with "") and persists it.
+func (s *Session) SetUserID(uid string) {
+	s.mu.Lock()
+	s.userID = uid
+	s.mu.Unlock()
+	if s.mgr != nil {
+		s.mgr.persistUserID(s.ID, uid)
 	}
 }
 
@@ -285,9 +303,15 @@ func (m *Manager) newSessionFromRow(row store.SessionRow) *Session {
 		viewToken:    row.ViewToken,
 		label:        row.Label,
 		public:       row.Public,
+		userID:       row.UserID,
 		lastActiveAt: time.Unix(row.LastActiveAt, 0),
 	}
 }
+
+// Store returns the underlying *store.Store ("nil" when the Manager is
+// in-memory only). Callers that need persistence beyond the session/invite
+// scope (auth, audit log) should use this handle.
+func (m *Manager) Store() *store.Store { return m.store }
 
 // MaxPublic returns the configured public-session cap.
 func (m *Manager) MaxPublic() int { return m.maxPublic }
@@ -532,6 +556,16 @@ func (m *Manager) persistPublic(id string, public bool) {
 	}
 }
 
+// persistUserID writes the user attachment to the store. No-op when store is nil.
+func (m *Manager) persistUserID(id, userID string) {
+	if m.store == nil {
+		return
+	}
+	if err := m.store.UpdateSessionUserID(context.Background(), id, userID); err != nil {
+		m.logger.Warn("store: update user_id failed", "id", id, "err", err)
+	}
+}
+
 // newID returns a hex-encoded 16-char (8-byte) random identifier.
 func newID() string {
 	var buf [8]byte
@@ -654,6 +688,11 @@ func (m *Manager) RevokeInvite(token string) {
 	m.logger.Info("invite revoked", "token", token)
 }
 
+type liveTouch struct {
+	id string
+	ts int64
+}
+
 // CleanupOnce performs one cleanup pass: kills sessions whose LastActiveAt
 // is older than IdleTTL, drops invites that are used or expired, and
 // flushes Touch timestamps from memory to disk. Returns how many sessions
@@ -666,10 +705,6 @@ func (m *Manager) CleanupOnce() (killedSessions, prunedInvites int) {
 	// lock so each Simulator's StopRun does not block the map.
 	m.mu.RLock()
 	deadIDs := make([]string, 0)
-	type liveTouch struct {
-		id string
-		ts int64
-	}
 	live := make([]liveTouch, 0, len(m.sessions))
 	for id, sess := range m.sessions {
 		last := sess.LastActiveAt()
@@ -686,18 +721,7 @@ func (m *Manager) CleanupOnce() (killedSessions, prunedInvites int) {
 	}
 
 	if m.store != nil {
-		// Flush in-memory Touch timestamps for surviving sessions.
-		for _, lt := range live {
-			if err := m.store.UpdateSessionLastActive(ctx, lt.id, lt.ts); err != nil {
-				m.logger.Warn("store: flush last_active failed", "id", lt.id, "err", err)
-			}
-		}
-		n, err := m.store.DeleteExpiredInvites(ctx, now.Unix())
-		if err != nil {
-			m.logger.Warn("store: prune invites failed", "err", err)
-		} else {
-			prunedInvites += n
-		}
+		prunedInvites += m.flushStoreCleanup(ctx, now, live)
 	} else {
 		m.mu.Lock()
 		for token, inv := range m.invites {
@@ -713,6 +737,26 @@ func (m *Manager) CleanupOnce() (killedSessions, prunedInvites int) {
 		m.logger.Info("cleanup pass", "killed_sessions", killedSessions, "pruned_invites", prunedInvites)
 	}
 	return
+}
+
+// flushStoreCleanup performs the store-backed portion of the cleanup pass:
+// pushes in-memory Touch timestamps to disk and prunes expired invites and
+// magic-link tokens. Returns the number of invites pruned.
+func (m *Manager) flushStoreCleanup(ctx context.Context, now time.Time, live []liveTouch) int {
+	for _, lt := range live {
+		if err := m.store.UpdateSessionLastActive(ctx, lt.id, lt.ts); err != nil {
+			m.logger.Warn("store: flush last_active failed", "id", lt.id, "err", err)
+		}
+	}
+	pruned, err := m.store.DeleteExpiredInvites(ctx, now.Unix())
+	if err != nil {
+		m.logger.Warn("store: prune invites failed", "err", err)
+		pruned = 0
+	}
+	if _, err := m.store.DeleteExpiredMagicLinks(ctx, now.Unix()); err != nil {
+		m.logger.Warn("store: prune magic links failed", "err", err)
+	}
+	return pruned
 }
 
 // StartCleanup launches a goroutine that calls CleanupOnce every interval

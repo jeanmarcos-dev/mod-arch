@@ -76,6 +76,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v/{token}", s.handleViewer)
 	mux.HandleFunc("GET /_assets/{name}", s.handleAsset)
 	s.registerAdminRoutes(mux)
+	s.registerAuthRoutes(mux)
 	mux.HandleFunc("/", s.handleRoot)
 }
 
@@ -113,6 +114,14 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if s.staticFS != nil {
+		// HTML paths other than "/" (e.g. /login) belong to the SPA. Serve
+		// index.html so vue-router can resolve them on the client.
+		if isHTMLPath(path) && path != "/" {
+			r2 := r.Clone(r.Context())
+			r2.URL.Path = "/"
+			http.FileServer(http.FS(s.staticFS)).ServeHTTP(w, r2)
+			return
+		}
 		http.FileServer(http.FS(s.staticFS)).ServeHTTP(w, r)
 		return
 	}

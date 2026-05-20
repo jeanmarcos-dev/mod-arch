@@ -1,0 +1,279 @@
+package server
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/jeanmarcos/modos-cpu/internal/sessions"
+	"github.com/jeanmarcos/modos-cpu/internal/store"
+)
+
+// magicLinkTTL is how long an emailed login token remains usable.
+const magicLinkTTL = 15 * time.Minute
+
+var (
+	emailRE     = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+	studentIDRE = regexp.MustCompile(`^[A-Za-z0-9._\-]{1,32}$`)
+)
+
+func (s *Server) registerAuthRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
+	mux.HandleFunc("GET /api/auth/me", s.handleAuthMe)
+	mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
+	mux.HandleFunc("GET /auth/magic", s.handleAuthMagic)
+}
+
+type loginRequest struct {
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	StudentID string `json:"student_id"`
+}
+
+type userPublic struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email,omitempty"`
+}
+
+// handleAuthLogin creates or reuses a user identity and attaches it to the
+// caller's session. When an email is supplied it also issues a magic link
+// (logged to stderr) so the student can re-attach from another browser.
+func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	var req loginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "JSON inválido"})
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	sid := strings.TrimSpace(req.StudentID)
+
+	if name == "" || len(name) > 32 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "el nombre es obligatorio y no puede exceder 32 caracteres"})
+		return
+	}
+	if email != "" && !emailRE.MatchString(email) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "el correo no tiene un formato válido"})
+		return
+	}
+	if sid != "" && !studentIDRE.MatchString(sid) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "el ID de estudiante solo admite letras, números, punto y guión"})
+		return
+	}
+
+	st := s.manager.Store()
+	if st == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "persistencia deshabilitada"})
+		return
+	}
+
+	user, err := s.upsertUser(r.Context(), st, name, email, sid)
+	if err != nil {
+		s.logger.Warn("auth: upsert user failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "no fue posible crear el usuario"})
+		return
+	}
+
+	sess, err := s.getOrCreateSession(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "no hay cupo para sesiones nuevas"})
+		return
+	}
+	sess.SetUserID(user.ID)
+	sess.SetLabel(user.Name)
+	sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
+
+	magicSent := false
+	if email != "" {
+		if err := s.issueMagicLink(r, email); err != nil {
+			s.logger.Warn("auth: issue magic link failed", "email", email, "err", err)
+		} else {
+			magicSent = true
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"user":       publicUser(user),
+		"magic_sent": magicSent,
+	})
+}
+
+// upsertUser dedupes by email, then by student_id, otherwise creates a fresh
+// row. Always refreshes name and last_login_at.
+func (s *Server) upsertUser(ctx context.Context, st *store.Store, name, email, sid string) (*store.UserRow, error) {
+	now := time.Now().Unix()
+	var existing *store.UserRow
+	var err error
+	if email != "" {
+		existing, err = st.GetUserByEmail(ctx, email)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+	}
+	if existing == nil && sid != "" {
+		existing, err = st.GetUserByStudentID(ctx, sid)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+	}
+	if existing != nil {
+		if existing.Name != name {
+			if err := st.UpdateUserName(ctx, existing.ID, name); err != nil {
+				return nil, err
+			}
+			existing.Name = name
+		}
+		if err := st.UpdateUserLastLogin(ctx, existing.ID, now); err != nil {
+			return nil, err
+		}
+		existing.LastLoginAt = now
+		return existing, nil
+	}
+	row := store.UserRow{
+		ID:          newAuthID(),
+		Name:        name,
+		Email:       email,
+		StudentID:   sid,
+		CreatedAt:   now,
+		LastLoginAt: now,
+	}
+	if err := st.CreateUser(ctx, row); err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (s *Server) issueMagicLink(r *http.Request, email string) error {
+	st := s.manager.Store()
+	if st == nil {
+		return errors.New("store unavailable")
+	}
+	token := newAuthID() + newAuthID()
+	now := time.Now()
+	if err := st.CreateMagicLink(r.Context(), store.MagicLinkRow{
+		Token:     token,
+		Email:     email,
+		CreatedAt: now.Unix(),
+		ExpiresAt: now.Add(magicLinkTTL).Unix(),
+	}); err != nil {
+		return err
+	}
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	url := fmt.Sprintf("%s://%s/auth/magic?t=%s", scheme, r.Host, token)
+	s.logger.Info("magic link", "email", email, "url", url, "expires_in", magicLinkTTL.String())
+	return nil
+}
+
+// handleAuthMe reports the user attached to the caller's session, if any.
+func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.currentUser(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "no autenticado"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"user": publicUser(user)})
+}
+
+// handleAuthLogout detaches the user from the current session while keeping
+// the session itself alive, so the student can continue anonymously.
+func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	sess, role := s.resolveSessionAndRole(r)
+	if sess != nil && role == sessions.RoleOwner {
+		sess.SetUserID("")
+		sess.SetLabel("")
+		sess.Sim.Broadcast(s.sessionInfoMessage(sess, role))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleAuthMagic consumes a magic-link token, resolves the user by the
+// associated email, attaches it to the caller's session and redirects to /.
+func (s *Server) handleAuthMagic(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("t")
+	if token == "" {
+		http.Error(w, "token requerido", http.StatusBadRequest)
+		return
+	}
+	st := s.manager.Store()
+	if st == nil {
+		http.Error(w, "persistencia deshabilitada", http.StatusServiceUnavailable)
+		return
+	}
+	email, err := st.ConsumeMagicLink(r.Context(), token, time.Now().Unix())
+	if errors.Is(err, store.ErrNotFound) {
+		http.Error(w, "el enlace es inválido o expiró", http.StatusGone)
+		return
+	}
+	if err != nil {
+		s.logger.Warn("auth: consume magic link failed", "err", err)
+		http.Error(w, "error interno", http.StatusInternalServerError)
+		return
+	}
+	user, err := st.GetUserByEmail(r.Context(), email)
+	if errors.Is(err, store.ErrNotFound) {
+		http.Error(w, "el usuario asociado ya no existe", http.StatusGone)
+		return
+	}
+	if err != nil {
+		s.logger.Warn("auth: lookup user by email failed", "err", err)
+		http.Error(w, "error interno", http.StatusInternalServerError)
+		return
+	}
+	if err := st.UpdateUserLastLogin(r.Context(), user.ID, time.Now().Unix()); err != nil {
+		s.logger.Warn("auth: refresh last_login failed", "err", err)
+	}
+
+	sess, err := s.getOrCreateSession(w, r)
+	if err != nil {
+		http.Error(w, "no hay cupo para sesiones nuevas", http.StatusServiceUnavailable)
+		return
+	}
+	sess.SetUserID(user.ID)
+	sess.SetLabel(user.Name)
+	sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
+
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+// currentUser resolves the user attached to the caller's session ("" => false).
+func (s *Server) currentUser(r *http.Request) (*store.UserRow, bool) {
+	sess, _ := s.resolveSessionAndRole(r)
+	if sess == nil {
+		return nil, false
+	}
+	uid := sess.UserID()
+	if uid == "" {
+		return nil, false
+	}
+	st := s.manager.Store()
+	if st == nil {
+		return nil, false
+	}
+	user, err := st.GetUser(r.Context(), uid)
+	if err != nil {
+		return nil, false
+	}
+	return user, true
+}
+
+func publicUser(u *store.UserRow) userPublic {
+	return userPublic{ID: u.ID, Name: u.Name, Email: u.Email}
+}
+
+func newAuthID() string {
+	var buf [8]byte
+	_, _ = rand.Read(buf[:])
+	return hex.EncodeToString(buf[:])
+}

@@ -17,7 +17,7 @@ var schemaSQL string
 
 // SchemaVersion is the current schema version stored via PRAGMA user_version.
 // Bump only when an incompatible migration is added.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // Store is the database handle. Methods on Store are safe for concurrent use:
 // SQLite serializes writes internally and the connection pool handles reads.

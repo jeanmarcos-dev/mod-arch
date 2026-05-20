@@ -76,7 +76,7 @@ func TestSchemaTablesPresent(t *testing.T) {
 	}
 	defer s.Close()
 
-	want := []string{"users", "sessions", "invites", "audit_log", "settings"}
+	want := []string{"users", "sessions", "invites", "magic_links", "audit_log", "settings"}
 	for _, table := range want {
 		t.Run(table, func(t *testing.T) {
 			var n int

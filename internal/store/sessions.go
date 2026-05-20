@@ -109,6 +109,17 @@ func (s *Store) UpdateSessionViewToken(ctx context.Context, id, token string) er
 	return nil
 }
 
+// UpdateSessionUserID attaches (or detaches with "") a user to a session.
+func (s *Store) UpdateSessionUserID(ctx context.Context, id, userID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE sessions SET user_id = ? WHERE id = ?`,
+		nullableString(userID), id)
+	if err != nil {
+		return fmt.Errorf("store: update user_id: %w", err)
+	}
+	return nil
+}
+
 // UpdateSessionLastActive bumps last_active_at. Used by the cleanup pass to
 // flush in-memory activity to disk; not called on every Touch to avoid I/O.
 func (s *Store) UpdateSessionLastActive(ctx context.Context, id string, ts int64) error {

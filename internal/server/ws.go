@@ -69,16 +69,36 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 // sessionInfoMessage builds the event we send the client so it knows which
 // session it belongs to and with which role. Sent on connect and whenever
-// something relevant changes (share toggled, label updated, etc.).
+// something relevant changes (share toggled, label updated, user logged
+// in/out, etc.).
 func (s *Server) sessionInfoMessage(sess *sessions.Session, role sessions.Role) map[string]any {
-	return map[string]any{
+	msg := map[string]any{
 		"type":       "session_info",
 		"id":         sess.ID,
 		"mode":       sess.Mode.String(),
 		"role":       role.String(),
 		"label":      sess.Label(),
 		"view_token": sess.ViewToken(),
+		"user_id":    "",
+		"user_name":  "",
+		"user_email": "",
 	}
+	uid := sess.UserID()
+	if uid == "" {
+		return msg
+	}
+	st := s.manager.Store()
+	if st == nil {
+		return msg
+	}
+	u, err := st.GetUser(context.Background(), uid)
+	if err != nil {
+		return msg
+	}
+	msg["user_id"] = u.ID
+	msg["user_name"] = u.Name
+	msg["user_email"] = u.Email
+	return msg
 }
 
 // wsReadLoop receives commands from the client and dispatches them to the

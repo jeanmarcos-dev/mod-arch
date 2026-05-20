@@ -1,20 +1,34 @@
 <script setup lang="ts">
 import { useCpuStore } from '../stores/cpu';
+import { useAuthStore } from '../stores/auth';
 import { computed, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import ProgramPicker from './ProgramPicker.vue';
 
 const cpu = useCpuStore();
+const auth = useAuthStore();
+const router = useRouter();
 
 const modeLabel = computed(() => (cpu.mode === 3 ? 'USER' : 'KERNEL'));
 const modeClass = computed(() => (cpu.mode === 3 ? 'mode-user' : 'mode-kernel'));
 
-// Input local del alias. Espejo del sessionInfo.label pero editable; al
-// blur o enter, lo confirmamos al backend con setAlias.
+// The alias input mirrors sessionInfo.label and only shows for anonymous
+// owners; once a user is logged in, the read-only name pill replaces it.
 const aliasInput = ref(cpu.sessionInfo.label);
 watch(() => cpu.sessionInfo.label, (lab) => { aliasInput.value = lab; });
 function onAliasCommit() {
   const v = aliasInput.value.trim().slice(0, 32);
   if (v !== cpu.sessionInfo.label) cpu.setAlias(v);
+}
+
+const loggedIn = computed(() => Boolean(cpu.sessionInfo.user_name));
+
+function goToLogin() {
+  router.push('/login');
+}
+
+async function doLogout() {
+  await auth.logout();
 }
 
 function onLoad() {
@@ -27,10 +41,20 @@ defineEmits<{ (e: 'open-glossary'): void; (e: 'open-share'): void }>();
 <template>
   <div class="topbar">
     <div class="topbar-row">
+      <div
+        v-if="!cpu.isViewer() && loggedIn"
+        class="user-wrap"
+        :title="cpu.sessionInfo.user_email ? `Conectado como ${cpu.sessionInfo.user_name} · ${cpu.sessionInfo.user_email}` : `Conectado como ${cpu.sessionInfo.user_name}`"
+      >
+        <span class="user-icon">👤</span>
+        <span class="user-name">{{ cpu.sessionInfo.user_name }}</span>
+        <button class="btn-logout" @click="doLogout" title="Cerrar sesión y continuar de forma anónima">×</button>
+      </div>
+
       <label
-        v-if="!cpu.isViewer()"
+        v-else-if="!cpu.isViewer()"
         class="alias-wrap"
-        title="Identifíquese con un alias breve. Si comparte su sesión, este nombre aparece en el banner del espectador y en la lista pública."
+        title="Identifíquese con un alias breve. Si comparte su sesión, este nombre aparece en el banner del espectador y en la lista pública. También puede iniciar sesión con su correo para acceder desde otro dispositivo."
       >
         <span class="alias-icon">◉</span>
         <input
@@ -43,6 +67,7 @@ defineEmits<{ (e: 'open-glossary'): void; (e: 'open-share'): void }>();
           placeholder="su alias..."
           autocomplete="off"
         />
+        <button class="btn-login-mini" @click.prevent="goToLogin" title="Iniciar sesión con nombre y correo (opcional)">⤴</button>
       </label>
 
       <ProgramPicker />
@@ -231,6 +256,63 @@ defineEmits<{ (e: 'open-glossary'): void; (e: 'open-share'): void }>();
   color: var(--text-muted);
   font-style: italic;
   letter-spacing: 0;
+}
+
+.btn-login-mini {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 2px 6px;
+  min-width: 22px;
+  letter-spacing: 0;
+}
+
+.btn-login-mini:hover {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: rgba(255, 179, 71, 0.1);
+}
+
+/* Read-only identity pill shown when a user is authenticated. */
+.user-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 179, 71, 0.06);
+  border: 1px solid var(--amber);
+  padding: 0 8px 0 10px;
+  min-height: 32px;
+  max-width: 220px;
+  color: var(--amber);
+  font-size: 13px;
+}
+
+.user-icon {
+  font-size: 12px;
+}
+
+.user-name {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.btn-logout {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  min-width: 20px;
+  letter-spacing: 0;
+}
+
+.btn-logout:hover {
+  color: var(--red-soft);
+  border-color: var(--red-soft);
 }
 
 .config {

@@ -24,7 +24,7 @@ export type CpuEvent =
   | { type: 'process_state'; pid: number; state: string; reason?: string }
   | { type: 'syscall'; pid: number; num: number; name: string; args: number[]; result: number }
   | { type: 'console_out'; pid: number; bytes: number[]; text: string }
-  | { type: 'session_info'; id: string; mode: string; role: string; label: string; view_token: string }
+  | { type: 'session_info'; id: string; mode: string; role: string; label: string; view_token: string; user_id?: string; user_name?: string; user_email?: string }
   | { type: 'error'; message: string };
 
 export interface SessionInfo {
@@ -33,6 +33,9 @@ export interface SessionInfo {
   role: 'owner' | 'viewer' | 'none';
   label: string;
   view_token: string;
+  user_id: string;
+  user_name: string;
+  user_email: string;
 }
 
 export interface ProgramInfo {
@@ -111,7 +114,7 @@ export const useCpuStore = defineStore('cpu', () => {
 
   // ─── Sesión multi-tenant ────────────────────────────────────────────────
   // Llega vía evento session_info al conectar + cada vez que cambia (share/unshare).
-  const sessionInfo = ref<SessionInfo>({ id: '', mode: 'unknown', role: 'none', label: '', view_token: '' });
+  const sessionInfo = ref<SessionInfo>({ id: '', mode: 'unknown', role: 'none', label: '', view_token: '', user_id: '', user_name: '', user_email: '' });
   // Computed cómodos para el resto de la app.
   const isViewer = () => sessionInfo.value.role === 'viewer';
 
@@ -293,6 +296,9 @@ export const useCpuStore = defineStore('cpu', () => {
           role: ev.role as SessionInfo['role'],
           label: ev.label,
           view_token: ev.view_token,
+          user_id: ev.user_id ?? '',
+          user_name: ev.user_name ?? '',
+          user_email: ev.user_email ?? '',
         };
         if (ev.role === 'viewer') {
           pushLog(`▸ conectado como ESPECTADOR de "${ev.label || ev.id.slice(0, 6)}"`, 'cyan');

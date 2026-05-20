@@ -39,6 +39,17 @@ CREATE TABLE IF NOT EXISTS invites (
 
 CREATE INDEX IF NOT EXISTS idx_invites_expires_at ON invites(expires_at);
 
+CREATE TABLE IF NOT EXISTS magic_links (
+    token      TEXT PRIMARY KEY,
+    email      TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at    INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_magic_links_email   ON magic_links(email);
+CREATE INDEX IF NOT EXISTS idx_magic_links_expires ON magic_links(expires_at);
+
 CREATE TABLE IF NOT EXISTS audit_log (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     ts        INTEGER NOT NULL,

@@ -191,6 +191,39 @@ func TestPersist_CleanupFlushesLastActive(t *testing.T) {
 	}
 }
 
+func TestPersist_UserIDSurvivesRestart(t *testing.T) {
+	st := openFileStore(t)
+
+	// FK sessions.user_id → users.id requires a real user.
+	if err := st.CreateUser(t.Context(), store.UserRow{
+		ID: "u-42", Name: "Ada", CreatedAt: 1, LastLoginAt: 1,
+	}); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	m1 := NewManager(Config{Store: st})
+	sess, err := m1.Create(ModeFull)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	sess.SetUserID("u-42")
+
+	m2 := NewManager(Config{Store: st})
+	got := m2.Get(sess.ID)
+	if got == nil {
+		t.Fatalf("session lost")
+	}
+	if got.UserID() != "u-42" {
+		t.Errorf("UserID=%q, want u-42", got.UserID())
+	}
+
+	got.SetUserID("")
+	m3 := NewManager(Config{Store: st})
+	if again := m3.Get(sess.ID); again.UserID() != "" {
+		t.Errorf("UserID after detach = %q, want empty", again.UserID())
+	}
+}
+
 func openFileStore(t *testing.T) *store.Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "state.db")
