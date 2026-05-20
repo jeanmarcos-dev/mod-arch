@@ -50,11 +50,12 @@ func (c *CPU) dispatchIRQ(vector uint8, source string) error {
 	oldMode := c.Mode
 
 	// If coming from user, switch to the kernel stack. In real x86 this is
-	// done by consulting the TSS; here a single global kernel stack is enough.
+	// done by consulting the TSS, which is per-CPU; here each core carries its
+	// own KernelStackTop so concurrent traps land on separate frames.
 	if oldMode == ModeUser {
 		c.SavedUserESP = oldESP
 		c.SavedUserSS = c.R.SS
-		c.R.ESP = KernelStackTop
+		c.R.ESP = c.KernelStackTop
 		c.R.SS = SelKernelData
 	}
 

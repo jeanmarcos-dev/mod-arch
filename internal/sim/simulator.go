@@ -65,8 +65,9 @@ type Simulator struct {
 
 // Config holds the construction parameters for a Simulator.
 type Config struct {
-	Demos  []Demo
-	Logger *slog.Logger
+	Demos    []Demo
+	Logger   *slog.Logger
+	NumCores int // number of simulated CPU cores; clamped to [1, kernel.MaxCores]
 }
 
 // New builds a ready Simulator with no program loaded.
@@ -78,8 +79,12 @@ func New(cfg Config) *Simulator {
 	for _, d := range cfg.Demos {
 		progs[d.Name] = d
 	}
+	cores := cfg.NumCores
+	if cores < 1 {
+		cores = 1
+	}
 	return &Simulator{
-		kernel:   kernel.New(cpu.DefaultMemSize),
+		kernel:   kernel.NewMulti(cpu.DefaultMemSize, cores),
 		programs: progs,
 		clients:  make(map[*Client]struct{}),
 		logger:   cfg.Logger,
@@ -131,8 +136,8 @@ func (s *Simulator) LoadProgram(name string) error {
 func (s *Simulator) StepOnce() error {
 	s.mu.Lock()
 	evs, err := s.kernel.Step()
-	tick := s.kernel.CPU.Tick
-	halted := s.kernel.CPU.Halted
+	tick := s.kernel.BootCPU().Tick
+	halted := s.kernel.AllHalted()
 	s.mu.Unlock()
 	if err != nil {
 		s.Broadcast(map[string]any{"type": "error", "message": err.Error()})
@@ -176,7 +181,7 @@ func (s *Simulator) StartRun(hz int) {
 				return
 			case <-ticker.C:
 				s.mu.Lock()
-				halted := s.kernel.CPU.Halted
+				halted := s.kernel.AllHalted()
 				s.mu.Unlock()
 				if halted {
 					s.StopRun()
@@ -255,9 +260,19 @@ func (s *Simulator) Snapshot() map[string]any {
 }
 
 // snapshotLocked builds a state snapshot. The caller MUST hold s.mu.
+//
+// The top-level fields (regs, mode, halted, current_pid, …) mirror the boot
+// core so single-core demos and the existing frontend keep working unchanged.
+// The new "cores" array is the multicore-aware view: one entry per core with
+// its own regs/mode/halted/current_pid.
 func (s *Simulator) snapshotLocked() map[string]any {
-	c := s.kernel.CPU
+	boot := s.kernel.BootCore()
+	c := boot.CPU
 	r := c.R
+	cores := make([]map[string]any, 0, s.kernel.NumCores())
+	for _, core := range s.kernel.Cores {
+		cores = append(cores, coreSnapshot(core))
+	}
 	return map[string]any{
 		"type": "snapshot",
 		"regs": map[string]uint32{
@@ -270,17 +285,36 @@ func (s *Simulator) snapshotLocked() map[string]any {
 		"halted":        c.Halted,
 		"tick":          c.Tick,
 		"timer_quantum": s.kernel.TimerQuantum,
-		"current_pid":   s.kernel.CurrentPID,
-		"ready_queue":   append([]int(nil), s.kernel.ReadyQueue...),
+		"current_pid":   boot.CurrentPID,
+		"ready_queue":   s.kernel.Ready.Snapshot(),
 		"wait_queue":    s.waitQueueLocked(),
 		"procs":         s.processListLocked(),
 		"sources":       s.procSources,
+		"cores":         cores,
+		"num_cores":     s.kernel.NumCores(),
+	}
+}
+
+func coreSnapshot(core *kernel.Core) map[string]any {
+	r := core.CPU.R
+	return map[string]any{
+		"id": core.ID,
+		"regs": map[string]uint32{
+			"EAX": r.EAX, "EBX": r.EBX, "ECX": r.ECX, "EDX": r.EDX,
+			"ESI": r.ESI, "EDI": r.EDI, "ESP": r.ESP, "EBP": r.EBP,
+			"EIP": r.EIP, "EFLAGS": r.EFLAGS,
+		},
+		"segments":    map[string]uint16{"CS": r.CS, "DS": r.DS, "SS": r.SS},
+		"mode":        core.CPU.Mode,
+		"halted":      core.CPU.Halted,
+		"tick":        core.CPU.Tick,
+		"current_pid": core.CurrentPID,
 	}
 }
 
 func (s *Simulator) waitQueueLocked() []map[string]any {
 	list := make([]map[string]any, 0)
-	maxPID := max(s.kernel.CurrentPID, len(s.kernel.Processes))
+	maxPID := s.maxKnownPIDLocked()
 	for pid := 1; pid <= maxPID; pid++ {
 		p, ok := s.kernel.Processes[pid]
 		if !ok || p.State != "BLOCKED" {
@@ -297,7 +331,7 @@ func (s *Simulator) waitQueueLocked() []map[string]any {
 
 func (s *Simulator) processListLocked() []map[string]any {
 	list := make([]map[string]any, 0, len(s.kernel.Processes))
-	maxPID := max(s.kernel.CurrentPID, len(s.kernel.Processes))
+	maxPID := s.maxKnownPIDLocked()
 	for pid := 1; pid <= maxPID; pid++ {
 		p, ok := s.kernel.Processes[pid]
 		if !ok {
@@ -308,11 +342,24 @@ func (s *Simulator) processListLocked() []map[string]any {
 	return list
 }
 
+// maxKnownPIDLocked picks the larger of "highest PID currently running on any
+// core" and "size of the process table" so the iteration covers every PID
+// the kernel knows about even when some cores are idle.
+func (s *Simulator) maxKnownPIDLocked() int {
+	m := len(s.kernel.Processes)
+	for _, c := range s.kernel.Cores {
+		if c.CurrentPID > m {
+			m = c.CurrentPID
+		}
+	}
+	return m
+}
+
 // MemorySlice returns a copy of the bytes in [addr, addr+length).
 func (s *Simulator) MemorySlice(addr, length uint32) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	mem := s.kernel.CPU.Mem.Bytes
+	mem := s.kernel.Mem.Bytes
 	if int(addr) >= len(mem) {
 		return nil, fmt.Errorf("addr out of range")
 	}

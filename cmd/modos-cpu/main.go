@@ -99,6 +99,7 @@ func runServer(args []string) {
 	defer func() { _ = st.Close() }()
 	logger.Info("state db ready", "path", dbPath)
 
+	numCores := envInt("MODOS_CPU_CORES", 1)
 	manager := sessions.NewManager(sessions.Config{
 		Demos:         demos,
 		Logger:        logger,
@@ -107,7 +108,9 @@ func runServer(args []string) {
 		MaxPrivileged: envInt("MAX_PRIVILEGED_SESSIONS", 5),
 		IdleTTL:       envDuration("SESSION_TTL", 30*time.Minute),
 		InviteTTL:     envDuration("INVITE_TTL", 24*time.Hour),
+		NumCores:      numCores,
 	})
+	logger.Info("cpu cores configured", "num_cores", numCores)
 
 	s := server.New(server.Config{
 		Manager:  manager,
@@ -166,8 +169,9 @@ func runCLI(args []string) {
 	fmt.Printf("▸ %s — quantum=%d · %d procesos\n", demo.Name, *quantum, len(demo.Procs))
 	fmt.Printf("  %s\n\n", demo.Description)
 
+	bootCPU := k.BootCPU()
 	var consoleOut []byte
-	for step := 0; step < *maxSteps && !k.CPU.Halted; step++ {
+	for step := 0; step < *maxSteps && !bootCPU.Halted; step++ {
 		evs, err := k.Step()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "step %d error: %v\n", step, err)
@@ -183,14 +187,14 @@ func runCLI(args []string) {
 		}
 	}
 
-	if !k.CPU.Halted {
+	if !bootCPU.Halted {
 		fmt.Fprintf(os.Stderr, "\n⚠ no halted tras %d steps\n", *maxSteps)
 		os.Exit(1)
 	}
 
 	fmt.Println()
-	dumpRegs(k.CPU)
-	fmt.Printf("\n▸ HALT @ EIP=0x%08X tras %d ticks\n", k.CPU.R.EIP, k.CPU.Tick)
+	dumpRegs(bootCPU)
+	fmt.Printf("\n▸ HALT @ EIP=0x%08X tras %d ticks\n", bootCPU.R.EIP, bootCPU.Tick)
 	if len(consoleOut) > 0 {
 		fmt.Printf("\n▸ CONSOLE OUTPUT (%d bytes):\n----------\n%s----------\n", len(consoleOut), string(consoleOut))
 	}

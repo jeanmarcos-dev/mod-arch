@@ -89,11 +89,11 @@ func TestSyscall_ExitHalts(t *testing.T) {
 		if _, err := k.Step(); err != nil {
 			t.Fatalf("step %d: %v", i, err)
 		}
-		if k.CPU.Halted {
+		if k.BootCPU().Halted {
 			break
 		}
 	}
-	if !k.CPU.Halted {
+	if !k.BootCPU().Halted {
 		t.Fatalf("CPU did not halt after sys_exit within %d steps", maxSteps)
 	}
 	if k.Processes[1].State != StateZombie {
@@ -117,12 +117,12 @@ func TestSyscall_ExitSchedulesNext(t *testing.T) {
 		if _, err := k.Step(); err != nil {
 			t.Fatalf("step %d: %v", i, err)
 		}
-		if k.CurrentPID == 2 {
+		if k.BootCore().CurrentPID == 2 {
 			break
 		}
 	}
-	if k.CurrentPID != 2 {
-		t.Fatalf("CurrentPID = %d, want 2 (P1 exited and should yield to P2)", k.CurrentPID)
+	if k.BootCore().CurrentPID != 2 {
+		t.Fatalf("CurrentPID = %d, want 2 (P1 exited and should yield to P2)", k.BootCore().CurrentPID)
 	}
 	if k.Processes[1].State != StateZombie {
 		t.Errorf("P1 state = %s, want ZOMBIE", k.Processes[1].State)

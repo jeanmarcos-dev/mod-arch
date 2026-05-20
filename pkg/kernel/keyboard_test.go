@@ -39,10 +39,10 @@ func TestKeyboard_BlocksProcessIfEmpty(t *testing.T) {
 	if k.Processes[1].BlockedOn != "keyboard" {
 		t.Errorf("P1 reason = %q, want keyboard", k.Processes[1].BlockedOn)
 	}
-	if !k.CPU.Halted {
+	if !k.BootCPU().Halted {
 		t.Error("CPU should be HALTED waiting for an IRQ")
 	}
-	if !k.CPU.FlagOn(cpu.FlagIF) {
+	if !k.BootCPU().FlagOn(cpu.FlagIF) {
 		t.Error("IF should be on (HALT waiting for IRQ)")
 	}
 }
@@ -77,11 +77,11 @@ func TestKeyboard_PushKeyWakesProcess(t *testing.T) {
 	if k.Processes[1].State != StateRun {
 		t.Errorf("P1 state after IRQ = %s, want RUN", k.Processes[1].State)
 	}
-	if k.CPU.R.EAX != 1 {
-		t.Errorf("EAX after read = %d, want 1 (bytes read)", k.CPU.R.EAX)
+	if k.BootCPU().R.EAX != 1 {
+		t.Errorf("EAX after read = %d, want 1 (bytes read)", k.BootCPU().R.EAX)
 	}
 	// Verify the byte 'a' landed at the buffer address.
-	b := k.CPU.Mem.Bytes[0x33FFE0]
+	b := k.BootCPU().Mem.Bytes[0x33FFE0]
 	if b != 'a' {
 		t.Errorf("buf @ 0x33FFE0 = 0x%X, want 0x%X ('a')", b, 'a')
 	}

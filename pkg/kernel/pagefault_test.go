@@ -29,7 +29,7 @@ func TestPageFault_KillsProcessSingle(t *testing.T) {
 				pfEv = &pe
 			}
 		}
-		if k.CPU.Halted {
+		if k.BootCPU().Halted {
 			break
 		}
 	}
@@ -39,7 +39,7 @@ func TestPageFault_KillsProcessSingle(t *testing.T) {
 	if pfEv.Addr != 0x100000 {
 		t.Errorf("PageFault addr = 0x%X, want 0x100000", pfEv.Addr)
 	}
-	if !k.CPU.Halted {
+	if !k.BootCPU().Halted {
 		t.Error("CPU should be halted (only process died)")
 	}
 	if k.Processes[1].State != StateZombie {
@@ -60,7 +60,7 @@ func TestPageFault_KillsProcessSwitchesToNext(t *testing.T) {
 		if _, err := k.Step(); err != nil {
 			t.Fatalf("step %d: %v", i, err)
 		}
-		if k.CurrentPID == 2 && k.Processes[1].State == StateZombie {
+		if k.BootCore().CurrentPID == 2 && k.Processes[1].State == StateZombie {
 			break
 		}
 	}
@@ -71,13 +71,13 @@ func TestPageFault_KillsProcessSwitchesToNext(t *testing.T) {
 	if k.Processes[1].BlockedOn != "page_fault" {
 		t.Errorf("P1 reason = %q, want page_fault", k.Processes[1].BlockedOn)
 	}
-	if k.CurrentPID != 2 {
-		t.Errorf("CurrentPID = %d, want 2 (P2 takes the CPU)", k.CurrentPID)
+	if k.BootCore().CurrentPID != 2 {
+		t.Errorf("CurrentPID = %d, want 2 (P2 takes the CPU)", k.BootCore().CurrentPID)
 	}
 	if k.Processes[2].State != StateRun {
 		t.Errorf("P2 state = %s, want RUN", k.Processes[2].State)
 	}
-	if k.CPU.Halted {
+	if k.BootCPU().Halted {
 		t.Error("CPU should NOT be halted (P2 is still alive)")
 	}
 }
@@ -95,7 +95,7 @@ func TestPageFault_UserCannotReadKernelEither(t *testing.T) {
 		if _, err := k.Step(); err != nil {
 			t.Fatal(err)
 		}
-		if k.CPU.Halted {
+		if k.BootCPU().Halted {
 			break
 		}
 	}

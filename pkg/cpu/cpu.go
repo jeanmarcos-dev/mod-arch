@@ -80,6 +80,12 @@ type CPU struct {
 	SavedUserESP uint32
 	SavedUserSS  uint16
 
+	// KernelStackTop is the initial ESP loaded on dispatchIRQ from user mode.
+	// In real x86 the value comes from the TSS, which is per-CPU; the kernel
+	// gives each core its own region so concurrent traps do not stomp each
+	// other's interrupt frames.
+	KernelStackTop uint32
+
 	// events buffers events emitted in the current step. Cleared at the start
 	// of each Step and consumed by the caller at the end.
 	events []Event
@@ -89,7 +95,19 @@ type CPU struct {
 // caller to configure (CS/DS/SS, EIP, ESP, initial mode).
 func New(memSize int) *CPU {
 	return &CPU{
-		Mem: NewMemory(memSize),
+		Mem:            NewMemory(memSize),
+		KernelStackTop: KernelStackTop,
+	}
+}
+
+// NewWithMemory builds a CPU that shares a Memory instance and uses a
+// caller-supplied kernel stack region. Used by the kernel to spin up
+// additional cores after the boot CPU: every core sees the same physical RAM
+// but lands on its own kernel stack on trap entry.
+func NewWithMemory(mem *Memory, kernelStackTop uint32) *CPU {
+	return &CPU{
+		Mem:            mem,
+		KernelStackTop: kernelStackTop,
 	}
 }
 

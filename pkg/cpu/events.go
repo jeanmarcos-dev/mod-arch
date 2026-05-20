@@ -172,3 +172,26 @@ type EventConsoleOut struct {
 
 // Tag returns the event tag.
 func (EventConsoleOut) Tag() string { return "console_out" }
+
+// EventCoreAssign is emitted when a core starts executing a PID, either at
+// bootstrap or after a scheduling decision. The frontend can use it to draw
+// which PID lives on which core in multicore demos.
+type EventCoreAssign struct {
+	CoreID int `json:"core_id"`
+	PID    int `json:"pid"`
+}
+
+// Tag returns the event tag.
+func (EventCoreAssign) Tag() string { return "core_assign" }
+
+// EventCoreRelease is emitted when a core stops executing a PID — either
+// because the process exited, blocked, or got preempted with no replacement
+// available.
+type EventCoreRelease struct {
+	CoreID int    `json:"core_id"`
+	PID    int    `json:"pid"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// Tag returns the event tag.
+func (EventCoreRelease) Tag() string { return "core_release" }

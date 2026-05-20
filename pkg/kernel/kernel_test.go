@@ -65,8 +65,8 @@ func TestSoftInt_EntersKernel(t *testing.T) {
 		t.Fatalf("step int 0x80: %v", err)
 	}
 
-	if k.CPU.Mode != cpu.ModeKernel {
-		t.Fatalf("after int 0x80, mode = %d, want kernel(0)", k.CPU.Mode)
+	if k.BootCPU().Mode != cpu.ModeKernel {
+		t.Fatalf("after int 0x80, mode = %d, want kernel(0)", k.BootCPU().Mode)
 	}
 
 	irq, ok := findEvent[cpu.EventIRQFire](evs)
@@ -85,16 +85,16 @@ func TestSoftInt_EntersKernel(t *testing.T) {
 		t.Errorf("ModeSwitch = %+v", ms)
 	}
 
-	if k.CPU.R.EIP != cpu.AddrKernelText+0x40 {
-		t.Errorf("EIP = 0x%X, want 0x%X (syscall handler)", k.CPU.R.EIP, cpu.AddrKernelText+0x40)
+	if k.BootCPU().R.EIP != cpu.AddrKernelText+0x40 {
+		t.Errorf("EIP = 0x%X, want 0x%X (syscall handler)", k.BootCPU().R.EIP, cpu.AddrKernelText+0x40)
 	}
 
-	if k.CPU.FlagOn(cpu.FlagIF) {
+	if k.BootCPU().FlagOn(cpu.FlagIF) {
 		t.Error("IF should be off after dispatch")
 	}
 
-	if k.CPU.R.ESP > cpu.KernelStackTop || k.CPU.R.ESP < cpu.AddrKernelBase {
-		t.Errorf("ESP = 0x%X, does not look like the kernel stack", k.CPU.R.ESP)
+	if k.BootCPU().R.ESP > cpu.KernelStackTop || k.BootCPU().R.ESP < cpu.AddrKernelBase {
+		t.Errorf("ESP = 0x%X, does not look like the kernel stack", k.BootCPU().R.ESP)
 	}
 }
 
@@ -107,13 +107,13 @@ func TestIRET_ReturnsToUser(t *testing.T) {
 		0xF4, // hlt
 	})
 
-	userEIPBeforeINT := k.CPU.R.EIP
-	userESPBeforeINT := k.CPU.R.ESP
+	userEIPBeforeINT := k.BootCPU().R.EIP
+	userESPBeforeINT := k.BootCPU().R.ESP
 
 	if _, err := k.Step(); err != nil {
 		t.Fatal(err)
 	}
-	if k.CPU.Mode != cpu.ModeKernel {
+	if k.BootCPU().Mode != cpu.ModeKernel {
 		t.Fatalf("should be in kernel after int")
 	}
 
@@ -125,15 +125,15 @@ func TestIRET_ReturnsToUser(t *testing.T) {
 		}
 	}
 
-	if k.CPU.Mode != cpu.ModeUser {
-		t.Errorf("after IRET mode = %d, want user(3)", k.CPU.Mode)
+	if k.BootCPU().Mode != cpu.ModeUser {
+		t.Errorf("after IRET mode = %d, want user(3)", k.BootCPU().Mode)
 	}
 	// int 0x80 is 2 bytes; return EIP = userEIPBeforeINT + 2
-	if k.CPU.R.EIP != userEIPBeforeINT+2 {
-		t.Errorf("EIP = 0x%X, want 0x%X (instruction after int)", k.CPU.R.EIP, userEIPBeforeINT+2)
+	if k.BootCPU().R.EIP != userEIPBeforeINT+2 {
+		t.Errorf("EIP = 0x%X, want 0x%X (instruction after int)", k.BootCPU().R.EIP, userEIPBeforeINT+2)
 	}
-	if k.CPU.R.ESP != userESPBeforeINT {
-		t.Errorf("user ESP = 0x%X, want 0x%X (restored)", k.CPU.R.ESP, userESPBeforeINT)
+	if k.BootCPU().R.ESP != userESPBeforeINT {
+		t.Errorf("user ESP = 0x%X, want 0x%X (restored)", k.BootCPU().R.ESP, userESPBeforeINT)
 	}
 }
 
@@ -173,7 +173,7 @@ func TestTimer_OnlyFiresWithIFEnabled(t *testing.T) {
 	// to be re-interrupted).
 	k := newTestKernel(t, []byte{0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0xF4})
 	k.TimerQuantum = 4
-	k.CPU.FlagSet(cpu.FlagIF, false)
+	k.BootCPU().FlagSet(cpu.FlagIF, false)
 
 	// The timer will still queue (PendingIRQs grows) but the CPU must not
 	// dispatch while IF=0.
@@ -202,11 +202,11 @@ func TestAddProcess_FirstIsRun(t *testing.T) {
 	if pid != 1 {
 		t.Errorf("first PID = %d, want 1", pid)
 	}
-	if k.CurrentPID != 1 {
-		t.Errorf("CurrentPID = %d, want 1", k.CurrentPID)
+	if k.BootCore().CurrentPID != 1 {
+		t.Errorf("CurrentPID = %d, want 1", k.BootCore().CurrentPID)
 	}
-	if len(k.ReadyQueue) != 0 {
-		t.Errorf("ready queue should be empty, got: %v", k.ReadyQueue)
+	if k.Ready.Len() != 0 {
+		t.Errorf("ready queue should be empty, got: %v", k.Ready.Snapshot())
 	}
 	if k.Processes[1].State != StateRun {
 		t.Errorf("state = %s, want RUN", k.Processes[1].State)
@@ -218,11 +218,11 @@ func TestAddProcess_SecondIsReady(t *testing.T) {
 	_, _ = k.AddProcess("p1", []byte{0x90, 0xF4})
 	_, _ = k.AddProcess("p2", []byte{0x90, 0xF4})
 
-	if k.CurrentPID != 1 {
-		t.Errorf("CurrentPID = %d, want 1 (p2 should be in ready queue)", k.CurrentPID)
+	if k.BootCore().CurrentPID != 1 {
+		t.Errorf("CurrentPID = %d, want 1 (p2 should be in ready queue)", k.BootCore().CurrentPID)
 	}
-	if len(k.ReadyQueue) != 1 || k.ReadyQueue[0] != 2 {
-		t.Errorf("ready queue = %v, want [2]", k.ReadyQueue)
+	if snap := k.Ready.Snapshot(); len(snap) != 1 || snap[0] != 2 {
+		t.Errorf("ready queue = %v, want [2]", snap)
 	}
 	if k.Processes[2].State != StateReady {
 		t.Errorf("p2 state = %s, want READY", k.Processes[2].State)
@@ -258,12 +258,12 @@ func TestContextSwitch_TwoCounters(t *testing.T) {
 	// The running process keeps its regs live on the CPU; the other lives
 	// in its PCB.
 	var eaxP1, ebxP2 uint32
-	if k.CurrentPID == 1 {
-		eaxP1 = k.CPU.R.EAX
+	if k.BootCore().CurrentPID == 1 {
+		eaxP1 = k.BootCPU().R.EAX
 		ebxP2 = p2.Regs.EBX
 	} else {
 		eaxP1 = p1.Regs.EAX
-		ebxP2 = k.CPU.R.EBX
+		ebxP2 = k.BootCPU().R.EBX
 	}
 
 	if eaxP1 == 0 {
@@ -344,7 +344,7 @@ func TestContextSwitch_RegsArePreserved(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !switchedToP2 && k.CurrentPID == 2 {
+		if !switchedToP2 && k.BootCore().CurrentPID == 2 {
 			eaxP1WhenPreempted = k.Processes[1].Regs.EAX
 			switchedToP2 = true
 		}
@@ -362,11 +362,11 @@ func TestContextSwitch_RegsArePreserved(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if k.CurrentPID == 1 {
+		if k.BootCore().CurrentPID == 1 {
 			// p1 resumed; EAX should be >= the saved value (it kept growing).
-			if k.CPU.R.EAX < eaxP1WhenPreempted {
+			if k.BootCPU().R.EAX < eaxP1WhenPreempted {
 				t.Errorf("p1 EAX on resume = %d, want >= %d (not restored)",
-					k.CPU.R.EAX, eaxP1WhenPreempted)
+					k.BootCPU().R.EAX, eaxP1WhenPreempted)
 			}
 			return
 		}

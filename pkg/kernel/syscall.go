@@ -30,16 +30,17 @@ const (
 	FdStderr uint32 = 2
 )
 
-// handleSyscall dispatches based on EAX. Called from runHandlerLogic when an
-// IRQ on vector 0x80 arrives with source SW.
+// handleSyscall dispatches based on EAX of the calling core. Called from
+// runHandlerLogic when an IRQ on vector 0x80 arrives with source SW.
 //
-// Returns the events to propagate. The CPU EAX is left holding the result so
-// that when the in-memory handler runs IRET the user sees it (same as Linux).
-func (k *Kernel) handleSyscall() []cpu.Event {
-	num := k.CPU.R.EAX
-	arg1 := k.CPU.R.EBX
-	arg2 := k.CPU.R.ECX
-	arg3 := k.CPU.R.EDX
+// Returns the events to propagate. The core's CPU EAX is left holding the
+// result so that when the in-memory handler runs IRET the user sees it (same
+// as Linux).
+func (k *Kernel) handleSyscall(core *Core) []cpu.Event {
+	num := core.CPU.R.EAX
+	arg1 := core.CPU.R.EBX
+	arg2 := core.CPU.R.ECX
+	arg3 := core.CPU.R.EDX
 
 	var out []cpu.Event
 	var result uint32
@@ -48,17 +49,17 @@ func (k *Kernel) handleSyscall() []cpu.Event {
 	switch num {
 	case SysExit:
 		name = "exit"
-		out = append(out, k.sysExit(arg1)...)
+		out = append(out, k.sysExit(core, arg1)...)
 		result = 0
 	case SysWrite:
 		name = "write"
 		var subEvs []cpu.Event
-		result, subEvs = k.sysWrite(arg1, arg2, arg3)
+		result, subEvs = k.sysWrite(core, arg1, arg2, arg3)
 		out = append(out, subEvs...)
 	case SysRead:
 		name = "read"
 		var subEvs []cpu.Event
-		result, subEvs = k.sysRead(arg1, arg2, arg3)
+		result, subEvs = k.sysRead(core, arg1, arg2, arg3)
 		out = append(out, subEvs...)
 	default:
 		// Real Linux returns -ENOSYS (-38) for unknown syscalls.
@@ -66,11 +67,11 @@ func (k *Kernel) handleSyscall() []cpu.Event {
 		result = ^uint32(0)
 	}
 
-	k.CPU.R.EAX = result
+	core.CPU.R.EAX = result
 
 	// Emit the main syscall event with the full result.
 	syscallEv := cpu.EventSyscall{
-		PID:    k.CurrentPID,
+		PID:    core.CurrentPID,
 		Num:    num,
 		Name:   name,
 		Args:   []uint32{arg1, arg2, arg3},
@@ -91,7 +92,7 @@ func (k *Kernel) handleSyscall() []cpu.Event {
 // validate the user is allowed to read the range to prevent a malicious
 // pointer into kernel memory; we skip that check because this demo is a
 // pedagogical tool, not a security sandbox.
-func (k *Kernel) sysWrite(fd, bufAddr, count uint32) (uint32, []cpu.Event) {
+func (k *Kernel) sysWrite(core *Core, fd, bufAddr, count uint32) (uint32, []cpu.Event) {
 	if fd != FdStdout && fd != FdStderr {
 		return ^uint32(0), nil
 	}
@@ -101,10 +102,10 @@ func (k *Kernel) sysWrite(fd, bufAddr, count uint32) (uint32, []cpu.Event) {
 
 	bytes := make([]byte, count)
 	for i := range count {
-		// Pass k.CPU (not nil) so mem_read events are emitted while the
+		// Pass core.CPU (not nil) so mem_read events are emitted while the
 		// kernel reads the user's buffer. The narrator layer relies on
 		// these to draw bytes flying from user memory into the console.
-		b, err := k.CPU.Mem.Read8(k.CPU, bufAddr+i, cpu.ModeKernel)
+		b, err := k.Mem.Read8(core.CPU, bufAddr+i, cpu.ModeKernel)
 		if err != nil {
 			// Real Linux returns -EFAULT here.
 			return ^uint32(0), nil
@@ -113,18 +114,18 @@ func (k *Kernel) sysWrite(fd, bufAddr, count uint32) (uint32, []cpu.Event) {
 	}
 
 	ev := cpu.EventConsoleOut{
-		PID:   k.CurrentPID,
+		PID:   core.CurrentPID,
 		Bytes: append([]byte(nil), bytes...),
 		Text:  string(bytes),
 	}
 	return count, []cpu.Event{ev}
 }
 
-// sysExit stores the exit code in the PCB and delegates to killCurrent for the
-// cleanup (zombie + possible context switch or halt).
-func (k *Kernel) sysExit(code uint32) []cpu.Event {
-	if pcb := k.Processes[k.CurrentPID]; pcb != nil {
+// sysExit stores the exit code in the PCB and delegates to killCurrent for
+// the cleanup (zombie + possible context switch or halt) on the calling core.
+func (k *Kernel) sysExit(core *Core, code uint32) []cpu.Event {
+	if pcb := k.Processes[core.CurrentPID]; pcb != nil {
 		pcb.Regs.EAX = code
 	}
-	return k.killCurrent("exit")
+	return k.killCurrent(core, "exit")
 }

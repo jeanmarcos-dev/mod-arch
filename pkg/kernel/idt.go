@@ -40,27 +40,28 @@ func (k *Kernel) InstallDefaultIDT() {
 		IRQSyscall:     cpu.AddrKernelText + 0x40,
 	}
 
-	writeHandler(k.CPU, handlerAddrs[IRQDivideError], noopHandler)
-	writeHandler(k.CPU, handlerAddrs[IRQPageFault], pageFaultHandler)
-	writeHandler(k.CPU, handlerAddrs[IRQTimer], timerHandler)
-	writeHandler(k.CPU, handlerAddrs[IRQKeyboard], keyboardHandler)
-	writeHandler(k.CPU, handlerAddrs[IRQSyscall], syscallHandler)
+	boot := k.BootCPU()
+	writeHandler(boot, handlerAddrs[IRQDivideError], noopHandler)
+	writeHandler(boot, handlerAddrs[IRQPageFault], pageFaultHandler)
+	writeHandler(boot, handlerAddrs[IRQTimer], timerHandler)
+	writeHandler(boot, handlerAddrs[IRQKeyboard], keyboardHandler)
+	writeHandler(boot, handlerAddrs[IRQSyscall], syscallHandler)
 
 	for vec, addr := range handlerAddrs {
-		setIDTEntry(k.CPU, vec, addr)
+		setIDTEntry(boot, vec, addr)
 	}
 }
 
 // SetHandler replaces the handler address for a given vector. Useful for tests
 // and for future, more sophisticated handlers.
 func (k *Kernel) SetHandler(vector uint8, addr uint32) {
-	setIDTEntry(k.CPU, vector, addr)
+	setIDTEntry(k.BootCPU(), vector, addr)
 }
 
 // HandlerAddr returns the address installed for a given vector.
 func (k *Kernel) HandlerAddr(vector uint8) uint32 {
 	idtAddr := cpu.AddrIDT + uint32(vector)*4
-	return binary.LittleEndian.Uint32(k.CPU.Mem.Bytes[idtAddr : idtAddr+4])
+	return binary.LittleEndian.Uint32(k.Mem.Bytes[idtAddr : idtAddr+4])
 }
 
 // writeHandler copies handler bytes to a kernel address. The permission check

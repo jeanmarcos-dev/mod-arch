@@ -192,6 +192,7 @@ type Config struct {
 	MaxPrivileged int           // default 5
 	IdleTTL       time.Duration // default 30 min
 	InviteTTL     time.Duration // default 24 h
+	NumCores      int           // number of CPU cores per spawned Simulator; default 1
 }
 
 // Invite is a single-use token that allows the creation of a ModePrivileged
@@ -221,6 +222,7 @@ type Manager struct {
 	maxPrivileged int
 	idleTTL       time.Duration
 	inviteTTL     time.Duration
+	numCores      int
 
 	// Metrics — read by the admin dashboard.
 	metricsMu      sync.Mutex
@@ -246,6 +248,9 @@ func NewManager(cfg Config) *Manager {
 	if cfg.InviteTTL <= 0 {
 		cfg.InviteTTL = 24 * time.Hour
 	}
+	if cfg.NumCores <= 0 {
+		cfg.NumCores = 1
+	}
 	m := &Manager{
 		sessions:      make(map[string]*Session),
 		byViewToken:   make(map[string]*Session),
@@ -257,6 +262,7 @@ func NewManager(cfg Config) *Manager {
 		maxPrivileged: cfg.MaxPrivileged,
 		idleTTL:       cfg.IdleTTL,
 		inviteTTL:     cfg.InviteTTL,
+		numCores:      cfg.NumCores,
 	}
 	if m.store != nil {
 		m.hydrateFromStore()
@@ -296,7 +302,7 @@ func (m *Manager) hydrateFromStore() {
 func (m *Manager) newSessionFromRow(row store.SessionRow) *Session {
 	return &Session{
 		ID:           row.ID,
-		Sim:          sim.New(sim.Config{Demos: m.demos, Logger: m.logger}),
+		Sim:          sim.New(sim.Config{Demos: m.demos, Logger: m.logger, NumCores: m.numCores}),
 		Mode:         modeFromString(row.Mode),
 		CreatedAt:    time.Unix(row.CreatedAt, 0),
 		mgr:          m,
@@ -339,7 +345,7 @@ func (m *Manager) Create(mode Mode) (*Session, error) {
 	now := time.Now()
 	sess := &Session{
 		ID:           newID(),
-		Sim:          sim.New(sim.Config{Demos: m.demos, Logger: m.logger}),
+		Sim:          sim.New(sim.Config{Demos: m.demos, Logger: m.logger, NumCores: m.numCores}),
 		Mode:         mode,
 		CreatedAt:    now,
 		mgr:          m,

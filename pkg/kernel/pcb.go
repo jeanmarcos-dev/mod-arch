@@ -59,6 +59,10 @@ type PCB struct {
 	CodeBase uint32
 	CodeSize uint32
 	StackTop uint32
+
+	// Core is the ID of the core that currently owns this PCB (RUN), or -1
+	// when the process is READY/BLOCKED/ZOMBIE and no core holds it.
+	Core int
 }
 
 // Snapshot returns a JSON-friendly representation of the PCB for the frontend.

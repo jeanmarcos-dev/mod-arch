@@ -21,13 +21,13 @@ func ExampleKernel_AddProcess() {
 		return
 	}
 
-	for !k.CPU.Halted {
+	for !k.BootCPU().Halted {
 		if _, err := k.Step(); err != nil {
 			fmt.Println("step:", err)
 			return
 		}
 	}
 
-	fmt.Printf("EAX=0x%X halted=%v\n", k.CPU.R.EAX, k.CPU.Halted)
+	fmt.Printf("EAX=0x%X halted=%v\n", k.BootCPU().R.EAX, k.BootCPU().Halted)
 	// Output: EAX=0xC0FFEE halted=true
 }

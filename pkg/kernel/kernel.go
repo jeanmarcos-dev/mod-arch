@@ -17,6 +17,17 @@ const (
 	ProcStackSize = 0x40000
 )
 
+// MaxCores caps how many simulated cores Kernel.NewMulti will spin up. The
+// limit is a pedagogical choice: 1–4 covers the demos cleanly without forcing
+// the UI to handle arbitrarily many CPU panels.
+const MaxCores = 4
+
+// perCoreKernelStackSize is the slice of the kernel stack reserved per core,
+// carved out of the existing kernel region. Cores grow their stacks downward
+// from their own top, so a 64 KB slice is roomy for the simulator's tiny
+// interrupt frames while still keeping all 4 cores well above AddrKernelText.
+const perCoreKernelStackSize = 0x10000
+
 // processCodeBase returns the base address where the code of the given PID
 // is loaded. PID 1 -> 0x200000, PID 2 -> 0x240000, etc.
 func processCodeBase(pid int) uint32 {
@@ -32,20 +43,25 @@ func processStackTop(pid int) uint32 {
 	return cpu.AddrUserStack + uint32(pid)*ProcStackSize - 0x10
 }
 
-// Kernel wraps the CPU and adds the OS software decisions.
+// Kernel wraps one or more CPU cores and adds the OS software decisions.
 type Kernel struct {
-	CPU *cpu.CPU
+	// Cores is the source of truth for execution state. Cores[0] is the boot
+	// core; later cores come up idle until the scheduler hands them work.
+	Cores []*Core
 
-	// TimerQuantum is the number of CPU ticks between IRQ 0x20 fires.
-	// 0 disables the timer. Default: 8.
+	// Mem is the shared physical memory all cores read and write through.
+	Mem *cpu.Memory
+
+	// TimerQuantum is the number of CPU ticks between IRQ 0x20 fires on each
+	// core. 0 disables the timer. Default: 8.
 	TimerQuantum int
 
-	lastTimerFiredAt uint64
+	// Processes is the global process table keyed by PID.
+	Processes map[int]*PCB
 
-	// Processes is the process table keyed by PID.
-	Processes  map[int]*PCB
-	CurrentPID int
-	ReadyQueue []int
+	// Ready is the shared FIFO of READY PIDs waiting for an idle core. It is
+	// guarded by its own mutex because multicore demos pop concurrently.
+	Ready *ReadyQueue
 
 	// KeyboardBuf holds pending bytes; blockedReads is the FIFO queue of
 	// processes waiting in sys_read. A queue is required because several
@@ -56,28 +72,97 @@ type Kernel struct {
 	nextPID int
 }
 
-// New builds a Kernel with its CPU, installs the default IDT, and loads no
-// processes.
+// New builds a single-core Kernel — the original behavior. Delegates to
+// NewMulti with numCores=1 so the test suite and existing call sites stay
+// unchanged.
 func New(memSize int) *Kernel {
+	return NewMulti(memSize, 1)
+}
+
+// NewMulti builds a Kernel with the requested number of cores (clamped to
+// [1, MaxCores]). All cores share the same physical memory and the same IDT;
+// only the register file, pending IRQ queue, and kernel stack pointer are
+// per-core.
+func NewMulti(memSize, numCores int) *Kernel {
+	if numCores < 1 {
+		numCores = 1
+	}
+	if numCores > MaxCores {
+		numCores = MaxCores
+	}
+
+	mem := cpu.NewMemory(memSize)
+	cores := make([]*Core, numCores)
+	for i := range cores {
+		stackTop := cpu.KernelStackTop - uint32(i)*perCoreKernelStackSize
+		var c *cpu.CPU
+		if i == 0 {
+			// The boot core takes ownership of the freshly-allocated memory so
+			// the resulting CPU is exactly equivalent to cpu.New(memSize).
+			c = cpu.New(memSize)
+			c.Mem = mem
+			c.KernelStackTop = stackTop
+		} else {
+			c = cpu.NewWithMemory(mem, stackTop)
+			// Non-boot cores start halted; they wake up when the scheduler
+			// assigns them a process. Without this AllHalted would never be
+			// true for an N-core kernel that only ran on one core.
+			c.Halted = true
+		}
+		cores[i] = &Core{ID: i, CPU: c}
+	}
+
 	k := &Kernel{
-		CPU:          cpu.New(memSize),
+		Cores:        cores,
+		Mem:          mem,
 		TimerQuantum: 8,
 		Processes:    make(map[int]*PCB),
+		Ready:        NewReadyQueue(),
 		nextPID:      1,
 	}
 	k.InstallDefaultIDT()
 	return k
 }
 
+// BootCPU returns the CPU of the boot core (Cores[0]). Convenience accessor
+// for callers that only care about single-core state: the CLI tracer, the
+// snapshot helpers, and the IDT installer.
+func (k *Kernel) BootCPU() *cpu.CPU {
+	return k.Cores[0].CPU
+}
+
+// BootCore returns Cores[0] — the boot core.
+func (k *Kernel) BootCore() *Core {
+	return k.Cores[0]
+}
+
+// NumCores reports how many cores this kernel owns.
+func (k *Kernel) NumCores() int {
+	return len(k.Cores)
+}
+
+// AllHalted is true when every core has Halted=true. The run loop in sim
+// uses it to decide when to stop the ticker.
+func (k *Kernel) AllHalted() bool {
+	for _, c := range k.Cores {
+		if !c.CPU.Halted {
+			return false
+		}
+	}
+	return true
+}
+
 // Reset clears the process table and reinstalls the IDT. Useful for loading a
-// fresh scenario from scratch.
+// fresh scenario from scratch. All cores go back to their initial state.
 func (k *Kernel) Reset() {
-	k.CPU.Reset()
+	for _, c := range k.Cores {
+		c.CPU.Reset()
+		c.CurrentPID = 0
+		c.lastTimerFiredAt = 0
+	}
 	k.Processes = make(map[int]*PCB)
-	k.ReadyQueue = nil
-	k.CurrentPID = 0
+	k.Ready.Reset()
 	k.nextPID = 1
-	k.lastTimerFiredAt = 0
 	k.KeyboardBuf = nil
 	k.blockedReads = nil
 	// The IDT lives in kernel memory and CPU.Reset does not touch it, but
@@ -89,8 +174,9 @@ func (k *Kernel) Reset() {
 // region for that process, and returns the assigned PID. The process is left
 // in the READY state.
 //
-// The first registered process becomes CurrentPID and is loaded into the CPU;
-// any subsequent ones go onto the ready queue.
+// The first registered process becomes CurrentPID on the boot core and is
+// loaded into its CPU; any subsequent ones either fill remaining idle cores
+// (in multicore mode) or go onto the ready queue.
 func (k *Kernel) AddProcess(name string, code []byte) (int, error) {
 	if k.nextPID > MaxProcesses {
 		return 0, fmt.Errorf("maximum of %d processes supported", MaxProcesses)
@@ -107,9 +193,9 @@ func (k *Kernel) AddProcess(name string, code []byte) (int, error) {
 
 	// Zero the region before loading to avoid leftovers from a prior program.
 	for i := codeBase; i < codeBase+ProcCodeSize; i++ {
-		k.CPU.Mem.Bytes[i] = 0
+		k.Mem.Bytes[i] = 0
 	}
-	if err := k.CPU.Mem.LoadBytes(codeBase, code); err != nil {
+	if err := k.Mem.LoadBytes(codeBase, code); err != nil {
 		return 0, fmt.Errorf("load process %d code: %w", pid, err)
 	}
 
@@ -121,6 +207,7 @@ func (k *Kernel) AddProcess(name string, code []byte) (int, error) {
 		CodeBase: codeBase,
 		CodeSize: uint32(len(code)),
 		StackTop: stackTop,
+		Core:     -1,
 	}
 	// Initial state: as if the process were saved right before its first
 	// instruction. EIP at the code base, ESP at the top of its stack, EFLAGS
@@ -136,31 +223,60 @@ func (k *Kernel) AddProcess(name string, code []byte) (int, error) {
 
 	k.Processes[pid] = pcb
 
-	if k.CurrentPID == 0 {
-		k.CurrentPID = pid
+	// Hand the process to the first idle core; if every core is busy it goes
+	// onto the ready queue instead.
+	if idle := k.firstIdleCore(); idle != nil {
+		idle.CurrentPID = pid
 		pcb.State = StateRun
-		k.loadCPUFromPCB(pcb)
+		pcb.Core = idle.ID
+		k.loadCPUFromPCB(idle, pcb)
 	} else {
-		k.ReadyQueue = append(k.ReadyQueue, pid)
+		k.Ready.Push(pid)
 	}
 	return pid, nil
 }
 
-// Step executes one instruction of the current process, possibly performing a
-// context switch if the timer fired.
-//
-// Before stepping, it checks whether the timer should fire and, if so, pushes
-// IRQ 0x20 onto CPU.PendingIRQs (the CPU picks it up on its next Step).
-//
-// After stepping, if the dispatch was IRQ 0x20 we run the handler logic in Go
-// (scheduler): save the current PCB, pick the next one, restore it, and patch
-// the kernel-stack frame so the handler's IRET jumps to the new process EIP.
-func (k *Kernel) Step() ([]cpu.Event, error) {
-	if k.shouldFireTimer() {
-		k.CPU.PendingIRQs = append(k.CPU.PendingIRQs, IRQTimer)
-		k.lastTimerFiredAt = k.CPU.Tick
+// firstIdleCore returns the lowest-ID core that has no CurrentPID, or nil if
+// every core is busy.
+func (k *Kernel) firstIdleCore() *Core {
+	for _, c := range k.Cores {
+		if c.CurrentPID == 0 {
+			return c
+		}
 	}
-	evs, err := k.CPU.Step()
+	return nil
+}
+
+// Step advances the simulation by one tick, iterating every core in order.
+// Each core runs at most one CPU.Step plus, if that step dispatched an IRQ,
+// the matching handler logic. Returning all events in a single slice keeps
+// the WS contract identical to the single-core model.
+func (k *Kernel) Step() ([]cpu.Event, error) {
+	var out []cpu.Event
+	for _, core := range k.Cores {
+		evs, err := k.stepCore(core)
+		out = append(out, evs...)
+		if err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+// stepCore advances a single core: timer check → CPU.Step → handler logic.
+//
+// A core with no current process and no pending IRQ is treated as completely
+// idle: it does not tick and emits nothing. It only wakes up once the
+// scheduler assigns it work or routes an interrupt its way.
+func (k *Kernel) stepCore(core *Core) ([]cpu.Event, error) {
+	if core.CurrentPID == 0 && len(core.CPU.PendingIRQs) == 0 {
+		return nil, nil
+	}
+	if k.shouldFireTimer(core) {
+		core.CPU.PendingIRQs = append(core.CPU.PendingIRQs, IRQTimer)
+		core.lastTimerFiredAt = core.CPU.Tick
+	}
+	evs, err := core.CPU.Step()
 	if err != nil {
 		return evs, err
 	}
@@ -169,23 +285,24 @@ func (k *Kernel) Step() ([]cpu.Event, error) {
 		if !ok {
 			continue
 		}
-		schedEvs := k.runHandlerLogic(irq.Vector, irq.Source)
+		schedEvs := k.runHandlerLogic(core, irq.Vector, irq.Source)
 		// The handler may have called cpu.Emit (e.g. mem_read while reading
 		// the user buffer in sys_write). CPU.Step has already returned its
 		// own slice, so drain whatever the handler accumulated and merge.
-		handlerEvs := k.CPU.DrainEvents()
+		handlerEvs := core.CPU.DrainEvents()
 		evs = append(evs, handlerEvs...)
 		evs = append(evs, schedEvs...)
 	}
 	return evs, nil
 }
 
-// shouldFireTimer decides whether the PIT should fire on this step.
-func (k *Kernel) shouldFireTimer() bool {
+// shouldFireTimer decides whether the PIT should fire on this step of the
+// given core. Every core has its own PIT counter so quantums are independent.
+func (k *Kernel) shouldFireTimer(core *Core) bool {
 	if k.TimerQuantum <= 0 {
 		return false
 	}
-	return k.CPU.Tick >= k.lastTimerFiredAt+uint64(k.TimerQuantum) && k.CPU.Tick > 0
+	return core.CPU.Tick >= core.lastTimerFiredAt+uint64(k.TimerQuantum) && core.CPU.Tick > 0
 }
 
 // runHandlerLogic executes the work a real OS would perform between handler
@@ -196,21 +313,21 @@ func (k *Kernel) shouldFireTimer() bool {
 // BEFORE the handler body executes, mutates the kernel-stack frame and CPU
 // registers, and the subsequent IRET pops the patched frame to land in the
 // new process.
-func (k *Kernel) runHandlerLogic(vector uint8, source string) []cpu.Event {
+func (k *Kernel) runHandlerLogic(core *Core, vector uint8, source string) []cpu.Event {
 	switch vector {
 	case IRQTimer:
 		// Only schedule on HW timer; ignore SW-triggered INT 0x20.
 		if source != "HW" {
 			return nil
 		}
-		return k.scheduleNext()
+		return k.scheduleNext(core)
 	case IRQSyscall:
 		// Vector 0x80 is reserved for syscalls (user invokes it via `int 0x80`,
 		// source SW). Arrival via HW indicates a bug.
 		if source != "SW" {
 			return nil
 		}
-		return k.handleSyscall()
+		return k.handleSyscall(core)
 	case IRQPageFault:
 		// Page faults always come via "fault" (the MMU raises them on access
 		// violation). A real OS could resolve some (page-in, COW); here we
@@ -218,75 +335,83 @@ func (k *Kernel) runHandlerLogic(vector uint8, source string) []cpu.Event {
 		if source != "fault" {
 			return nil
 		}
-		return k.killCurrent("page_fault")
+		return k.killCurrent(core, "page_fault")
 	case IRQKeyboard:
 		// Keyboard: HW (PushKey) injects this IRQ with source HW. Deliver any
 		// pending bytes to the first process BLOCKED in sys_read.
 		if source != "HW" {
 			return nil
 		}
-		return k.handleKeyboard()
+		return k.handleKeyboard(core)
 	default:
 		return nil
 	}
 }
 
-// killCurrent terminates the current process and schedules the next one if any
-// remain. Used by sys_exit and by page-fault handling. The PCB is left as
-// ZOMBIE with the cause recorded in BlockedOn.
-func (k *Kernel) killCurrent(reason string) []cpu.Event {
-	curPID := k.CurrentPID
+// killCurrent terminates the current process on the given core and schedules
+// the next one if any remain. Used by sys_exit and by page-fault handling.
+// The PCB is left as ZOMBIE with the cause recorded in BlockedOn.
+func (k *Kernel) killCurrent(core *Core, reason string) []cpu.Event {
+	curPID := core.CurrentPID
 	curPCB := k.Processes[curPID]
 	if curPCB == nil {
-		k.CPU.Halted = true
+		core.CPU.Halted = true
 		return nil
 	}
 	curPCB.State = StateZombie
 	curPCB.BlockedOn = reason
+	curPCB.Core = -1
 
 	out := []cpu.Event{
 		cpu.EventProcessState{PID: curPID, State: string(StateZombie), Reason: reason},
 	}
 
-	// If other READY processes exist, hand the CPU to the first one. This is
+	// If other READY processes exist, hand the core to the first one. This is
 	// the scheduleNext pattern WITHOUT re-enqueueing the current PID (zombie
 	// processes do not return).
-	if len(k.ReadyQueue) > 0 {
-		nextPID := k.ReadyQueue[0]
-		k.ReadyQueue = k.ReadyQueue[1:]
+	if nextPID, ok := k.Ready.Pop(); ok {
 		nextPCB := k.Processes[nextPID]
 		if nextPCB != nil {
 			out = append(out, cpu.EventSchedDecision{
 				FromPID:    curPID,
 				ToPID:      nextPID,
-				ReadyQueue: append([]int(nil), k.ReadyQueue...),
+				ReadyQueue: k.Ready.Snapshot(),
 			})
 
-			k.CPU.R.EAX = nextPCB.Regs.EAX
-			k.CPU.R.EBX = nextPCB.Regs.EBX
-			k.CPU.R.ECX = nextPCB.Regs.ECX
-			k.CPU.R.EDX = nextPCB.Regs.EDX
-			k.CPU.R.ESI = nextPCB.Regs.ESI
-			k.CPU.R.EDI = nextPCB.Regs.EDI
-			k.CPU.R.EBP = nextPCB.Regs.EBP
-			k.CPU.R.DS = nextPCB.Regs.DS
-			k.CPU.SavedUserESP = nextPCB.SavedUserESP
-			k.CPU.SavedUserSS = nextPCB.SavedUserSS
+			core.CPU.R.EAX = nextPCB.Regs.EAX
+			core.CPU.R.EBX = nextPCB.Regs.EBX
+			core.CPU.R.ECX = nextPCB.Regs.ECX
+			core.CPU.R.EDX = nextPCB.Regs.EDX
+			core.CPU.R.ESI = nextPCB.Regs.ESI
+			core.CPU.R.EDI = nextPCB.Regs.EDI
+			core.CPU.R.EBP = nextPCB.Regs.EBP
+			core.CPU.R.DS = nextPCB.Regs.DS
+			core.CPU.SavedUserESP = nextPCB.SavedUserESP
+			core.CPU.SavedUserSS = nextPCB.SavedUserSS
 
-			writeKernelDWORD(k.CPU, k.CPU.R.ESP+0, nextPCB.Regs.EIP)
-			writeKernelDWORD(k.CPU, k.CPU.R.ESP+4, uint32(nextPCB.Regs.CS))
-			writeKernelDWORD(k.CPU, k.CPU.R.ESP+8, nextPCB.Regs.EFLAGS)
+			writeKernelDWORD(core.CPU, core.CPU.R.ESP+0, nextPCB.Regs.EIP)
+			writeKernelDWORD(core.CPU, core.CPU.R.ESP+4, uint32(nextPCB.Regs.CS))
+			writeKernelDWORD(core.CPU, core.CPU.R.ESP+8, nextPCB.Regs.EFLAGS)
 
 			out = append(out, cpu.EventPCBRestore{PID: nextPID, Regs: pcbRegsSnapshot(nextPCB)})
 			nextPCB.State = StateRun
-			k.CurrentPID = nextPID
-			out = append(out, cpu.EventProcessState{PID: nextPID, State: string(StateRun)})
+			nextPCB.Core = core.ID
+			core.CurrentPID = nextPID
+			out = append(out,
+				cpu.EventCoreRelease{CoreID: core.ID, PID: curPID, Reason: reason},
+				cpu.EventCoreAssign{CoreID: core.ID, PID: nextPID},
+				cpu.EventProcessState{PID: nextPID, State: string(StateRun)},
+			)
 			return out
 		}
 	}
 
-	// No remaining processes: halt the CPU.
-	k.CPU.Halted = true
-	out = append(out, cpu.EventHalt{PID: curPID})
+	// No remaining processes for this core: release it and halt the CPU.
+	core.CPU.Halted = true
+	core.CurrentPID = 0
+	out = append(out,
+		cpu.EventCoreRelease{CoreID: core.ID, PID: curPID, Reason: reason},
+		cpu.EventHalt{PID: curPID},
+	)
 	return out
 }
