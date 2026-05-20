@@ -100,7 +100,7 @@ function isActive(to: string): boolean {
 }
 
 .sidebar--collapsed {
-  width: 56px;
+  width: 64px;
 }
 
 .sidebar__head {
@@ -162,20 +162,28 @@ function isActive(to: string): boolean {
   color: var(--text-muted);
   text-transform: uppercase;
   white-space: nowrap;
+  /* Fixed height across both states so toggling the rail does not move
+     adjacent items up or down. */
+  min-height: 30px;
+  display: flex;
+  align-items: flex-end;
 }
 
+/* Collapsed rail: hide the label text but keep the same row height as the
+   expanded state; render a horizontal dashed divider centered vertically. */
 .sidebar--collapsed .sidebar__group {
-  height: 1px;
-  padding: var(--space-1) var(--space-3);
+  padding: 0 var(--space-3);
   border-top: 1px dashed var(--border);
-  margin: var(--space-1) var(--space-2);
+  margin: 0 var(--space-2);
+  min-height: 30px;
+  align-items: center;
 }
 
 .sidebar__link {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  padding: 0 var(--space-3);
   color: var(--text-dim);
   text-decoration: none;
   font-size: 13px;
@@ -185,6 +193,10 @@ function isActive(to: string): boolean {
     color var(--transition-fast),
     border-color var(--transition-fast);
   position: relative;
+  /* Constant row height across expanded/collapsed states avoids visual jumps
+     when the rail toggles. The 38px target is large enough for touch while
+     keeping the rail compact. */
+  min-height: 38px;
 }
 
 .sidebar__link:hover {
@@ -211,12 +223,25 @@ function isActive(to: string): boolean {
 }
 
 .sidebar__icon {
-  font-family: 'Major Mono Display', monospace;
-  width: 22px;
+  font-family: 'JetBrains Mono', 'Major Mono Display', monospace;
+  width: 20px;
   text-align: center;
-  font-size: 13px;
+  font-size: 16px;
+  line-height: 1;
   flex-shrink: 0;
   color: inherit;
+}
+
+/* Collapsed rail: the icon becomes the whole content. Keep the same
+   min-height so toggling expand/collapse doesn't shift row positions. */
+.sidebar--collapsed .sidebar__link {
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar--collapsed .sidebar__icon {
+  width: 100%;
+  font-size: 18px;
 }
 
 .sidebar__label {
@@ -267,7 +292,7 @@ function isActive(to: string): boolean {
 
 @media (max-width: 768px) {
   .sidebar {
-    width: 56px;
+    width: 64px;
   }
   .sidebar:not(.sidebar--collapsed) .sidebar__brand,
   .sidebar:not(.sidebar--collapsed) .sidebar__label,

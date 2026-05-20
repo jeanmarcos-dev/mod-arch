@@ -25,12 +25,12 @@ onMounted(() => {
 const items = [
   { to: '/', label: 'Vista general', icon: '▶', group: 'SIMULACIÓN' },
   { to: '/procesos', label: 'Procesos', icon: '●', group: 'SIMULACIÓN' },
-  { to: '/memoria', label: 'Memoria', icon: '≡', group: 'SIMULACIÓN' },
-  { to: '/interrupciones', label: 'Interrupciones', icon: '⌬', group: 'SIMULACIÓN' },
-  { to: '/concurrencia', label: 'Concurrencia', icon: '⚯', group: 'SIMULACIÓN', soon: true },
-  { to: '/x86', label: 'x86 real', icon: '◧', group: 'SIMULACIÓN', soon: true },
-  { to: '/sesiones', label: 'Mis sesiones', icon: '⎙', group: 'HERRAMIENTAS' },
-  { to: '/glosario', label: 'Glosario', icon: '☰', group: 'HERRAMIENTAS' },
+  { to: '/memoria', label: 'Memoria', icon: '▤', group: 'SIMULACIÓN' },
+  { to: '/interrupciones', label: 'Interrupciones', icon: '◈', group: 'SIMULACIÓN' },
+  { to: '/concurrencia', label: 'Concurrencia', icon: '◫', group: 'SIMULACIÓN', soon: true },
+  { to: '/x86', label: 'x86 real', icon: '▣', group: 'SIMULACIÓN', soon: true },
+  { to: '/sesiones', label: 'Mis sesiones', icon: '◇', group: 'HERRAMIENTAS' },
+  { to: '/glosario', label: 'Glosario', icon: '?', group: 'HERRAMIENTAS' },
   { to: '/preferencias', label: 'Preferencias', icon: '⚙', group: 'HERRAMIENTAS' },
   { to: '/perfil', label: 'Perfil', icon: '◐', group: 'HERRAMIENTAS' },
 ];
