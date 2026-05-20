@@ -136,6 +136,17 @@ export const useCpuStore = defineStore('cpu', () => {
   // ─── WS ─────────────────────────────────────────────────────────────────
   let ws: WebSocket | null = null;
 
+  // Event subscribers fan out raw CpuEvents to anything that wants to react —
+  // narrators, panels, debugging overlays. The store's own applyEvent runs
+  // first to keep its state consistent; subscribers fire after, so by the
+  // time they read regs/procs/etc the store already reflects the event.
+  type Subscriber = (ev: CpuEvent) => void;
+  const subscribers = new Set<Subscriber>();
+  function subscribe(fn: Subscriber): () => void {
+    subscribers.add(fn);
+    return () => subscribers.delete(fn);
+  }
+
   // connect is idempotent. Re-mounting components that call connect() — for
   // example navigating away from the Simulator and back through the shell —
   // would otherwise leak a WebSocket per visit, each with its own onmessage
@@ -318,8 +329,17 @@ export const useCpuStore = defineStore('cpu', () => {
         break;
       case 'mem_read':
       case 'mem_write':
-        // por ahora solo cuentan; Memory panel lo usará en su momento
+        // Memory traffic is consumed exclusively by subscribers (narrators,
+        // memory panel filters, etc.) — the store carries no aggregated
+        // counter for it because that would grow unbounded across runs.
         break;
+    }
+    // Fan-out to subscribers AFTER the store has reacted, so they can read
+    // the up-to-date snapshot in their handler.
+    if (subscribers.size > 0) {
+      for (const fn of subscribers) {
+        try { fn(ev); } catch (err) { pushLog(`⚠ subscriber: ${err}`, 'red'); }
+      }
     }
   }
 
@@ -377,6 +397,7 @@ export const useCpuStore = defineStore('cpu', () => {
     changedRegs,
     programs, selectedProgram, log, connected, lastError,
     procs, currentPID, readyQueue, waitQueue, flashingPIDs, procSources,
+    subscribe,
     consoleChunks, faultShake,
     glossarySearch, glossaryOpenSignal,
     sessionInfo, isViewer, viewerLink,
