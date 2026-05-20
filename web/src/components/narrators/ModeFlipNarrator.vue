@@ -1,0 +1,185 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, ref } from 'vue';
+import { useCpuStore } from '../../stores/cpu';
+import { useNarrators, type ModeSwitch } from '../../lib/narratorBus';
+import { usePreferencesStore } from '../../stores/preferences';
+
+// ModeFlipNarrator stages the USER↔KERNEL transition. Two layers:
+//
+//   1. An always-on ambient tint over its host element so the student can tell
+//      at a glance which privilege level the CPU is in right now. This stays
+//      on even when narrators are toggled off — it is context, not animation.
+//   2. A transient pulse + banner on each mode_switch event. The banner names
+//      both modes and the cause (e.g. "int 0x80", "iret"). Honors the
+//      narrators preference and the global animation speed knob.
+//
+// The component must be placed inside a position: relative parent — it covers
+// it via inset: 0 and lets pointer events fall through to the content below.
+
+const cpu = useCpuStore();
+const prefs = usePreferencesStore();
+const narrators = useNarrators();
+
+interface BannerInfo {
+  id: number;
+  from: 'user' | 'kernel';
+  to: 'user' | 'kernel';
+  cause: string;
+}
+
+const banner = ref<BannerInfo | null>(null);
+const pulse = ref(false);
+let seq = 0;
+let bannerTimer = 0;
+let pulseTimer = 0;
+
+narrators.onModeSwitch((ev: ModeSwitch) => {
+  seq++;
+  banner.value = { id: seq, from: ev.from, to: ev.to, cause: ev.cause };
+  pulse.value = true;
+
+  // Scale dwell + pulse by the global animation speed so projector mode reads
+  // them longer than compact mode.
+  const dwell = Math.round(1800 / prefs.animationSpeed);
+  const pulseDur = Math.round(450 / prefs.animationSpeed);
+
+  window.clearTimeout(bannerTimer);
+  window.clearTimeout(pulseTimer);
+  bannerTimer = window.setTimeout(() => { banner.value = null; }, dwell);
+  pulseTimer = window.setTimeout(() => { pulse.value = false; }, pulseDur);
+});
+
+onBeforeUnmount(() => {
+  window.clearTimeout(bannerTimer);
+  window.clearTimeout(pulseTimer);
+});
+
+// cpu.mode is 3 for user, 0 for kernel. Map to a readable class hook.
+const modeName = computed<'user' | 'kernel'>(() => (cpu.mode === 3 ? 'user' : 'kernel'));
+
+function label(m: 'user' | 'kernel') {
+  return m === 'user' ? 'USER' : 'KERNEL';
+}
+</script>
+
+<template>
+  <div
+    :class="[
+      'mode-flip',
+      `mode-flip--${modeName}`,
+      { 'mode-flip--pulse': pulse },
+    ]"
+    aria-hidden="true"
+  >
+    <div class="mode-flip__tint"></div>
+
+    <Transition name="mf-banner">
+      <div v-if="banner" :key="banner.id" class="mode-flip__banner">
+        <span class="mode-flip__chip mode-flip__chip--from">{{ label(banner.from) }}</span>
+        <span class="mode-flip__arrow">→</span>
+        <span class="mode-flip__chip mode-flip__chip--to">{{ label(banner.to) }}</span>
+        <span class="mode-flip__cause">{{ banner.cause }}</span>
+      </div>
+    </Transition>
+  </div>
+</template>
+
+<style scoped>
+.mode-flip {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: var(--z-overlay);
+  overflow: hidden;
+}
+
+.mode-flip__tint {
+  position: absolute;
+  inset: 0;
+  transition: background var(--transition-slow), box-shadow var(--transition-slow);
+}
+
+.mode-flip--user .mode-flip__tint {
+  background:
+    radial-gradient(circle at top right, rgba(106, 212, 255, 0.05), transparent 55%),
+    radial-gradient(circle at bottom left, rgba(106, 212, 255, 0.03), transparent 60%);
+}
+
+.mode-flip--kernel .mode-flip__tint {
+  background:
+    radial-gradient(circle at top right, rgba(255, 179, 71, 0.12), transparent 55%),
+    radial-gradient(circle at bottom left, rgba(255, 179, 71, 0.07), transparent 60%);
+  box-shadow: inset 0 0 0 1px rgba(255, 179, 71, 0.22), inset 0 0 38px rgba(255, 179, 71, 0.14);
+}
+
+.mode-flip--pulse .mode-flip__tint {
+  animation: mf-pulse 450ms ease-out;
+}
+
+@keyframes mf-pulse {
+  0%   { filter: brightness(1) saturate(1); }
+  35%  { filter: brightness(1.9) saturate(1.4); }
+  100% { filter: brightness(1) saturate(1); }
+}
+
+.mode-flip__banner {
+  position: absolute;
+  top: var(--space-3);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 6px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--amber);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-glow-amber-strong);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.mode-flip__chip {
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+}
+
+.mode-flip__chip--from { color: var(--text-dim); }
+.mode-flip__chip--to   { color: var(--amber); text-shadow: var(--shadow-glow-amber); }
+
+.mode-flip__arrow {
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.mode-flip__cause {
+  color: var(--text-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  padding-left: var(--space-2);
+  border-left: 1px solid var(--border);
+}
+
+.mf-banner-enter-from {
+  opacity: 0;
+  transform: translate(-50%, -10px) scale(0.95);
+}
+.mf-banner-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -4px);
+}
+.mf-banner-enter-active,
+.mf-banner-leave-active {
+  transition: opacity var(--transition-base), transform var(--transition-base);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mode-flip__tint,
+  .mf-banner-enter-active,
+  .mf-banner-leave-active { transition-duration: 0.001ms !important; }
+  .mode-flip--pulse .mode-flip__tint { animation: none; }
+}
+</style>
