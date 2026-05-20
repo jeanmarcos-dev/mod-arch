@@ -4,26 +4,140 @@ import { useCpuStore } from '../../stores/cpu';
 import { usePreferencesStore } from '../../stores/preferences';
 import { useNarrators, type MemWrite, type MemRead } from '../../lib/narratorBus';
 import ByteFlightNarrator from '../../components/narrators/ByteFlightNarrator.vue';
-import Card from '../../components/ui/Card.vue';
 import Term from '../../components/glossary/Term.vue';
+import MemoryMinimap, { type Pin } from '../../components/memory/MemoryMinimap.vue';
+import MemoryCoreChip from '../../components/memory/MemoryCoreChip.vue';
+import MemoryHexGrid, { type HeatEntry } from '../../components/memory/MemoryHexGrid.vue';
+import MemoryActivityFeed, { type FeedEntry } from '../../components/memory/MemoryActivityFeed.vue';
+import { fmtAddr, regionFor, MEM_TOTAL } from '../../lib/memoryLayout';
 
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
 
-// Memory window we paint. Hardcoded to the user-program region for the
-// canonical demo (add, sieve, etc.); the picker further down lets the
-// audience jump to other regions on the fly.
+const ROW_COUNT = 24;
+const WND_SIZE = ROW_COUNT * 16; // 384 B visible
+
 const baseAddr = ref(0x200000);
-const rowCount = 24; // 24 rows × 16 bytes = 384 bytes visible
 const bytes = ref<number[]>([]);
 const fetchError = ref('');
 
-const wndSize = rowCount * 16;
-const wndEnd = computed(() => baseAddr.value + wndSize);
+// When ON, the window re-centers on the most recent mem_write/mem_read so
+// the audience always sees the action — useful for kernel-heavy demos
+// (race_counter, philos_*, producer_consumer) whose activity lives at
+// 0x001FFFE0 area, outside the user_code default window.
+const autoFollow = ref(false);
+const FOLLOW_THROTTLE_MS = 600;
+let lastFollowAt = 0;
+
+const wndEnd = computed(() => baseAddr.value + WND_SIZE);
+const currentRegion = computed(() => regionFor(baseAddr.value));
+
+// ─── Live activity state ───────────────────────────────────────────────────
+// `heat` carries the "what is hot right now" map, keyed by absolute address.
+// It is the source for the per-cell decay animation. `lastWrite`/`lastRead`
+// also keep the last event per address but never expire (until GC); the byte
+// popover reads from them to show "last write by ... 4.2 s ago" even when
+// the heat animation has long ended.
+//
+// pins is a ring buffer of recent events painted on the minimap. Capped to
+// keep DOM nodes bounded — pin elements live for 8 s each via CSS animation.
+
+const heat = ref<Map<number, HeatEntry>>(new Map());
+const lastWriteByAddr = ref<Map<number, HeatEntry>>(new Map());
+const lastReadByAddr = ref<Map<number, HeatEntry>>(new Map());
+
+const PIN_CAP = 200;
+const pins = ref<Pin[]>([]);
+let pinSeq = 0;
+
+const FEED_CAP = 12;
+const feed = ref<FeedEntry[]>([]);
+let feedSeq = 0;
+
+let heatSeqCounter = 0;
+const HEAT_TTL_MS = 60_000;
+
+function gcMaps() {
+  // Drop entries older than 60 s on every event burst. Cheap; the maps are
+  // typically small (<200 entries) and we never hit O(n) over the whole 4 MB.
+  const now = performance.now();
+  const cutoff = now - HEAT_TTL_MS;
+  for (const [addr, entry] of heat.value) {
+    if (entry.t0 < cutoff) heat.value.delete(addr);
+  }
+}
+
+function recordEvent(kind: 'write' | 'read', addr: number, value: number, coreId: number, pid: number) {
+  heatSeqCounter += 1;
+  const entry: HeatEntry = {
+    seq: heatSeqCounter,
+    coreId,
+    kind,
+    t0: performance.now(),
+    pid,
+    value,
+  };
+
+  // Heatmap layer (write resets read, write resets write — always newest wins).
+  if (addr >= baseAddr.value && addr < wndEnd.value) {
+    heat.value.set(addr, entry);
+    // Reactive bump: Vue Map mutations require a new reference for templates
+    // depending on Map.get to re-evaluate. Cheaper than `new Map(...)` on
+    // every event because we only touch the affected key.
+    heat.value = new Map(heat.value);
+  }
+
+  // Persistent "last X" maps for the popover (no decay).
+  if (kind === 'write') {
+    lastWriteByAddr.value.set(addr, entry);
+    lastWriteByAddr.value = new Map(lastWriteByAddr.value);
+  } else {
+    lastReadByAddr.value.set(addr, entry);
+    lastReadByAddr.value = new Map(lastReadByAddr.value);
+  }
+
+  // Mini-map pin ring buffer.
+  pinSeq += 1;
+  pins.value.push({ id: pinSeq, addr, kind, coreId, t0: entry.t0 });
+  if (pins.value.length > PIN_CAP) pins.value.splice(0, pins.value.length - PIN_CAP);
+
+  // Activity feed (per-core filtering happens in the feed component).
+  feedSeq += 1;
+  feed.value.unshift({
+    id: feedSeq, addr, value, kind, coreId, pid, ts: entry.t0,
+  });
+  if (feed.value.length > FEED_CAP) feed.value.length = FEED_CAP;
+
+  // Speculative local mutation so the grid shows the new byte even before
+  // the next periodic reload finishes.
+  if (kind === 'write' && addr >= baseAddr.value && addr < wndEnd.value) {
+    const idx = addr - baseAddr.value;
+    if (idx >= 0 && idx < bytes.value.length) {
+      bytes.value[idx] = value & 0xff;
+    }
+  }
+
+  // Auto-follow: keep the window centered on the most recent activity. The
+  // throttle keeps the view from re-centering many times per second when
+  // multiple events arrive in a burst (which would be disorienting). We
+  // skip the jump if the event already falls inside the visible window —
+  // no point moving when the user already sees it pulse.
+  if (autoFollow.value && (addr < baseAddr.value || addr >= wndEnd.value)) {
+    const now = performance.now();
+    if (now - lastFollowAt > FOLLOW_THROTTLE_MS) {
+      lastFollowAt = now;
+      jumpTo(addr - WND_SIZE / 2);
+    }
+  }
+
+  gcMaps();
+}
+
+// ─── Memory fetch ──────────────────────────────────────────────────────────
 
 async function loadWindow() {
   try {
-    const r = await fetch(`/api/memory?addr=0x${baseAddr.value.toString(16)}&len=${wndSize}`);
+    const r = await fetch(`/api/memory?addr=0x${baseAddr.value.toString(16)}&len=${WND_SIZE}`);
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = (await r.json()) as { bytes: number[] };
     bytes.value = data.bytes;
@@ -33,55 +147,21 @@ async function loadWindow() {
   }
 }
 
-// Recent traffic feed: small ring of the last writes/reads inside the window
-// so the audience can scan what just happened. Each entry expires on its own
-// after a few seconds.
-interface FeedEntry {
-  id: number;
-  addr: number;
-  value: number;
-  kind: 'write' | 'read';
-  ts: number;
-}
-const feed = ref<FeedEntry[]>([]);
-let feedSeq = 0;
-function pushFeed(kind: 'write' | 'read', addr: number, value: number) {
-  feed.value.unshift({ id: ++feedSeq, addr, value, kind, ts: performance.now() });
-  if (feed.value.length > 8) feed.value.length = 8;
-}
+// ─── Narrator subscription ─────────────────────────────────────────────────
 
 const narrators = useNarrators();
 narrators.onMemWrite((m: MemWrite) => {
-  if (m.addr >= baseAddr.value && m.addr < wndEnd.value) {
-    pushFeed('write', m.addr, m.newValue);
-    flashByte(m.addr);
-    // Quick local mutation so the hex view shows the new value even before
-    // the next periodic reload finishes.
-    const idx = m.addr - baseAddr.value;
-    if (idx >= 0 && idx < bytes.value.length) bytes.value[idx] = m.newValue & 0xff;
-  }
+  // Honor the global SimBar core filter so hidden cores leave no trace
+  // here either (feed/heat/pins). Matches the model documented in
+  // cpu.ts: "selectedCoreIds rules every pane in the app."
+  if (!cpu.isCoreVisible(m.coreId)) return;
+  recordEvent('write', m.addr, m.newValue, m.coreId, m.pid);
 });
 narrators.onMemRead((m: MemRead) => {
-  if (m.addr >= baseAddr.value && m.addr < wndEnd.value) {
-    pushFeed('read', m.addr, m.value);
-  }
+  if (!cpu.isCoreVisible(m.coreId)) return;
+  recordEvent('read', m.addr, m.value, m.coreId, m.pid);
 });
 
-// Per-byte flash overlay applied when a write lands inside the window. The
-// Set keys are the absolute address; the Vue v-bind in the row consumes it.
-const flashing = ref<Set<number>>(new Set());
-function flashByte(addr: number) {
-  flashing.value.add(addr);
-  flashing.value = new Set(flashing.value); // reactive bump
-  window.setTimeout(() => {
-    flashing.value.delete(addr);
-    flashing.value = new Set(flashing.value);
-  }, 600);
-}
-
-// Periodic background reload so addresses that were not touched by mem_*
-// (e.g. DMA, kernel internal updates) still refresh. Slower than the
-// transitions to keep the narrator readable.
 let timer = 0;
 onMounted(() => {
   loadWindow();
@@ -89,138 +169,163 @@ onMounted(() => {
 });
 onUnmounted(() => { if (timer) window.clearInterval(timer); });
 
-watch(baseAddr, loadWindow);
+watch(baseAddr, () => {
+  // Switching the window invalidates the heatmap for the previous range.
+  // Keep lastWrite/lastRead so jumping back still shows accurate history.
+  heat.value = new Map();
+  loadWindow();
+});
 
-// Preset jumps. Each computes its target on the fly so "Stack" follows
-// ESP — keeping the ESP visible in the window matters more than landing
-// on a fixed address.
+// ─── Navigation: jump / scroll / input ─────────────────────────────────────
+
+function clampAddr(a: number): number {
+  if (!Number.isFinite(a)) return baseAddr.value;
+  const max = MEM_TOTAL - WND_SIZE;
+  return Math.max(0, Math.min(max, a)) & ~0xf;
+}
+
+function jumpTo(a: number) {
+  baseAddr.value = clampAddr(a);
+}
+
+function scrollBy(delta: number) {
+  jumpTo(baseAddr.value + delta);
+}
+
+// Quick shortcuts left over from the previous design — kept as a small row
+// below the address input. "Stack" is dynamic so a stack-heavy demo keeps
+// ESP visible without manual scrolling.
 type Preset = { label: string; resolve: () => number };
 const presets: Preset[] = [
   { label: 'Programa', resolve: () => 0x200000 },
-  { label: 'Stack', resolve: () => Math.max(0, ((cpu.regs.ESP || 0x33fff0) & ~0xff) - 0x80) },
-  { label: 'IDT', resolve: () => 0x100000 },
+  { label: 'Stack',    resolve: () => Math.max(0, ((cpu.regs.ESP || 0x33fff0) & ~0xff) - 0x80) },
+  { label: 'IDT',      resolve: () => 0x100000 },
 ];
-function jumpTo(p: Preset) { baseAddr.value = p.resolve(); }
 
-// Auto-follow ESP when a stack-touching demo is loaded. Detection runs on
-// the loaded event (procs reset) — when the new program is `pushpop` or
-// any stack-heavy demo, jump the window to the stack so the audience does
-// not have to click "Stack" manually.
+// Free-form hex / decimal input.
+const inputAddr = ref('');
+const inputError = ref(false);
+
+function commitInput() {
+  const raw = inputAddr.value.trim();
+  if (!raw) return;
+  const n = raw.startsWith('0x') || raw.startsWith('0X')
+    ? parseInt(raw.slice(2), 16)
+    : Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    inputError.value = true;
+    return;
+  }
+  inputError.value = false;
+  jumpTo(n);
+}
+
+watch(inputAddr, () => { inputError.value = false; });
+
+// Auto-follow ESP when a stack-touching demo is loaded.
 cpu.subscribe((ev) => {
   if (ev.type === 'loaded' && (ev.name === 'pushpop' || ev.name === 'callret')) {
-    // Defer one tick so cpu.regs.ESP reflects the post-load value.
-    setTimeout(() => { jumpTo(presets[1]); }, 200);
+    setTimeout(() => { jumpTo(presets[1].resolve()); }, 200);
   }
 });
-
-const rows = computed(() => {
-  const out: { addr: number; cells: number[] }[] = [];
-  for (let r = 0; r < rowCount; r++) {
-    const rowAddr = baseAddr.value + r * 16;
-    out.push({ addr: rowAddr, cells: bytes.value.slice(r * 16, r * 16 + 16) });
-  }
-  return out;
-});
-
-function fmtAddr(a: number): string {
-  return '0x' + (a >>> 0).toString(16).toUpperCase().padStart(8, '0');
-}
-function fmtByte(b: number | undefined): string {
-  if (b === undefined) return '··';
-  return (b & 0xff).toString(16).toUpperCase().padStart(2, '0');
-}
-function ageOf(ts: number): number {
-  return performance.now() - ts;
-}
 </script>
 
 <template>
   <div class="memory-page">
-    <!-- The narrator overlay covers the whole page so flights can cross
-         between the CPU chip and any byte cell. -->
     <ByteFlightNarrator class="memory-page__overlay" />
 
     <header class="memory-page__head">
       <div class="memory-page__title">
         <Term term="MMU" mode="title" class="memory-page__title-main">Memoria</Term>
         <span class="memory-page__title-sub">
-          Ventana <code>{{ fmtAddr(baseAddr) }}</code> · <code>{{ wndSize }} B</code>
+          Ventana <code>{{ fmtAddr(baseAddr) }}</code> · <code>{{ WND_SIZE }} B</code>
+          <template v-if="currentRegion">
+            · <span class="memory-page__title-region">{{ currentRegion.label }}</span>
+            <span class="memory-page__title-perm">user {{ currentRegion.userPerm }} · kernel {{ currentRegion.kernPerm }}</span>
+          </template>
         </span>
       </div>
-      <div class="memory-page__presets">
-        <button
-          v-for="p in presets"
-          :key="p.label"
-          type="button"
-          @click="jumpTo(p)"
-        >{{ p.label }}</button>
-      </div>
 
-      <div
-        v-if="!prefs.narratorsEnabled"
-        class="memory-page__hint"
-        title="Active 'Narradores visuales' en Preferencias para ver los bytes viajando"
-      >
-        ℹ Narradores apagados — actívelos en Preferencias para ver los bytes viajando
+      <MemoryMinimap
+        :base-addr="baseAddr"
+        :wnd-size="WND_SIZE"
+        :pins="pins"
+        @jump="jumpTo"
+      />
+
+      <div class="memory-page__nav">
+        <label class="memory-page__input">
+          <span class="memory-page__input-prefix">addr</span>
+          <input
+            v-model="inputAddr"
+            type="text"
+            inputmode="text"
+            placeholder="0x200000"
+            spellcheck="false"
+            autocomplete="off"
+            :class="{ 'is-error': inputError }"
+            @keydown.enter="commitInput"
+            @blur="commitInput"
+          />
+        </label>
+        <div class="memory-page__presets">
+          <button
+            v-for="p in presets"
+            :key="p.label"
+            type="button"
+            @click="jumpTo(p.resolve())"
+          >{{ p.label }}</button>
+          <button
+            type="button"
+            :class="['memory-page__follow', { 'memory-page__follow--on': autoFollow }]"
+            :title="autoFollow
+              ? 'La ventana sigue la actividad reciente. Click para fijarla.'
+              : 'Activar: la ventana se centra automáticamente sobre cada write/read fuera de pantalla.'"
+            @click="autoFollow = !autoFollow"
+          >{{ autoFollow ? '◉ seguir' : '○ seguir' }}</button>
+        </div>
       </div>
     </header>
 
+    <div
+      v-if="!prefs.narratorsEnabled"
+      class="memory-page__hint"
+      title="Active 'Narradores visuales' en Preferencias para ver los bytes viajando"
+    >
+      Narradores apagados — actívelos en Preferencias para ver los bytes viajando.
+    </div>
+
     <div class="memory-page__body">
-      <!-- CPU side: a single chip that acts as the source anchor for byte
-           flights. Shows the current EIP + EAX as context. -->
-      <aside class="memory-page__cpu" data-narrator-anchor="cpu">
-        <div class="cpu-chip">
-          <div class="cpu-chip__label">CPU</div>
-          <div class="cpu-chip__pid">PID {{ cpu.currentPID || '—' }}</div>
-          <dl class="cpu-chip__regs">
-            <div><dt><Term term="EIP" mode="label">EIP</Term></dt><dd>{{ fmtAddr(cpu.regs.EIP) }}</dd></div>
-            <div><dt><Term term="EAX" mode="label">EAX</Term></dt><dd>{{ fmtAddr(cpu.regs.EAX) }}</dd></div>
-            <div><dt><Term term="EBX" mode="label">EBX</Term></dt><dd>{{ fmtAddr(cpu.regs.EBX) }}</dd></div>
-            <div><dt><Term term="ESP" mode="label">ESP</Term></dt><dd>{{ fmtAddr(cpu.regs.ESP) }}</dd></div>
-          </dl>
-        </div>
+      <aside class="memory-page__cores">
+        <MemoryCoreChip
+          v-for="c in cpu.cores"
+          :key="c.id"
+          :core="c"
+          :selected="c.id === cpu.selectedCoreId"
+          :hidden-by-filter="!cpu.isCoreVisible(c.id)"
+          @select="cpu.setSelectedCore"
+          @jump="jumpTo"
+        />
       </aside>
 
-      <!-- Memory grid -->
-      <Card class="memory-page__grid" :elevation="1">
-        <div v-if="fetchError" class="memory-page__err">{{ fetchError }}</div>
-        <div class="hexgrid">
-          <div class="hexgrid__head">
-            <span class="hexgrid__addr-h">addr</span>
-            <span v-for="c in 16" :key="c" class="hexgrid__col-h">{{ (c - 1).toString(16).toUpperCase() }}</span>
-          </div>
-          <div v-for="row in rows" :key="row.addr" class="hexgrid__row">
-            <span class="hexgrid__addr">{{ fmtAddr(row.addr).slice(2) }}</span>
-            <span
-              v-for="(byte, idx) in row.cells"
-              :key="idx"
-              :class="['hexgrid__cell', flashing.has(row.addr + idx) && 'hexgrid__cell--flash']"
-              :data-mem-addr="`0x${(row.addr + idx).toString(16).toLowerCase()}`"
-            >{{ fmtByte(byte) }}</span>
-          </div>
-        </div>
-      </Card>
+      <MemoryHexGrid
+        class="memory-page__grid"
+        :base-addr="baseAddr"
+        :row-count="ROW_COUNT"
+        :bytes="bytes"
+        :heat="heat"
+        :last-read-by-addr="lastReadByAddr"
+        :last-write-by-addr="lastWriteByAddr"
+        :error-message="fetchError"
+        @scroll-by="scrollBy"
+      />
 
-      <!-- Right rail: activity feed -->
-      <aside class="memory-page__feed">
-        <Card title="Actividad" :elevation="1" class="memory-page__feed-card">
-          <p v-if="!feed.length" class="memory-page__feed-empty">
-            Cargue un demo y ejecute para ver el tráfico.
-          </p>
-          <ol v-else class="memory-page__feed-list">
-            <li
-              v-for="e in feed"
-              :key="e.id"
-              :class="['feed-row', `feed-row--${e.kind}`]"
-              :style="{ opacity: Math.max(0.4, 1 - ageOf(e.ts) / 5000) }"
-            >
-              <span class="feed-row__kind">{{ e.kind === 'write' ? '◣ W' : '◤ R' }}</span>
-              <code class="feed-row__addr">{{ fmtAddr(e.addr) }}</code>
-              <code class="feed-row__val">{{ fmtByte(e.value) }}</code>
-            </li>
-          </ol>
-        </Card>
-      </aside>
+      <MemoryActivityFeed
+        class="memory-page__feed"
+        :entries="feed"
+        :num-cores="cpu.numCores"
+        :visible-core-ids="cpu.selectedCoreIds"
+      />
     </div>
   </div>
 </template>
@@ -235,11 +340,12 @@ function ageOf(ts: number): number {
 }
 
 .memory-page__overlay {
-  /* The narrator sits above everything but below modals/topbar. */
+  /* Narrator sits above grid but below modals/topbar. */
 }
 
 .memory-page__head {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-5);
@@ -251,6 +357,7 @@ function ageOf(ts: number): number {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 200px;
 }
 
 .memory-page__title-main {
@@ -264,6 +371,10 @@ function ageOf(ts: number): number {
 .memory-page__title-sub {
   font-size: 11px;
   color: var(--text-dim);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .memory-page__title-sub code {
@@ -271,9 +382,67 @@ function ageOf(ts: number): number {
   font-family: 'JetBrains Mono', monospace;
 }
 
+.memory-page__title-region {
+  color: var(--green);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 10px;
+}
+
+.memory-page__title-perm {
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.memory-page__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+}
+
+.memory-page__input {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding-left: 6px;
+}
+
+.memory-page__input-prefix {
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.memory-page__input input {
+  background: transparent;
+  border: none;
+  color: var(--amber);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 4px 8px;
+  width: 110px;
+  outline: none;
+  min-height: unset;
+}
+
+.memory-page__input input.is-error {
+  color: var(--red-soft);
+}
+
+.memory-page__input input::placeholder {
+  color: var(--text-muted);
+}
+
 .memory-page__presets {
   display: flex;
-  gap: var(--space-1);
+  gap: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   overflow: hidden;
@@ -285,32 +454,39 @@ function ageOf(ts: number): number {
   border-right: 1px solid var(--border);
   color: var(--text-dim);
   font-family: inherit;
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 1px;
   text-transform: uppercase;
-  padding: 6px 10px;
+  padding: 3px 8px;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
+  min-height: unset;
 }
 
 .memory-page__presets button:last-child { border-right: none; }
-.memory-page__presets button:hover { background: rgba(255, 179, 71, 0.08); color: var(--amber); }
-.memory-page__presets button.on {
-  background: rgba(255, 179, 71, 0.18);
+.memory-page__presets button:hover { background: rgba(255, 179, 71, 0.10); color: var(--amber); }
+
+.memory-page__follow {
+  border-left: 1px dashed var(--border-strong) !important;
+}
+.memory-page__follow--on {
+  background: color-mix(in oklab, var(--amber) 18%, transparent);
   color: var(--amber);
   text-shadow: var(--shadow-glow-amber);
 }
 
 .memory-page__hint {
-  margin-left: auto;
   font-size: 11px;
   color: var(--text-dim);
   letter-spacing: 0.5px;
+  padding: 6px var(--space-5);
+  border-bottom: 1px dashed var(--border);
+  flex-shrink: 0;
 }
 
 .memory-page__body {
   display: grid;
-  grid-template-columns: 200px 1fr 240px;
+  grid-template-columns: 200px 1fr 270px;
   gap: var(--space-4);
   padding: var(--space-4) var(--space-5);
   overflow: hidden;
@@ -318,204 +494,38 @@ function ageOf(ts: number): number {
   min-height: 0;
 }
 
-.memory-page__cpu {
+.memory-page__cores {
   display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.cpu-chip {
-  width: 100%;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  padding: var(--space-3) var(--space-4);
-  background: var(--surface-2);
-  box-shadow: var(--shadow-glow-amber);
-  position: relative;
-}
-
-.cpu-chip::before,
-.cpu-chip::after {
-  content: '';
-  position: absolute;
-  width: 6px;
-  height: 16px;
-  background: var(--amber);
-  border-radius: 2px;
-  opacity: 0.6;
-}
-.cpu-chip::before { left: -3px; top: 14px; }
-.cpu-chip::after  { right: -3px; top: 14px; }
-
-.cpu-chip__label {
-  font-family: 'Major Mono Display', monospace;
-  font-size: 13px;
-  letter-spacing: 4px;
-  color: var(--amber);
-  text-shadow: var(--shadow-glow-amber);
-  text-align: center;
-  margin-bottom: var(--space-2);
-}
-
-.cpu-chip__pid {
-  font-size: 10px;
-  letter-spacing: 2px;
-  color: var(--text-dim);
-  text-align: center;
-  text-transform: uppercase;
-  margin-bottom: var(--space-3);
-}
-
-.cpu-chip__regs {
-  display: grid;
-  gap: var(--space-1);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-}
-
-.cpu-chip__regs > div {
-  display: flex;
-  justify-content: space-between;
+  flex-direction: column;
   gap: var(--space-2);
-}
-
-.cpu-chip__regs dt {
-  color: var(--text-dim);
-  letter-spacing: 1px;
-}
-
-.cpu-chip__regs dd {
-  color: var(--text);
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .memory-page__grid {
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
   min-height: 0;
 }
 
-.memory-page__grid :deep(.card__body) {
-  padding: 0;
-  overflow: auto;
-  flex: 1;
+.memory-page__feed {
   min-height: 0;
-}
-
-.hexgrid {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
-  padding: var(--space-3);
-}
-
-.hexgrid__head {
-  display: grid;
-  grid-template-columns: 80px repeat(16, 1fr);
-  gap: 6px;
-  padding-bottom: var(--space-2);
-  border-bottom: 1px dashed var(--border);
-  margin-bottom: var(--space-2);
-  font-size: 10px;
-  letter-spacing: 1px;
-  color: var(--text-muted);
-  text-transform: uppercase;
-}
-
-.hexgrid__head .hexgrid__col-h {
-  text-align: center;
-}
-
-.hexgrid__row {
-  display: grid;
-  grid-template-columns: 80px repeat(16, 1fr);
-  gap: 6px;
-  padding: 3px 0;
-}
-
-.hexgrid__addr {
-  color: var(--text-muted);
-  font-size: 11px;
-  letter-spacing: 0.5px;
-}
-
-.hexgrid__cell {
-  text-align: center;
-  color: var(--text);
-  padding: 2px 0;
-  border-radius: 2px;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-
-.hexgrid__cell--flash {
-  background: rgba(255, 179, 71, 0.30);
-  color: var(--amber);
-  text-shadow: var(--shadow-glow-amber);
-  animation: hex-pulse 600ms ease-out;
-}
-
-@keyframes hex-pulse {
-  0% { background: rgba(255, 179, 71, 0.6); transform: scale(1.18); }
-  100% { background: rgba(255, 179, 71, 0); transform: scale(1); }
-}
-
-.memory-page__err {
-  padding: var(--space-3);
-  color: var(--red-soft);
-  font-size: 12px;
-}
-
-.memory-page__feed-card { display: flex; flex-direction: column; min-height: 0; }
-
-.memory-page__feed-empty {
-  font-size: 12px;
-  color: var(--text-dim);
-  line-height: 1.5;
-}
-
-.memory-page__feed-list {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-}
-
-.feed-row {
-  display: grid;
-  grid-template-columns: 40px 1fr 40px;
-  gap: var(--space-2);
-  align-items: center;
-  padding: 4px var(--space-2);
-  border-left: 2px solid;
-  background: var(--surface-2);
-  transition: opacity var(--transition-base);
-}
-
-.feed-row--write {
-  border-left-color: var(--amber);
-  color: var(--amber);
-}
-
-.feed-row--read {
-  border-left-color: var(--cyan);
-  color: var(--cyan);
-}
-
-.feed-row__kind {
-  font-weight: bold;
-  letter-spacing: 1px;
-}
-
-.feed-row__addr,
-.feed-row__val {
-  color: inherit;
 }
 
 @media (max-width: 1100px) {
+  .memory-page__head {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+  }
+  .memory-page__nav { align-items: flex-start; }
   .memory-page__body {
     grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr auto;
   }
-  .memory-page__cpu { order: -1; }
+  .memory-page__cores {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .memory-page__cores > * {
+    min-width: 180px;
+  }
 }
 </style>

@@ -54,6 +54,18 @@
   --shadow-glow-amber-strong: 0 0 18px rgba(255, 179, 71, 0.55);
   --shadow-glow-green: 0 0 12px rgba(127, 255, 170, 0.30);
   --shadow-glow-red: 0 0 12px rgba(255, 58, 58, 0.35);
+
+  /* Per-core accent palette. Used wherever a UI surface needs to attribute
+     activity to a specific CPU core (memory heatmap, byte flights, chip
+     borders). Palette is short on purpose: real demos top out at 4 cores. */
+  --core-0: #ffb547;             /* amber  — same as the global accent */
+  --core-1: #6ad4ff;             /* cyan   */
+  --core-2: #7fffaa;             /* green  */
+  --core-3: #c9a0ff;             /* violet */
+  --shadow-glow-core-0: 0 0 12px rgba(255, 181, 71,  0.45);
+  --shadow-glow-core-1: 0 0 12px rgba(106, 212, 255, 0.45);
+  --shadow-glow-core-2: 0 0 12px rgba(127, 255, 170, 0.45);
+  --shadow-glow-core-3: 0 0 12px rgba(201, 160, 255, 0.45);
   --shadow-elevation-1: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-elevation-2: 0 8px 24px rgba(0, 0, 0, 0.5);
   --shadow-elevation-floating: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 179, 71, 0.18);
