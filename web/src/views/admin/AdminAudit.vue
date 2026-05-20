@@ -1,67 +1,51 @@
 <script setup lang="ts">
-import { useAdminStore } from '../../stores/admin';
+import { useAdminStore, type AuditRow } from '../../stores/admin';
 import Card from '../../components/ui/Card.vue';
-import EmptyState from '../../components/ui/EmptyState.vue';
+import DataTable, { type Column } from '../../components/ui/DataTable.vue';
 import { formatTimestamp } from './util';
 
 const admin = useAdminStore();
+
+const columns: Column<AuditRow>[] = [
+  { id: 'ts', label: 'Cuándo', accessor: (r) => formatTimestamp(r.ts), width: '170px' },
+  { id: 'actor', label: 'Actor' },
+  { id: 'action', label: 'Acción' },
+  { id: 'target', label: 'Objetivo' },
+  { id: 'meta', label: 'Meta' },
+];
 </script>
 
 <template>
   <Card title="Registro de auditoría">
-    <table v-if="admin.audit.length" class="grid">
-      <thead>
-        <tr>
-          <th>Cuándo</th>
-          <th>Actor</th>
-          <th>Acción</th>
-          <th>Objetivo</th>
-          <th>Meta</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="e in admin.audit" :key="e.id">
-          <td class="dim mono">{{ formatTimestamp(e.ts) }}</td>
-          <td class="mono">{{ e.actor }}</td>
-          <td><span class="action">{{ e.action }}</span></td>
-          <td class="mono">{{ e.target || '—' }}</td>
-          <td class="mono dim">{{ e.meta || '' }}</td>
-        </tr>
-      </tbody>
-    </table>
-    <EmptyState
-      v-else
-      icon="☰"
-      title="El registro está vacío"
-      message="Cada acción privilegiada (cerrar sesión, expulsar usuario, cambiar política de acceso, etc.) deja un rastro aquí."
-    />
+    <DataTable
+      :columns="columns"
+      :rows="admin.audit"
+      initial-sort="ts"
+      search-placeholder="Buscar por actor, acción u objetivo…"
+      empty-icon="☰"
+      empty-title="El registro está vacío"
+      empty-message="Cada acción privilegiada (cerrar sesión, expulsar usuario, cambiar política de acceso, etc.) deja un rastro aquí."
+    >
+      <template #[`cell:ts`]="{ value }">
+        <span class="mono dim">{{ value }}</span>
+      </template>
+      <template #[`cell:actor`]="{ row }">
+        <span class="mono">{{ row.actor }}</span>
+      </template>
+      <template #[`cell:action`]="{ row }">
+        <span class="action">{{ row.action }}</span>
+      </template>
+      <template #[`cell:target`]="{ row }">
+        <span class="mono">{{ row.target || '—' }}</span>
+      </template>
+      <template #[`cell:meta`]="{ row }">
+        <span class="mono dim">{{ row.meta || '' }}</span>
+      </template>
+    </DataTable>
   </Card>
 </template>
 
 <style scoped>
-.grid {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-.grid th, .grid td {
-  padding: 8px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  text-align: left;
-  vertical-align: middle;
-}
-
-.grid th {
-  font-size: 10px;
-  letter-spacing: 1.5px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  font-weight: 500;
-}
-
-.grid tbody tr:hover { background: rgba(255, 179, 71, 0.04); }
-
 .mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; }
 .dim { color: var(--text-dim); }
 
