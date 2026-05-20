@@ -41,16 +41,30 @@ func (k *Kernel) handleSyscall(core *Core) []cpu.Event {
 	arg1 := core.CPU.R.EBX
 	arg2 := core.CPU.R.ECX
 	arg3 := core.CPU.R.EDX
+	callerPID := core.CurrentPID
+
+	// sys_exit is special: it may switch the core to a different process via
+	// killCurrent, so core.CPU.R afterwards belongs to that new occupant.
+	// Touching EAX or emitting events keyed on core.CurrentPID below would
+	// corrupt the next process's register file (same shape as the
+	// SyncMutexLock/SemWait pre-stage trick). Handle the exit up front and
+	// return.
+	if num == SysExit {
+		out := []cpu.Event{cpu.EventSyscall{
+			PID:    callerPID,
+			Num:    num,
+			Name:   "exit",
+			Args:   []uint32{arg1, arg2, arg3},
+			Result: 0,
+		}}
+		return append(out, k.sysExit(core, arg1)...)
+	}
 
 	var out []cpu.Event
 	var result uint32
 	var name string
 
 	switch num {
-	case SysExit:
-		name = "exit"
-		out = append(out, k.sysExit(core, arg1)...)
-		result = 0
 	case SysWrite:
 		name = "write"
 		var subEvs []cpu.Event

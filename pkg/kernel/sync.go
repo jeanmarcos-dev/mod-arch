@@ -324,6 +324,36 @@ func (k *Kernel) blockOnSync(core *Core, reason string) []cpu.Event {
 	return out
 }
 
+// evictFromAllQueues removes pid from every place where it might still be
+// queued: mutex/sem waiters, keyboard blocked-reads, and the global ready
+// queue. Called from killCurrent so a dying process never gets handed off a
+// resource by a future unlock/signal.
+func (k *Kernel) evictFromAllQueues(pid int) {
+	for _, m := range k.Mutexes {
+		m.Waiters = removeInt(m.Waiters, pid)
+	}
+	for _, s := range k.Semaphores {
+		s.Waiters = removeInt(s.Waiters, pid)
+	}
+	for i, br := range k.blockedReads {
+		if br.PID == pid {
+			k.blockedReads = append(k.blockedReads[:i], k.blockedReads[i+1:]...)
+			break
+		}
+	}
+	k.Ready.Remove(pid)
+}
+
+func removeInt(xs []int, target int) []int {
+	out := xs[:0]
+	for _, v := range xs {
+		if v != target {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // wakeWaiter moves a previously-blocked PID back to READY. If a core is sitting
 // idle, the PID is handed straight to it via loadCPUFromPCB — switchTo cannot
 // be used because the idle core has no kernel-stack frame to patch (the

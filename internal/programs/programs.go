@@ -514,5 +514,235 @@ int main(void) {
 				},
 			},
 		},
+
+		// producer_consumer: classic synchronization via two semaphores. The
+		// "buffer" is conceptually one slot; sem 1 (empty) starts at 1, sem 2
+		// (full) at 0. Producer waits on empty / signals full; consumer does
+		// the opposite. Whether or not there is a real data field, the
+		// invariant "producer ≤ consumer + 1" is what the semaphore enforces.
+		{
+			Name:        "producer_consumer",
+			Category:    "concurrencia",
+			Description: "Productor y consumidor con un buffer de un slot, sincronizados por dos semáforos. Demuestra el patrón sem_wait/sem_signal sin necesidad de mutex porque solo hay un productor y un consumidor.",
+			Procs: []Proc{
+				{
+					Name: "setup_two_sems",
+					Source: `// Setup: crea sem(empty=1) y sem(full=0); luego termina.
+int main(void) {
+    sem_create(1);   // sem id 1 — "empty", buffer starts available
+    sem_create(0);   // sem id 2 — "full",  no items pending
+    exit(0);
+}
+`,
+					Bytes: []byte{
+						0xB8, 0x20, 0x00, 0x00, 0x00, // mov eax, 0x20 (SyncSemCreate)
+						0xBB, 0x01, 0x00, 0x00, 0x00, // mov ebx, 1   (init=1 → empty)
+						0xCD, 0x81, // int 0x81 → eax=1
+						0xB8, 0x20, 0x00, 0x00, 0x00, // mov eax, 0x20
+						0xBB, 0x00, 0x00, 0x00, 0x00, // mov ebx, 0   (init=0 → full)
+						0xCD, 0x81, // int 0x81 → eax=2
+						0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1 (sys_exit)
+						0x31, 0xDB, // xor ebx, ebx
+						0xCD, 0x80, // int 0x80
+					},
+				},
+				{
+					Name: "producer",
+					Source: `// Producer: 50 veces, espera buffer libre y luego avisa item disponible.
+int main(void) {
+    for (int i = 0; i < 50; i++) {
+        sem_wait(1);   // wait empty
+        // producir un item (en este demo no se escribe payload: el sync es lo
+        // pedagógico, no la data).
+        sem_signal(2); // signal full
+    }
+    exit(0);
+}
+`,
+					Bytes: []byte{
+						0xB9, 0x32, 0x00, 0x00, 0x00, // mov ecx, 50
+						0xBB, 0x01, 0x00, 0x00, 0x00, // L: mov ebx, 1 (empty)
+						0xB8, 0x21, 0x00, 0x00, 0x00, // mov eax, 0x21 (SemWait)
+						0xCD, 0x81, // int 0x81
+						0xBB, 0x02, 0x00, 0x00, 0x00, // mov ebx, 2 (full)
+						0xB8, 0x22, 0x00, 0x00, 0x00, // mov eax, 0x22 (SemSignal)
+						0xCD, 0x81, // int 0x81
+						0x49,       // dec ecx
+						0x75, 0xE5, // jne L
+						0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
+						0x31, 0xDB, // xor ebx, ebx
+						0xCD, 0x80, // int 0x80
+					},
+				},
+				{
+					Name: "consumer",
+					Source: `// Consumer: 50 veces, espera item disponible y luego libera el buffer.
+int main(void) {
+    for (int i = 0; i < 50; i++) {
+        sem_wait(2);   // wait full
+        // consumir el item (idéntica omisión de payload).
+        sem_signal(1); // signal empty
+    }
+    exit(0);
+}
+`,
+					Bytes: []byte{
+						0xB9, 0x32, 0x00, 0x00, 0x00,
+						0xBB, 0x02, 0x00, 0x00, 0x00, // L: mov ebx, 2 (full)
+						0xB8, 0x21, 0x00, 0x00, 0x00, // mov eax, 0x21 (SemWait)
+						0xCD, 0x81,
+						0xBB, 0x01, 0x00, 0x00, 0x00, // mov ebx, 1 (empty)
+						0xB8, 0x22, 0x00, 0x00, 0x00, // mov eax, 0x22 (SemSignal)
+						0xCD, 0x81,
+						0x49,
+						0x75, 0xE5,
+						0xB8, 0x01, 0x00, 0x00, 0x00,
+						0x31, 0xDB,
+						0xCD, 0x80,
+					},
+				},
+			},
+		},
+
+		// dining_philosophers_deadlock: 3 philos seated at a round table with
+		// 3 forks (mutex 1, 2, 3). Each philo picks LEFT then RIGHT, in the
+		// same order: 0→(1,2), 1→(2,3), 2→(3,1). Classic circular wait. When
+		// they grab their lefts in lock-step the system stalls: every fork
+		// is held, every philo waits for the next.
+		{
+			Name:        "philos_deadlock",
+			Category:    "concurrencia",
+			Description: "Cena de los filósofos en versión naïve (3 comensales). Cada uno toma su tenedor IZQUIERDO primero, luego el DERECHO. Si todos consiguen su izquierdo simultáneamente, nadie puede tomar el derecho → deadlock visible en la cola de los mutexes.",
+			Procs: []Proc{
+				{
+					Name: "setup_three_forks",
+					Source: `// Setup: tres tenedores (mutex 1, 2, 3) y exit.
+int main(void) {
+    mutex_create();  // fork 1
+    mutex_create();  // fork 2
+    mutex_create();  // fork 3
+    exit(0);
+}
+`,
+					Bytes: []byte{
+						0xB8, 0x10, 0x00, 0x00, 0x00, // mov eax, 0x10
+						0xCD, 0x81, // int 0x81 → mutex 1
+						0xB8, 0x10, 0x00, 0x00, 0x00,
+						0xCD, 0x81, // → mutex 2
+						0xB8, 0x10, 0x00, 0x00, 0x00,
+						0xCD, 0x81, // → mutex 3
+						0xB8, 0x01, 0x00, 0x00, 0x00,
+						0x31, 0xDB,
+						0xCD, 0x80,
+					},
+				},
+				philoBytes("philo_0_naive", 0, 1, 2, "filo 0: izq=1, der=2"),
+				philoBytes("philo_1_naive", 1, 2, 3, "filo 1: izq=2, der=3"),
+				philoBytes("philo_2_naive", 2, 3, 1, "filo 2: izq=3, der=1 (cierra el ciclo → deadlock potencial)"),
+			},
+		},
+
+		// dining_philosophers_safe: same three philos but the last one
+		// (philo 2) inverts its lock order: lower-id fork first, then higher.
+		// Breaking the symmetric "always-left-first" rule removes the cycle.
+		{
+			Name:        "philos_safe",
+			Category:    "concurrencia",
+			Description: "Misma cena de filósofos pero el último comensal invierte su orden de toma de tenedores. La asimetría rompe el ciclo de espera → no hay deadlock, el sistema progresa.",
+			Procs: []Proc{
+				{
+					Name: "setup_three_forks_safe",
+					Source: `// Setup idéntico al naïve: tres mutexes y exit.
+int main(void) {
+    mutex_create();
+    mutex_create();
+    mutex_create();
+    exit(0);
+}
+`,
+					Bytes: []byte{
+						0xB8, 0x10, 0x00, 0x00, 0x00,
+						0xCD, 0x81,
+						0xB8, 0x10, 0x00, 0x00, 0x00,
+						0xCD, 0x81,
+						0xB8, 0x10, 0x00, 0x00, 0x00,
+						0xCD, 0x81,
+						0xB8, 0x01, 0x00, 0x00, 0x00,
+						0x31, 0xDB,
+						0xCD, 0x80,
+					},
+				},
+				philoBytes("philo_0_safe", 0, 1, 2, "filo 0: 1 → 2"),
+				philoBytes("philo_1_safe", 1, 2, 3, "filo 1: 2 → 3"),
+				// Asimetría: philo 2 toma 1 primero (lower) y luego 3.
+				philoBytes("philo_2_safe", 2, 1, 3, "filo 2: 1 → 3 (asimétrico, rompe el ciclo)"),
+			},
+		},
 	}
+}
+
+// philoBytes emits a hand-encoded philosopher loop. Each philo locks its first
+// fork, then its second, "eats" (two nops), and unlocks in reverse order. The
+// shape is identical across philos; only the fork IDs vary, so the helper keeps
+// the demo table readable.
+func philoBytes(name string, idx, firstFork, secondFork int, label string) Proc {
+	return Proc{
+		Name: name,
+		Source: "// Filósofo #" + itoa(idx) + " — " + label + "\n" +
+			"int main(void) {\n" +
+			"    for (int i = 0; i < 10; i++) {\n" +
+			"        mutex_lock(" + itoa(firstFork) + ");\n" +
+			"        mutex_lock(" + itoa(secondFork) + ");\n" +
+			"        /* eat */\n" +
+			"        mutex_unlock(" + itoa(secondFork) + ");\n" +
+			"        mutex_unlock(" + itoa(firstFork) + ");\n" +
+			"    }\n" +
+			"    exit(0);\n" +
+			"}\n",
+		Bytes: []byte{
+			0xB9, 0x0A, 0x00, 0x00, 0x00, // mov ecx, 10
+			0xBB, byte(firstFork), 0x00, 0x00, 0x00, // L: mov ebx, firstFork
+			0xB8, 0x11, 0x00, 0x00, 0x00, // mov eax, 0x11 (MutexLock)
+			0xCD, 0x81, // int 0x81
+			0xBB, byte(secondFork), 0x00, 0x00, 0x00, // mov ebx, secondFork
+			0xB8, 0x11, 0x00, 0x00, 0x00, // mov eax, 0x11
+			0xCD, 0x81,
+			0x90, 0x90, // nop nop (eat)
+			0xBB, byte(secondFork), 0x00, 0x00, 0x00, // mov ebx, secondFork
+			0xB8, 0x12, 0x00, 0x00, 0x00, // mov eax, 0x12 (MutexUnlock)
+			0xCD, 0x81,
+			0xBB, byte(firstFork), 0x00, 0x00, 0x00, // mov ebx, firstFork
+			0xB8, 0x12, 0x00, 0x00, 0x00,
+			0xCD, 0x81,
+			0x49,       // dec ecx
+			0x75, 0xCB, // jne L (target 0x05, after 0x3A → delta -0x35)
+			0xB8, 0x01, 0x00, 0x00, 0x00,
+			0x31, 0xDB,
+			0xCD, 0x80,
+		},
+	}
+}
+
+// itoa is a tiny helper for the source-listing strings. Standard strconv works
+// but pulling it in for one call is overkill.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	var b [20]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		b[i] = '-'
+	}
+	return string(b[i:])
 }

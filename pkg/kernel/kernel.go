@@ -304,9 +304,20 @@ func (k *Kernel) stepCore(core *Core) ([]cpu.Event, error) {
 }
 
 // shouldFireTimer decides whether the PIT should fire on this step of the
-// given core. Every core has its own PIT counter so quantums are independent.
+// given core. The quantum counts only user-mode ticks — while the core is
+// executing kernel code (handlers, IRETs) or sitting idle (CurrentPID=0),
+// lastFired keeps advancing so the next user slice gets its full quantum.
+// Without this, timer IRQs would accumulate in PendingIRQs while IF=0 and
+// all dispatch back-to-back on the next IRET, starving user instructions
+// between successive fires. The idle-core check also prevents a halted core
+// (post-killCurrent with no Ready left) from being woken into running stale
+// user EIPs past sys_exit.
 func (k *Kernel) shouldFireTimer(core *Core) bool {
 	if k.TimerQuantum <= 0 {
+		return false
+	}
+	if core.CurrentPID == 0 || core.CPU.Mode != cpu.ModeUser {
+		core.lastTimerFiredAt = core.CPU.Tick
 		return false
 	}
 	return core.CPU.Tick >= core.lastTimerFiredAt+uint64(k.TimerQuantum) && core.CPU.Tick > 0
@@ -365,6 +376,12 @@ func (k *Kernel) runHandlerLogic(core *Core, vector uint8, source string) []cpu.
 // killCurrent terminates the current process on the given core and schedules
 // the next one if any remain. Used by sys_exit and by page-fault handling.
 // The PCB is left as ZOMBIE with the cause recorded in BlockedOn.
+//
+// Before flipping the state we evict the dying PID from every sync queue it
+// might still appear in (mutexes, semaphores, keyboard, ready). Otherwise a
+// later unlock/signal could "wake" the zombie via wakeWaiter and switchTo
+// would resurrect it — IRET would land at its saved EIP past sys_exit and
+// execute garbage opcodes.
 func (k *Kernel) killCurrent(core *Core, reason string) []cpu.Event {
 	curPID := core.CurrentPID
 	curPCB := k.Processes[curPID]
@@ -372,6 +389,7 @@ func (k *Kernel) killCurrent(core *Core, reason string) []cpu.Event {
 		core.CPU.Halted = true
 		return nil
 	}
+	k.evictFromAllQueues(curPID)
 	curPCB.State = StateZombie
 	curPCB.BlockedOn = reason
 	curPCB.Core = -1
