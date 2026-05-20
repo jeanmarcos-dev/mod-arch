@@ -57,6 +57,12 @@ func (k *Kernel) handleSync(core *Core) []cpu.Event {
 			CoreID: core.ID, PID: core.CurrentPID, MutexID: id, Op: "create",
 		})
 	case SyncMutexLock:
+		// Pre-set EAX so that if mutexLock has to block, blockOnSync
+		// (which copies CPU regs into the PCB before switching to the
+		// next core occupant) captures 0 — the value the user must
+		// read once the lock eventually arrives. Modifying EAX AFTER
+		// the switch would corrupt the next process's register file.
+		core.CPU.R.EAX = 0
 		evs, blocked, ok := k.mutexLock(core, int(arg))
 		out = append(out, evs...)
 		if !ok {
@@ -64,10 +70,6 @@ func (k *Kernel) handleSync(core *Core) []cpu.Event {
 			break
 		}
 		if blocked {
-			// The current process blocked. blockOnSync already wrote the
-			// scheduling events; EAX must remain 0 so the user reads
-			// "success" when it resumes.
-			core.CPU.R.EAX = 0
 			return out
 		}
 		result = 0
@@ -84,6 +86,9 @@ func (k *Kernel) handleSync(core *Core) []cpu.Event {
 			CoreID: core.ID, PID: core.CurrentPID, SemID: id, Op: "create", Count: int(arg),
 		})
 	case SyncSemWait:
+		// Same trick as SyncMutexLock: stage 0 in EAX so blockOnSync
+		// snapshots the right success value into the blocking PCB.
+		core.CPU.R.EAX = 0
 		evs, blocked, ok := k.semWait(core, int(arg))
 		out = append(out, evs...)
 		if !ok {
@@ -91,7 +96,6 @@ func (k *Kernel) handleSync(core *Core) []cpu.Event {
 			break
 		}
 		if blocked {
-			core.CPU.R.EAX = 0
 			return out
 		}
 		result = 0
@@ -320,9 +324,11 @@ func (k *Kernel) blockOnSync(core *Core, reason string) []cpu.Event {
 	return out
 }
 
-// wakeWaiter moves a previously-blocked PID back to READY. It does not switch
-// any core directly; the next scheduler tick (or idle core lookup) will pick
-// the woken PID up.
+// wakeWaiter moves a previously-blocked PID back to READY. If a core is sitting
+// idle, the PID is handed straight to it via loadCPUFromPCB — switchTo cannot
+// be used because the idle core has no kernel-stack frame to patch (the
+// process state must come up fresh from the PCB). Otherwise the PID is queued
+// for the scheduler to pick up later.
 func (k *Kernel) wakeWaiter(pid int, reason string) []cpu.Event {
 	pcb := k.Processes[pid]
 	if pcb == nil {
@@ -335,14 +341,16 @@ func (k *Kernel) wakeWaiter(pid int, reason string) []cpu.Event {
 		cpu.EventProcessState{PID: pid, State: string(StateReady), Reason: "woken from " + reason},
 	}
 
-	// If an idle core is sitting around, hand the PID to it directly; the
-	// frontend then sees a clean assign without a stop-over in the ready
-	// queue. Otherwise queue normally.
 	if idle := k.firstIdleCore(); idle != nil {
-		out = append(out, cpu.EventSchedDecision{
-			FromPID: 0, ToPID: pid, ReadyQueue: k.Ready.Snapshot(),
-		})
-		out = append(out, k.switchTo(idle, pid)...)
+		idle.CurrentPID = pid
+		pcb.State = StateRun
+		pcb.Core = idle.ID
+		k.loadCPUFromPCB(idle, pcb)
+		out = append(out,
+			cpu.EventSchedDecision{FromPID: 0, ToPID: pid, ReadyQueue: k.Ready.Snapshot()},
+			cpu.EventCoreAssign{CoreID: idle.ID, PID: pid},
+			cpu.EventProcessState{PID: pid, State: string(StateRun)},
+		)
 		return out
 	}
 	k.Ready.Push(pid)

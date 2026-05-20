@@ -78,7 +78,12 @@ func runServer(args []string) {
 		for _, p := range d.Procs {
 			procs = append(procs, sim.Proc{Name: p.Name, Bytes: p.Bytes, Source: p.Source})
 		}
-		demos = append(demos, sim.Demo{Name: d.Name, Description: d.Description, Procs: procs})
+		demos = append(demos, sim.Demo{
+			Name:        d.Name,
+			Description: d.Description,
+			Category:    d.Category,
+			Procs:       procs,
+		})
 	}
 
 	files, err := staticui.Files()

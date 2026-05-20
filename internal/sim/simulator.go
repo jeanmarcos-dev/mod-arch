@@ -20,6 +20,7 @@ import (
 type Demo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Category    string `json:"category,omitempty"`
 	Procs       []Proc `json:"-"`
 }
 
@@ -79,10 +80,7 @@ func New(cfg Config) *Simulator {
 	for _, d := range cfg.Demos {
 		progs[d.Name] = d
 	}
-	cores := cfg.NumCores
-	if cores < 1 {
-		cores = 1
-	}
+	cores := max(cfg.NumCores, 1)
 	return &Simulator{
 		kernel:   kernel.NewMulti(cpu.DefaultMemSize, cores),
 		programs: progs,
@@ -391,6 +389,7 @@ func demoSummary(d Demo) map[string]any {
 	return map[string]any{
 		"name":        d.Name,
 		"description": d.Description,
+		"category":    d.Category,
 		"size":        totalSize,
 		"procs":       procNames,
 	}

@@ -9,6 +9,10 @@ type Demo struct {
 	Name        string
 	Description string
 	Procs       []Proc
+	// Category groups demos in the UI ("concurrencia", "interrupciones",
+	// etc.). Empty means "uncategorized" and the demo appears in the
+	// default picker.
+	Category string
 }
 
 // Proc is a single binary that the kernel loads as a process.
@@ -339,6 +343,173 @@ int main(void) {
 						0xBB, 0x00, 0x00, 0x00, 0x00,
 						0x43,
 						0xEB, 0xFD,
+					},
+				},
+			},
+		},
+
+		// ─── Concurrency demos ────────────────────────────────────────────
+		// Shared counter at 0x3FFFE0 (inside user_stack region, well above any
+		// process stack). Each worker iterates 200 times doing
+		// load → inc → store.
+		{
+			Name:        "race_counter",
+			Category:    "concurrencia",
+			Description: "Tres procesos: el setup pone el contador en 0, dos workers lo incrementan 200 veces cada uno SIN lock. El resultado final raramente es 400 porque el timer preempt el load/store y se pierden updates.",
+			Procs: []Proc{
+				{
+					Name: "setup_zero_counter",
+					Source: `// Setup: pone el contador compartido en 0 y termina.
+int main(void) {
+    *(int *)0x3FFFE0 = 0;
+    exit(0);
+}
+`,
+					Bytes: []byte{
+						0x31, 0xC0, // xor eax, eax
+						0xA3, 0xE0, 0xFF, 0x3F, 0x00, // mov [0x3FFFE0], eax
+						0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1 (sys_exit)
+						0x31, 0xDB, // xor ebx, ebx
+						0xCD, 0x80, // int 0x80
+					},
+				},
+				{
+					Name: "racer_a",
+					Source: `// Worker A: incrementa el contador compartido 200 veces sin lock.
+int main(void) {
+    for (int i = 0; i < 200; i++) {
+        int n = *(int *)0x3FFFE0;   // load
+        n++;                          // increment
+        *(int *)0x3FFFE0 = n;         // store ← preemption window between load and store
+    }
+    exit(0);
+}
+`,
+					Bytes: []byte{
+						0xB9, 0xC8, 0x00, 0x00, 0x00, // mov ecx, 200
+						0xA1, 0xE0, 0xFF, 0x3F, 0x00, // L: mov eax, [counter]
+						0x40,                         // inc eax
+						0xA3, 0xE0, 0xFF, 0x3F, 0x00, // mov [counter], eax
+						0x49,       // dec ecx
+						0x75, 0xF2, // jne L
+						0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
+						0x31, 0xDB, // xor ebx, ebx
+						0xCD, 0x80, // int 0x80
+					},
+				},
+				{
+					Name: "racer_b",
+					Source: `// Worker B: mismo loop que A. Sin lock entre ambos.
+int main(void) {
+    for (int i = 0; i < 200; i++) {
+        int n = *(int *)0x3FFFE0;
+        n++;
+        *(int *)0x3FFFE0 = n;
+    }
+    exit(0);
+}
+`,
+					Bytes: []byte{
+						0xB9, 0xC8, 0x00, 0x00, 0x00,
+						0xA1, 0xE0, 0xFF, 0x3F, 0x00,
+						0x40,
+						0xA3, 0xE0, 0xFF, 0x3F, 0x00,
+						0x49,
+						0x75, 0xF2,
+						0xB8, 0x01, 0x00, 0x00, 0x00,
+						0x31, 0xDB,
+						0xCD, 0x80,
+					},
+				},
+			},
+		},
+
+		{
+			Name:        "safe_counter",
+			Category:    "concurrencia",
+			Description: "Mismo loop que race_counter, pero los workers piden un mutex (id=1) antes de modificar el contador. Resultado final SIEMPRE 400 porque el lock serializa la sección crítica.",
+			Procs: []Proc{
+				{
+					Name: "setup_zero_and_mutex",
+					Source: `// Setup: pone el contador en 0, crea el mutex (id=1) y termina.
+int main(void) {
+    *(int *)0x3FFFE0 = 0;
+    mutex_create();   // ID 1 (primer mutex del kernel)
+    exit(0);
+}
+`,
+					Bytes: []byte{
+						0x31, 0xC0, // xor eax, eax
+						0xA3, 0xE0, 0xFF, 0x3F, 0x00, // mov [counter], eax
+						0xB8, 0x10, 0x00, 0x00, 0x00, // mov eax, 0x10 (SyncMutexCreate)
+						0xCD, 0x81, // int 0x81 → eax = mutex id
+						0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1 (sys_exit)
+						0x31, 0xDB, // xor ebx, ebx
+						0xCD, 0x80, // int 0x80
+					},
+				},
+				{
+					Name: "locker_a",
+					Source: `// Worker A: incrementa con mutex id=1.
+int main(void) {
+    for (int i = 0; i < 200; i++) {
+        mutex_lock(1);
+        int n = *(int *)0x3FFFE0;
+        n++;
+        *(int *)0x3FFFE0 = n;
+        mutex_unlock(1);
+    }
+    exit(0);
+}
+`,
+					Bytes: []byte{
+						0xB9, 0xC8, 0x00, 0x00, 0x00, // mov ecx, 200
+						0xBB, 0x01, 0x00, 0x00, 0x00, // L: mov ebx, 1 (mutex id)
+						0xB8, 0x11, 0x00, 0x00, 0x00, // mov eax, 0x11 (SyncMutexLock)
+						0xCD, 0x81, // int 0x81
+						0xA1, 0xE0, 0xFF, 0x3F, 0x00, // mov eax, [counter]
+						0x40,                         // inc eax
+						0xA3, 0xE0, 0xFF, 0x3F, 0x00, // mov [counter], eax
+						0xBB, 0x01, 0x00, 0x00, 0x00, // mov ebx, 1
+						0xB8, 0x12, 0x00, 0x00, 0x00, // mov eax, 0x12 (SyncMutexUnlock)
+						0xCD, 0x81, // int 0x81
+						0x49,       // dec ecx
+						0x75, 0xDA, // jne L
+						0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
+						0x31, 0xDB, // xor ebx, ebx
+						0xCD, 0x80, // int 0x80
+					},
+				},
+				{
+					Name: "locker_b",
+					Source: `// Worker B: mismo loop que A, ambos serializan vía mutex id=1.
+int main(void) {
+    for (int i = 0; i < 200; i++) {
+        mutex_lock(1);
+        int n = *(int *)0x3FFFE0;
+        n++;
+        *(int *)0x3FFFE0 = n;
+        mutex_unlock(1);
+    }
+    exit(0);
+}
+`,
+					Bytes: []byte{
+						0xB9, 0xC8, 0x00, 0x00, 0x00,
+						0xBB, 0x01, 0x00, 0x00, 0x00,
+						0xB8, 0x11, 0x00, 0x00, 0x00,
+						0xCD, 0x81,
+						0xA1, 0xE0, 0xFF, 0x3F, 0x00,
+						0x40,
+						0xA3, 0xE0, 0xFF, 0x3F, 0x00,
+						0xBB, 0x01, 0x00, 0x00, 0x00,
+						0xB8, 0x12, 0x00, 0x00, 0x00,
+						0xCD, 0x81,
+						0x49,
+						0x75, 0xDA,
+						0xB8, 0x01, 0x00, 0x00, 0x00,
+						0x31, 0xDB,
+						0xCD, 0x80,
 					},
 				},
 			},
