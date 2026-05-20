@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
+import { apiFetch, apiJSON } from '../lib/api';
 
 export interface AuthUser {
   id: string;
@@ -20,7 +21,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function fetchMe(): Promise<boolean> {
     try {
-      const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
+      const res = await apiFetch('/api/auth/me');
       if (!res.ok) {
         user.value = null;
         return false;
@@ -38,18 +39,12 @@ export const useAuthStore = defineStore('auth', () => {
     lastError.value = null;
     magicSent.value = false;
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        lastError.value = data.error ?? `error ${res.status}`;
-        return false;
-      }
-      user.value = data.user as AuthUser;
+      const data = await apiJSON<{ user: AuthUser; magic_sent: boolean }>(
+        'POST',
+        '/api/auth/login',
+        payload,
+      );
+      user.value = data.user;
       magicSent.value = Boolean(data.magic_sent);
       return true;
     } catch (err) {
@@ -60,10 +55,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function logout(): Promise<void> {
     try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'same-origin',
-      });
+      await apiFetch('/api/auth/logout', { method: 'POST' });
     } finally {
       user.value = null;
       magicSent.value = false;

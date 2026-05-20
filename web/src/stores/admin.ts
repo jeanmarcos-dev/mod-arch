@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
+import { apiFetch } from '../lib/api';
 
 export interface AdminStats {
   full: number;
@@ -60,13 +61,12 @@ export interface AuditRow {
 }
 
 async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const opts: RequestInit = {
-    method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-    credentials: 'same-origin',
-  };
-  if (body !== undefined) opts.body = JSON.stringify(body);
-  const r = await fetch(path, opts);
+  const opts: RequestInit = { method };
+  if (body !== undefined) {
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(body);
+  }
+  const r = await apiFetch(path, opts);
   if (!r.ok) {
     const e = await r.json().catch(() => ({ error: 'Error HTTP ' + r.status }));
     throw new Error(e.error || 'Error HTTP ' + r.status);
@@ -93,7 +93,7 @@ export const useAdminStore = defineStore('admin', () => {
   // hide the entire /admin namespace in the latter case.
   async function fetchMeStatus(): Promise<number> {
     try {
-      const r = await fetch('/admin/api/me', { credentials: 'same-origin' });
+      const r = await apiFetch('/admin/api/me');
       if (r.ok) {
         const data = (await r.json()) as { user: string; stats: AdminStats };
         user.value = data.user;
