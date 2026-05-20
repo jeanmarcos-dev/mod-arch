@@ -2,6 +2,9 @@
 import { ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAdminStore } from '../../stores/admin';
+import Btn from '../../components/ui/Btn.vue';
+import Card from '../../components/ui/Card.vue';
+import Field from '../../components/ui/Field.vue';
 
 const admin = useAdminStore();
 const router = useRouter();
@@ -28,45 +31,51 @@ async function submit() {
 
 <template>
   <div class="admin-login">
-    <div class="card">
-      <header>
+    <Card class="admin-login__card" :elevation="2">
+      <header class="admin-login__header">
         <h1>ADMIN · MODOS-CPU</h1>
-        <p class="hint">Acceso restringido al panel de administración</p>
+        <p class="admin-login__hint">Acceso restringido al panel de administración.</p>
       </header>
 
-      <form @submit.prevent="submit">
-        <label>
-          <span>Usuario</span>
+      <form class="admin-login__form" @submit.prevent="submit">
+        <Field label="Usuario" required v-slot="{ id }">
           <input
+            :id="id"
             v-model="user"
+            name="user"
             autocomplete="username"
             autofocus
             required
             :disabled="busy"
           />
-        </label>
-        <label>
-          <span>Contraseña</span>
+        </Field>
+
+        <Field label="Contraseña" required :error="admin.lastError ?? ''" v-slot="{ id }">
           <input
+            :id="id"
             v-model="pass"
+            name="pass"
             type="password"
             autocomplete="current-password"
             required
             :disabled="busy"
           />
-        </label>
+        </Field>
 
-        <p v-if="admin.lastError" class="error">{{ admin.lastError }}</p>
-
-        <button type="submit" :disabled="busy || !user || !pass">
+        <Btn
+          type="submit"
+          :loading="busy"
+          :disabled="!user || !pass"
+          block
+        >
           {{ busy ? 'Verificando…' : 'Ingresar' }}
-        </button>
+        </Btn>
       </form>
 
-      <footer>
+      <footer class="admin-login__footer">
         <a href="/">← Volver al simulador</a>
       </footer>
-    </div>
+    </Card>
   </div>
 </template>
 
@@ -75,117 +84,51 @@ async function submit() {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 16px;
+  padding: var(--space-4);
   background:
     radial-gradient(ellipse at center, rgba(255, 179, 71, 0.06), transparent 60%),
-    var(--bg, #0a0a0a);
+    var(--surface-0);
 }
 
-.card {
+.admin-login__card {
   width: min(100%, 380px);
-  background: rgba(0, 0, 0, 0.55);
-  border: 1px solid var(--border, #3a3a3a);
-  box-shadow: 0 0 32px rgba(255, 179, 71, 0.05);
-  padding: 28px 26px;
-  font-family: 'JetBrains Mono', monospace;
 }
 
-header h1 {
+.admin-login__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-5);
+}
+
+.admin-login__header h1 {
   font-family: 'Major Mono Display', monospace;
   font-size: 16px;
   letter-spacing: 4px;
-  color: var(--amber, #ffb347);
-  margin: 0 0 6px;
-  text-shadow: 0 0 8px rgba(255, 179, 71, 0.3);
+  color: var(--amber);
+  text-shadow: var(--shadow-glow-amber);
+  font-weight: normal;
 }
 
-.hint {
-  color: var(--text-dim, #888);
+.admin-login__hint {
+  color: var(--text-dim);
   font-size: 12px;
-  margin: 0 0 22px;
 }
 
-form {
+.admin-login__form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-4);
 }
 
-label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 11px;
-  letter-spacing: 1px;
-  color: var(--text-dim, #888);
-  text-transform: uppercase;
-}
-
-input {
-  font-family: 'JetBrains Mono', monospace;
-  background: rgba(0, 0, 0, 0.55);
-  border: 1px solid var(--border, #3a3a3a);
-  color: var(--text, #e0e0e0);
-  padding: 9px 10px;
-  font-size: 14px;
-  outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-input:focus {
-  border-color: var(--amber, #ffb347);
-  box-shadow: 0 0 6px rgba(255, 179, 71, 0.25);
-}
-
-input:disabled {
-  opacity: 0.6;
-}
-
-button {
-  margin-top: 6px;
-  font-family: 'JetBrains Mono', monospace;
-  background: rgba(255, 179, 71, 0.12);
-  border: 1px solid var(--amber, #ffb347);
-  color: var(--amber, #ffb347);
-  padding: 10px 12px;
-  font-size: 13px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: background 0.15s ease, box-shadow 0.15s ease;
-}
-
-button:hover:not(:disabled) {
-  background: rgba(255, 179, 71, 0.2);
-  box-shadow: 0 0 10px rgba(255, 179, 71, 0.3);
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.error {
-  margin: 0;
-  color: var(--red, #ff7a7a);
-  font-size: 12px;
-  border-left: 2px solid var(--red, #ff7a7a);
-  padding-left: 8px;
-}
-
-footer {
-  margin-top: 22px;
+.admin-login__footer {
+  margin-top: var(--space-5);
   text-align: center;
   font-size: 11px;
 }
 
-footer a {
-  color: var(--text-dim, #888);
-  text-decoration: none;
+.admin-login__footer a {
+  color: var(--text-dim);
   letter-spacing: 1px;
-}
-
-footer a:hover {
-  color: var(--amber, #ffb347);
 }
 </style>
