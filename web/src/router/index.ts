@@ -16,7 +16,13 @@ const Simulator = () => import('../views/Simulator.vue');
 const StudentLogin = () => import('../views/Login.vue');
 const NotFound = () => import('../views/NotFound.vue');
 const AdminLogin = () => import('../views/admin/Login.vue');
-const AdminDashboard = () => import('../views/admin/Dashboard.vue');
+const AdminShell = () => import('../layouts/AdminShell.vue');
+const AdminOverview = () => import('../views/admin/AdminOverview.vue');
+const AdminSessions = () => import('../views/admin/AdminSessions.vue');
+const AdminInvites = () => import('../views/admin/AdminInvites.vue');
+const AdminAccess = () => import('../views/admin/AdminAccess.vue');
+const AdminUsers = () => import('../views/admin/AdminUsers.vue');
+const AdminAudit = () => import('../views/admin/AdminAudit.vue');
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -49,9 +55,16 @@ export const router = createRouter({
     },
     {
       path: '/admin',
-      name: 'admin-dashboard',
-      component: AdminDashboard,
+      component: AdminShell,
       meta: { requiresAuth: true },
+      children: [
+        { path: '', name: 'admin-dashboard', component: AdminOverview, meta: { title: 'Resumen' } },
+        { path: 'sesiones', name: 'admin-sessions', component: AdminSessions, meta: { title: 'Sesiones' } },
+        { path: 'usuarios', name: 'admin-users', component: AdminUsers, meta: { title: 'Usuarios' } },
+        { path: 'invitaciones', name: 'admin-invites', component: AdminInvites, meta: { title: 'Invitaciones' } },
+        { path: 'accesos', name: 'admin-access', component: AdminAccess, meta: { title: 'Accesos' } },
+        { path: 'auditoria', name: 'admin-audit', component: AdminAudit, meta: { title: 'Auditoría' } },
+      ],
     },
     {
       path: '/admin/:catchAll(.*)',
