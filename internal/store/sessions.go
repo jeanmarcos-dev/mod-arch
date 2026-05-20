@@ -78,6 +78,27 @@ func (s *Store) ListSessions(ctx context.Context) ([]SessionRow, error) {
 	return out, rows.Err()
 }
 
+// ListSessionsByUserID returns every session attached to a given user, newest
+// activity first. Used by the student-facing "Mis sesiones" page.
+func (s *Store) ListSessionsByUserID(ctx context.Context, userID string) ([]SessionRow, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, mode, label, public, view_token, user_id, created_at, last_active_at
+         FROM sessions WHERE user_id = ? ORDER BY last_active_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list sessions by user: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]SessionRow, 0)
+	for rows.Next() {
+		r, err := scanSessionRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *r)
+	}
+	return out, rows.Err()
+}
+
 // UpdateSessionLabel persists a label change.
 func (s *Store) UpdateSessionLabel(ctx context.Context, id, label string) error {
 	_, err := s.db.ExecContext(ctx,

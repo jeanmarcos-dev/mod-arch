@@ -20,6 +20,7 @@ const magicLinkTTL = 15 * time.Minute
 func (s *Server) registerAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/auth/login", s.limitByIP(s.authLimit, s.requireCSRF(s.handleAuthLogin)))
 	mux.HandleFunc("GET /api/auth/me", s.handleAuthMe)
+	mux.HandleFunc("GET /api/auth/sessions", s.handleAuthMySessions)
 	mux.HandleFunc("POST /api/auth/logout", s.requireCSRF(s.handleAuthLogout))
 	mux.HandleFunc("GET /auth/magic", s.handleAuthMagic)
 }
@@ -179,6 +180,49 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"user": publicUser(user)})
+}
+
+// handleAuthMySessions lists every session attached to the caller's user. The
+// student-facing "Mis sesiones" page uses this to show a history.
+func (s *Server) handleAuthMySessions(w http.ResponseWriter, r *http.Request) {
+	user, ok := s.currentUser(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "no autenticado"})
+		return
+	}
+	st := s.manager.Store()
+	if st == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "persistencia deshabilitada"})
+		return
+	}
+	rows, err := st.ListSessionsByUserID(r.Context(), user.ID)
+	if err != nil {
+		s.logger.Warn("auth: list user sessions failed", "user", user.ID, "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "error interno"})
+		return
+	}
+	type item struct {
+		ID         string `json:"id"`
+		Mode       string `json:"mode"`
+		Label      string `json:"label"`
+		Public     bool   `json:"public"`
+		ViewToken  string `json:"view_token,omitempty"`
+		CreatedAt  int64  `json:"created_at"`
+		LastActive int64  `json:"last_active"`
+	}
+	out := make([]item, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, item{
+			ID:         row.ID,
+			Mode:       row.Mode,
+			Label:      row.Label,
+			Public:     row.Public,
+			ViewToken:  row.ViewToken,
+			CreatedAt:  row.CreatedAt,
+			LastActive: row.LastActiveAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // handleAuthLogout detaches the user from the current session while keeping
