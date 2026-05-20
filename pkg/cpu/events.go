@@ -195,3 +195,44 @@ type EventCoreRelease struct {
 
 // Tag returns the event tag.
 func (EventCoreRelease) Tag() string { return "core_release" }
+
+// EventMutexOp summarizes every action on a kernel mutex so the frontend can
+// animate locks, contention, and handoffs without juggling four near-identical
+// event types. Op values:
+//
+//   - "create"   — mutex_create returned a new ID.
+//   - "acquired" — pid took the lock immediately (no contention).
+//   - "waiting"  — pid blocked because someone else held the lock.
+//   - "released" — pid released the lock and no one was waiting.
+//   - "handoff"  — pid released the lock and the next waiter took it.
+type EventMutexOp struct {
+	CoreID  int    `json:"core_id"`
+	PID     int    `json:"pid"`
+	MutexID int    `json:"mutex_id"`
+	Op      string `json:"op"`
+	NextPID int    `json:"next_pid,omitempty"`
+	Waiters []int  `json:"waiters,omitempty"`
+}
+
+// Tag returns the event tag.
+func (EventMutexOp) Tag() string { return "mutex_op" }
+
+// EventSemOp summarizes every action on a kernel semaphore. Op values:
+//
+//   - "create"          — sem_create returned a new ID.
+//   - "wait_immediate"  — pid decremented count and continued.
+//   - "wait_blocked"    — count was 0 so pid blocked.
+//   - "signal"          — pid incremented count, no one was waiting.
+//   - "handoff"         — pid signaled and the first waiter was unblocked.
+type EventSemOp struct {
+	CoreID  int    `json:"core_id"`
+	PID     int    `json:"pid"`
+	SemID   int    `json:"sem_id"`
+	Op      string `json:"op"`
+	Count   int    `json:"count"`
+	NextPID int    `json:"next_pid,omitempty"`
+	Waiters []int  `json:"waiters,omitempty"`
+}
+
+// Tag returns the event tag.
+func (EventSemOp) Tag() string { return "sem_op" }

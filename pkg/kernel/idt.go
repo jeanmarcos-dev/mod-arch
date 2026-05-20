@@ -16,6 +16,7 @@ const (
 	IRQTimer       uint8 = 0x20 // PIT
 	IRQKeyboard    uint8 = 0x21
 	IRQSyscall     uint8 = 0x80 // Linux convention
+	IRQSync        uint8 = 0x81 // mutex / semaphore subsystem
 )
 
 // InstallDefaultIDT writes minimal handlers into kernel memory and registers
@@ -29,6 +30,7 @@ func (k *Kernel) InstallDefaultIDT() {
 	timerHandler := []byte{0x90, 0xCF}         // nop + iret
 	syscallHandler := []byte{0x90, 0x90, 0xCF} // nop nop iret
 	keyboardHandler := []byte{0x90, 0xCF}
+	syncHandler := []byte{0x90, 0x90, 0xCF} // nop nop iret (same shape as syscall)
 
 	// Each handler starts on a 0x10-aligned address so they are easy to
 	// distinguish in hex dumps and visualizations.
@@ -38,6 +40,7 @@ func (k *Kernel) InstallDefaultIDT() {
 		IRQTimer:       cpu.AddrKernelText + 0x20,
 		IRQKeyboard:    cpu.AddrKernelText + 0x30,
 		IRQSyscall:     cpu.AddrKernelText + 0x40,
+		IRQSync:        cpu.AddrKernelText + 0x50,
 	}
 
 	boot := k.BootCPU()
@@ -46,6 +49,7 @@ func (k *Kernel) InstallDefaultIDT() {
 	writeHandler(boot, handlerAddrs[IRQTimer], timerHandler)
 	writeHandler(boot, handlerAddrs[IRQKeyboard], keyboardHandler)
 	writeHandler(boot, handlerAddrs[IRQSyscall], syscallHandler)
+	writeHandler(boot, handlerAddrs[IRQSync], syncHandler)
 
 	for vec, addr := range handlerAddrs {
 		setIDTEntry(boot, vec, addr)

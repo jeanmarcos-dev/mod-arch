@@ -69,6 +69,11 @@ type Kernel struct {
 	KeyboardBuf  []byte
 	blockedReads []*blockedReadRequest
 
+	// Mutexes and Semaphores are 1-indexed registries of the kernel's
+	// synchronization primitives, exposed through INT 0x81.
+	Mutexes    []*Mutex
+	Semaphores []*Semaphore
+
 	nextPID int
 }
 
@@ -165,6 +170,8 @@ func (k *Kernel) Reset() {
 	k.nextPID = 1
 	k.KeyboardBuf = nil
 	k.blockedReads = nil
+	k.Mutexes = nil
+	k.Semaphores = nil
 	// The IDT lives in kernel memory and CPU.Reset does not touch it, but
 	// reinstall defensively in case a test mutated entries.
 	k.InstallDefaultIDT()
@@ -328,6 +335,13 @@ func (k *Kernel) runHandlerLogic(core *Core, vector uint8, source string) []cpu.
 			return nil
 		}
 		return k.handleSyscall(core)
+	case IRQSync:
+		// Vector 0x81 carries mutex/semaphore sub-syscalls. Same SW-only
+		// convention as 0x80.
+		if source != "SW" {
+			return nil
+		}
+		return k.handleSync(core)
 	case IRQPageFault:
 		// Page faults always come via "fault" (the MMU raises them on access
 		// violation). A real OS could resolve some (page-in, COW); here we
