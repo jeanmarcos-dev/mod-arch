@@ -35,10 +35,8 @@ type Server struct {
 	logger   *slog.Logger
 	staticFS fs.FS
 
-	fullTmpl       *template.Template
-	adminLoginTmpl *template.Template
-	adminDashTmpl  *template.Template
-	admin          adminConfig
+	fullTmpl *template.Template
+	admin    adminConfig
 }
 
 // Config holds the Server construction parameters.
@@ -60,7 +58,6 @@ func New(cfg Config) *Server {
 		fullTmpl: mustParseTemplate("full", "templates/full.html"),
 		admin:    loadAdminConfig(),
 	}
-	s.initAdminTemplates()
 	if s.admin.enabled {
 		cfg.Logger.Info("admin enabled", "user", s.admin.user)
 	} else {

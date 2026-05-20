@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-//go:embed templates/*.html templates/*.css templates/*.js
+//go:embed templates/*.html templates/*.css
 var templateFS embed.FS
 
 // mustParseTemplate parses a single HTML file from templateFS or panics.
@@ -37,7 +37,6 @@ func readStaticAsset(filePath string) []byte {
 // Only entries listed here are served by handleAsset.
 var assetContentTypes = map[string]string{
 	".css": "text/css; charset=utf-8",
-	".js":  "application/javascript; charset=utf-8",
 }
 
 // handleAsset serves CSS and JavaScript files embedded under templates/.
