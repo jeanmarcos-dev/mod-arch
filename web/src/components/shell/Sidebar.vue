@@ -46,7 +46,7 @@ function isActive(to: string): boolean {
       >
         <span aria-hidden="true">{{ collapsed ? '»' : '«' }}</span>
       </button>
-      <h1 v-if="!collapsed" class="sidebar__brand">{{ heading }}</h1>
+      <h1 class="sidebar__brand">{{ heading }}</h1>
     </header>
 
     <nav class="sidebar__nav" aria-label="Navegación principal">
@@ -55,7 +55,7 @@ function isActive(to: string): boolean {
           v-if="item.group && (idx === 0 || items[idx - 1].group !== item.group)"
           class="sidebar__group"
         >
-          <span v-if="!collapsed">{{ item.group }}</span>
+          <span class="sidebar__group-label">{{ item.group }}</span>
         </div>
 
         <RouterLink
@@ -70,7 +70,7 @@ function isActive(to: string): boolean {
           @click="(e) => item.soon && e.preventDefault()"
         >
           <span class="sidebar__icon" aria-hidden="true">{{ item.icon }}</span>
-          <span v-if="!collapsed" class="sidebar__label">
+          <span class="sidebar__label">
             {{ item.label }}
             <span v-if="item.soon" class="sidebar__soon">Próx.</span>
           </span>
@@ -79,7 +79,7 @@ function isActive(to: string): boolean {
     </nav>
 
     <footer class="sidebar__foot">
-      <div v-if="!collapsed && auth.user" class="sidebar__user">
+      <div v-if="auth.user" class="sidebar__user">
         <span class="sidebar__user-icon" aria-hidden="true">[👤]</span>
         <span class="sidebar__user-name">{{ auth.user.name }}</span>
       </div>
@@ -97,19 +97,28 @@ function isActive(to: string): boolean {
   flex-shrink: 0;
   transition: width var(--transition-base);
   overflow: hidden;
+  /* Everything that contracts when the rail folds shares this curve so the
+     animation reads as one motion (label squeezes while icon grows). */
 }
 
 .sidebar--collapsed {
-  width: 64px;
+  width: 56px;
 }
 
 .sidebar__head {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-3);
+  padding: var(--space-3);
   border-bottom: 1px dashed var(--border);
   min-height: 48px;
+  transition: padding var(--transition-base);
+  overflow: hidden;
+}
+
+.sidebar--collapsed .sidebar__head {
+  padding: var(--space-3) 0;
+  justify-content: center;
 }
 
 .sidebar__toggle {
@@ -144,6 +153,18 @@ function isActive(to: string): boolean {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 200px;
+  opacity: 1;
+  transition:
+    max-width var(--transition-base),
+    opacity var(--transition-fast),
+    margin var(--transition-base);
+}
+
+.sidebar--collapsed .sidebar__brand {
+  max-width: 0;
+  opacity: 0;
+  margin: 0;
 }
 
 .sidebar__nav {
@@ -157,26 +178,56 @@ function isActive(to: string): boolean {
 
 .sidebar__group {
   padding: var(--space-3) var(--space-3) var(--space-1);
-  font-size: 10px;
-  letter-spacing: 2px;
-  color: var(--text-muted);
-  text-transform: uppercase;
   white-space: nowrap;
   /* Fixed height across both states so toggling the rail does not move
      adjacent items up or down. */
   min-height: 30px;
   display: flex;
   align-items: flex-end;
+  position: relative;
+  transition: padding var(--transition-base);
 }
 
-/* Collapsed rail: hide the label text but keep the same row height as the
-   expanded state; render a horizontal dashed divider centered vertically. */
-.sidebar--collapsed .sidebar__group {
-  padding: 0 var(--space-3);
+/* The dashed divider appears only in the collapsed state. It lives as a
+   pseudo-element so its opacity can fade in alongside the width change
+   instead of popping in at the end of the transition. */
+.sidebar__group::after {
+  content: '';
+  position: absolute;
+  left: var(--space-2);
+  right: var(--space-2);
+  top: 50%;
   border-top: 1px dashed var(--border);
-  margin: 0 var(--space-2);
-  min-height: 30px;
+  opacity: 0;
+  transition: opacity var(--transition-base);
+  pointer-events: none;
+}
+
+.sidebar__group-label {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  overflow: hidden;
+  max-width: 200px;
+  opacity: 1;
+  transition:
+    max-width var(--transition-base),
+    opacity var(--transition-fast);
+}
+
+.sidebar--collapsed .sidebar__group {
+  padding: 0 var(--space-2);
   align-items: center;
+}
+
+.sidebar--collapsed .sidebar__group-label {
+  max-width: 0;
+  opacity: 0;
+}
+
+.sidebar--collapsed .sidebar__group::after {
+  opacity: 1;
 }
 
 .sidebar__link {
@@ -191,12 +242,12 @@ function isActive(to: string): boolean {
   transition:
     background var(--transition-fast),
     color var(--transition-fast),
-    border-color var(--transition-fast);
+    border-color var(--transition-fast),
+    padding var(--transition-base),
+    gap var(--transition-base);
   position: relative;
-  /* Constant row height across expanded/collapsed states avoids visual jumps
-     when the rail toggles. The 38px target is large enough for touch while
-     keeping the rail compact. */
   min-height: 38px;
+  overflow: hidden;
 }
 
 .sidebar__link:hover {
@@ -224,24 +275,15 @@ function isActive(to: string): boolean {
 
 .sidebar__icon {
   font-family: 'JetBrains Mono', 'Major Mono Display', monospace;
-  width: 20px;
+  width: 22px;
   text-align: center;
   font-size: 16px;
   line-height: 1;
   flex-shrink: 0;
   color: inherit;
-}
-
-/* Collapsed rail: the icon becomes the whole content. Keep the same
-   min-height so toggling expand/collapse doesn't shift row positions. */
-.sidebar--collapsed .sidebar__link {
-  justify-content: center;
-  padding: 0;
-}
-
-.sidebar--collapsed .sidebar__icon {
-  width: 100%;
-  font-size: 18px;
+  transition:
+    font-size var(--transition-base),
+    width var(--transition-base);
 }
 
 .sidebar__label {
@@ -250,8 +292,33 @@ function isActive(to: string): boolean {
   gap: var(--space-2);
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   letter-spacing: 0.5px;
+  flex: 1;
+  min-width: 0;
+  max-width: 200px;
+  opacity: 1;
+  transition:
+    max-width var(--transition-base),
+    opacity var(--transition-fast);
+}
+
+/* Collapsed rail: the icon becomes the whole content. The same min-height
+   keeps row Y positions identical so siblings don't jump during the
+   width transition. */
+.sidebar--collapsed .sidebar__link {
+  justify-content: center;
+  padding: 0;
+  gap: 0;
+}
+
+.sidebar--collapsed .sidebar__icon {
+  width: 100%;
+  font-size: 20px;
+}
+
+.sidebar--collapsed .sidebar__label {
+  max-width: 0;
+  opacity: 0;
 }
 
 .sidebar__soon {
@@ -276,29 +343,41 @@ function isActive(to: string): boolean {
   align-items: center;
   gap: var(--space-2);
   color: var(--text-dim);
+  overflow: hidden;
 }
 
 .sidebar__user-icon {
   color: var(--amber);
   font-family: 'Major Mono Display', monospace;
   font-size: 11px;
+  flex-shrink: 0;
 }
 
 .sidebar__user-name {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 160px;
+  opacity: 1;
+  transition:
+    max-width var(--transition-base),
+    opacity var(--transition-fast);
+}
+
+.sidebar--collapsed .sidebar__user-name {
+  max-width: 0;
+  opacity: 0;
+}
+
+.sidebar--collapsed .sidebar__foot {
+  padding: var(--space-2) 0;
+  display: flex;
+  justify-content: center;
 }
 
 @media (max-width: 768px) {
-  .sidebar {
-    width: 64px;
-  }
-  .sidebar:not(.sidebar--collapsed) .sidebar__brand,
-  .sidebar:not(.sidebar--collapsed) .sidebar__label,
-  .sidebar:not(.sidebar--collapsed) .sidebar__group span,
-  .sidebar:not(.sidebar--collapsed) .sidebar__user {
-    display: none;
-  }
+  /* On mobile the rail always behaves like the collapsed state — the
+     transition animation still runs identically when toggling. */
+  .sidebar { width: 56px; }
 }
 </style>
