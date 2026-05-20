@@ -76,7 +76,16 @@ func runServer(args []string) {
 	for _, d := range programs.Demos() {
 		procs := make([]sim.Proc, 0, len(d.Procs))
 		for _, p := range d.Procs {
-			procs = append(procs, sim.Proc{Name: p.Name, Bytes: p.Bytes, Source: p.Source})
+			var smap []sim.SourceLine
+			if len(p.SourceMap) > 0 {
+				smap = make([]sim.SourceLine, len(p.SourceMap))
+				for i, sl := range p.SourceMap {
+					smap[i] = sim.SourceLine{Offset: sl.Offset, Mnemonic: sl.Mnemonic, CLine: sl.CLine}
+				}
+			}
+			procs = append(procs, sim.Proc{
+				Name: p.Name, Bytes: p.Bytes, Source: p.Source, SourceMap: smap,
+			})
 		}
 		demos = append(demos, sim.Demo{
 			Name:        d.Name,

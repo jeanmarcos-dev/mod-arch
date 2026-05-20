@@ -20,10 +20,34 @@ type Demo struct {
 // Source is the hand-written C-like equivalent shown to the user. It is NOT
 // compiled into Bytes at runtime; the bytes are hand-encoded in parallel so
 // the viewer sees WHAT the process does without reading assembly directly.
+//
+// SourceMap is the optional bridge between machine instructions and the
+// C lines that motivated them. Each entry pins one instruction to its C
+// line and offers a human-readable mnemonic for the side-by-side panel
+// that the UI renders. An empty SourceMap means "no bridge available" —
+// the UI falls back to showing Source as plain text without highlighting.
 type Proc struct {
-	Name   string
-	Bytes  []byte
-	Source string
+	Name      string
+	Bytes     []byte
+	Source    string
+	SourceMap []SourceLine
+}
+
+// SourceLine pins one machine instruction to its C line of origin.
+//
+//   - Offset is relative to the start of Proc.Bytes. The first instruction
+//     is always at Offset 0.
+//   - Mnemonic is the assembler text displayed in the ASM panel. It is the
+//     author's pedagogical wording and need not be byte-for-byte identical
+//     to what cpu.execInstruction emits (which contains absolute addresses
+//     that vary with code_base across processes).
+//   - CLine is the 1-based line number into Source. Multiple instructions
+//     may share a CLine (a single C statement often expands to several
+//     machine instructions).
+type SourceLine struct {
+	Offset   uint32
+	Mnemonic string
+	CLine    int
 }
 
 // Demos returns the embedded demo scenarios.
@@ -46,6 +70,12 @@ int main(void) {
 					0xBB, 0x20, 0x00, 0x00, 0x00, // mov ebx, 32
 					0x01, 0xD8, // add eax, ebx
 					0xF4, // hlt
+				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "MOV EAX, 10", CLine: 3},
+					{Offset: 0x05, Mnemonic: "MOV EBX, 32", CLine: 4},
+					{Offset: 0x0A, Mnemonic: "ADD EAX, EBX", CLine: 5},
+					{Offset: 0x0C, Mnemonic: "HLT", CLine: 5},
 				},
 			}},
 		},
@@ -72,6 +102,14 @@ int main(void) {
 					0x75, 0xFB, // jne -5
 					0xF4,
 				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "MOV EAX, 0", CLine: 3},
+					{Offset: 0x05, Mnemonic: "MOV ECX, 10", CLine: 4},
+					{Offset: 0x0A, Mnemonic: "INC EAX", CLine: 6},
+					{Offset: 0x0B, Mnemonic: "CMP EAX, ECX", CLine: 5},
+					{Offset: 0x0D, Mnemonic: "JNE -5", CLine: 5},
+					{Offset: 0x0F, Mnemonic: "HLT", CLine: 8},
+				},
 			}},
 		},
 		{
@@ -95,6 +133,13 @@ int main(void) {
 					0x58, // pop eax
 					0xF4,
 				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "MOV EAX, 0xCAFE", CLine: 3},
+					{Offset: 0x05, Mnemonic: "PUSH EAX", CLine: 4},
+					{Offset: 0x06, Mnemonic: "MOV EAX, 0", CLine: 5},
+					{Offset: 0x0B, Mnemonic: "POP EAX", CLine: 6},
+					{Offset: 0x0C, Mnemonic: "HLT", CLine: 7},
+				},
 			}},
 		},
 		{
@@ -116,6 +161,12 @@ int main(void) {
 					0xF4,                         // hlt (skipped)
 					0xB8, 0x99, 0x00, 0x00, 0x00, // mov eax, 0x99
 					0xC3, // ret
+				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "CALL fn", CLine: 7},
+					{Offset: 0x05, Mnemonic: "HLT", CLine: 7},
+					{Offset: 0x06, Mnemonic: "MOV EAX, 0x99", CLine: 3},
+					{Offset: 0x0B, Mnemonic: "RET", CLine: 3},
 				},
 			}},
 		},
@@ -139,6 +190,12 @@ int main(void) {
 					0x40, // inc eax
 					0xF4,
 				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "MOV EAX, 1", CLine: 4},
+					{Offset: 0x05, Mnemonic: "INT 0x80", CLine: 5},
+					{Offset: 0x07, Mnemonic: "INC EAX", CLine: 6},
+					{Offset: 0x08, Mnemonic: "HLT", CLine: 7},
+				},
 			}},
 		},
 		{
@@ -158,6 +215,25 @@ int main(void) {
 					0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
 					0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
 					0xF4,
+				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "NOP", CLine: 5},
+					{Offset: 0x01, Mnemonic: "NOP", CLine: 5},
+					{Offset: 0x02, Mnemonic: "NOP", CLine: 5},
+					{Offset: 0x03, Mnemonic: "NOP", CLine: 5},
+					{Offset: 0x04, Mnemonic: "NOP", CLine: 5},
+					{Offset: 0x05, Mnemonic: "NOP", CLine: 5},
+					{Offset: 0x06, Mnemonic: "NOP", CLine: 5},
+					{Offset: 0x07, Mnemonic: "NOP", CLine: 5},
+					{Offset: 0x08, Mnemonic: "NOP", CLine: 5},
+					{Offset: 0x09, Mnemonic: "NOP", CLine: 5},
+					{Offset: 0x0A, Mnemonic: "NOP", CLine: 5},
+					{Offset: 0x0B, Mnemonic: "NOP", CLine: 5},
+					{Offset: 0x0C, Mnemonic: "NOP", CLine: 5},
+					{Offset: 0x0D, Mnemonic: "NOP", CLine: 5},
+					{Offset: 0x0E, Mnemonic: "NOP", CLine: 5},
+					{Offset: 0x0F, Mnemonic: "NOP", CLine: 5},
+					{Offset: 0x10, Mnemonic: "HLT", CLine: 6},
 				},
 			}},
 		},
@@ -188,6 +264,17 @@ int main(void) {
 					0xBB, 0x00, 0x00, 0x00, 0x00, // mov ebx, 0
 					0xCD, 0x80, // int 0x80 (sys_exit)
 					0x68, 0x6F, 0x6C, 0x61, 0x20, 0x53, 0x4F, 0x0A, // "hola SO\n"
+				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "MOV EAX, 4    ; sys_write", CLine: 5},
+					{Offset: 0x05, Mnemonic: "MOV EBX, 1    ; fd=stdout", CLine: 5},
+					{Offset: 0x0A, Mnemonic: "MOV ECX, 0x200022  ; &msg", CLine: 5},
+					{Offset: 0x0F, Mnemonic: "MOV EDX, 8    ; len", CLine: 5},
+					{Offset: 0x14, Mnemonic: "INT 0x80", CLine: 5},
+					{Offset: 0x16, Mnemonic: "MOV EAX, 1    ; sys_exit", CLine: 6},
+					{Offset: 0x1B, Mnemonic: "MOV EBX, 0    ; status", CLine: 6},
+					{Offset: 0x20, Mnemonic: "INT 0x80", CLine: 6},
+					// Bytes 0x22..0x29 are the "hola SO\n" data; not executable.
 				},
 			}},
 		},
@@ -223,6 +310,19 @@ int main(void) {
 					0xCD, 0x80, // int 0x80
 					0xEB, 0xD2, // jmp -46
 				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "MOV EAX, 3    ; sys_read", CLine: 10},
+					{Offset: 0x05, Mnemonic: "MOV EBX, 0    ; fd=stdin", CLine: 10},
+					{Offset: 0x0A, Mnemonic: "MOV ECX, 0x33FFE0", CLine: 10},
+					{Offset: 0x0F, Mnemonic: "MOV EDX, 1", CLine: 10},
+					{Offset: 0x14, Mnemonic: "INT 0x80", CLine: 10},
+					{Offset: 0x16, Mnemonic: "MOV EAX, 4    ; sys_write", CLine: 11},
+					{Offset: 0x1B, Mnemonic: "MOV EBX, 1    ; fd=stdout", CLine: 11},
+					{Offset: 0x20, Mnemonic: "MOV ECX, 0x33FFE0", CLine: 11},
+					{Offset: 0x25, Mnemonic: "MOV EDX, 1", CLine: 11},
+					{Offset: 0x2A, Mnemonic: "INT 0x80", CLine: 11},
+					{Offset: 0x2C, Mnemonic: "JMP -46  ; while(1)", CLine: 9},
+				},
 			}},
 		},
 
@@ -245,6 +345,11 @@ int main(void) {
 					0xA3, 0x00, 0x00, 0x10, 0x00, // mov [0x100000], eax
 					0xF4,
 				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "MOV EAX, 0xDEAD", CLine: 5},
+					{Offset: 0x05, Mnemonic: "MOV [0x100000], EAX  ; ¡fault!", CLine: 6},
+					{Offset: 0x0A, Mnemonic: "HLT  ; unreachable", CLine: 7},
+				},
 			}},
 		},
 
@@ -266,6 +371,11 @@ int main(void) {
 						0x40,       // inc eax
 						0xEB, 0xFD, // jmp -3
 					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV EAX, 0", CLine: 4},
+						{Offset: 0x05, Mnemonic: "INC EAX", CLine: 5},
+						{Offset: 0x06, Mnemonic: "JMP -3  ; while(1)", CLine: 5},
+					},
 				},
 				{
 					Name: "counter_ebx",
@@ -280,6 +390,11 @@ int main(void) {
 						0xBB, 0x00, 0x00, 0x00, 0x00, // mov ebx, 0
 						0x43,       // inc ebx
 						0xEB, 0xFD, // jmp -3
+					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV EBX, 0", CLine: 4},
+						{Offset: 0x05, Mnemonic: "INC EBX", CLine: 5},
+						{Offset: 0x06, Mnemonic: "JMP -3  ; while(1)", CLine: 5},
 					},
 				},
 				{
@@ -309,6 +424,19 @@ int main(void) {
 						0xCD, 0x80, // int 0x80
 						0xEB, 0xD2, // jmp -46
 					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV EAX, 3    ; sys_read", CLine: 8},
+						{Offset: 0x05, Mnemonic: "MOV EBX, 0    ; fd=stdin", CLine: 8},
+						{Offset: 0x0A, Mnemonic: "MOV ECX, 0x3BFFE0", CLine: 8},
+						{Offset: 0x0F, Mnemonic: "MOV EDX, 1", CLine: 8},
+						{Offset: 0x14, Mnemonic: "INT 0x80", CLine: 8},
+						{Offset: 0x16, Mnemonic: "MOV EAX, 4    ; sys_write", CLine: 9},
+						{Offset: 0x1B, Mnemonic: "MOV EBX, 1    ; fd=stdout", CLine: 9},
+						{Offset: 0x20, Mnemonic: "MOV ECX, 0x3BFFE0", CLine: 9},
+						{Offset: 0x25, Mnemonic: "MOV EDX, 1", CLine: 9},
+						{Offset: 0x2A, Mnemonic: "INT 0x80", CLine: 9},
+						{Offset: 0x2C, Mnemonic: "JMP -46  ; while(1)", CLine: 7},
+					},
 				},
 			},
 		},
@@ -330,6 +458,11 @@ int main(void) {
 						0x40,
 						0xEB, 0xFD,
 					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV EAX, 0", CLine: 3},
+						{Offset: 0x05, Mnemonic: "INC EAX", CLine: 4},
+						{Offset: 0x06, Mnemonic: "JMP -3", CLine: 4},
+					},
 				},
 				{
 					Name: "p2_count_ebx",
@@ -343,6 +476,11 @@ int main(void) {
 						0xBB, 0x00, 0x00, 0x00, 0x00,
 						0x43,
 						0xEB, 0xFD,
+					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV EBX, 0", CLine: 3},
+						{Offset: 0x05, Mnemonic: "INC EBX", CLine: 4},
+						{Offset: 0x06, Mnemonic: "JMP -3", CLine: 4},
 					},
 				},
 			},
@@ -372,6 +510,13 @@ int main(void) {
 						0x31, 0xDB, // xor ebx, ebx
 						0xCD, 0x80, // int 0x80
 					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "XOR EAX, EAX", CLine: 3},
+						{Offset: 0x02, Mnemonic: "MOV [0x3FFFE0], EAX", CLine: 3},
+						{Offset: 0x07, Mnemonic: "MOV EAX, 1    ; sys_exit", CLine: 4},
+						{Offset: 0x0C, Mnemonic: "XOR EBX, EBX  ; status=0", CLine: 4},
+						{Offset: 0x0E, Mnemonic: "INT 0x80", CLine: 4},
+					},
 				},
 				{
 					Name: "racer_a",
@@ -396,6 +541,17 @@ int main(void) {
 						0x31, 0xDB, // xor ebx, ebx
 						0xCD, 0x80, // int 0x80
 					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV ECX, 200  ; for init", CLine: 3},
+						{Offset: 0x05, Mnemonic: "MOV EAX, [0x3FFFE0]  ; load", CLine: 4},
+						{Offset: 0x0A, Mnemonic: "INC EAX       ; n++", CLine: 5},
+						{Offset: 0x0B, Mnemonic: "MOV [0x3FFFE0], EAX  ; store", CLine: 6},
+						{Offset: 0x10, Mnemonic: "DEC ECX", CLine: 3},
+						{Offset: 0x11, Mnemonic: "JNE -14       ; for loop", CLine: 3},
+						{Offset: 0x13, Mnemonic: "MOV EAX, 1    ; sys_exit", CLine: 8},
+						{Offset: 0x18, Mnemonic: "XOR EBX, EBX", CLine: 8},
+						{Offset: 0x1A, Mnemonic: "INT 0x80", CLine: 8},
+					},
 				},
 				{
 					Name: "racer_b",
@@ -419,6 +575,17 @@ int main(void) {
 						0xB8, 0x01, 0x00, 0x00, 0x00,
 						0x31, 0xDB,
 						0xCD, 0x80,
+					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV ECX, 200", CLine: 3},
+						{Offset: 0x05, Mnemonic: "MOV EAX, [0x3FFFE0]", CLine: 4},
+						{Offset: 0x0A, Mnemonic: "INC EAX", CLine: 5},
+						{Offset: 0x0B, Mnemonic: "MOV [0x3FFFE0], EAX", CLine: 6},
+						{Offset: 0x10, Mnemonic: "DEC ECX", CLine: 3},
+						{Offset: 0x11, Mnemonic: "JNE -14", CLine: 3},
+						{Offset: 0x13, Mnemonic: "MOV EAX, 1    ; sys_exit", CLine: 8},
+						{Offset: 0x18, Mnemonic: "XOR EBX, EBX", CLine: 8},
+						{Offset: 0x1A, Mnemonic: "INT 0x80", CLine: 8},
 					},
 				},
 			},
@@ -446,6 +613,15 @@ int main(void) {
 						0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1 (sys_exit)
 						0x31, 0xDB, // xor ebx, ebx
 						0xCD, 0x80, // int 0x80
+					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "XOR EAX, EAX", CLine: 3},
+						{Offset: 0x02, Mnemonic: "MOV [0x3FFFE0], EAX", CLine: 3},
+						{Offset: 0x07, Mnemonic: "MOV EAX, 0x10  ; MutexCreate", CLine: 4},
+						{Offset: 0x0C, Mnemonic: "INT 0x81", CLine: 4},
+						{Offset: 0x0E, Mnemonic: "MOV EAX, 1     ; sys_exit", CLine: 5},
+						{Offset: 0x13, Mnemonic: "XOR EBX, EBX", CLine: 5},
+						{Offset: 0x15, Mnemonic: "INT 0x80", CLine: 5},
 					},
 				},
 				{
@@ -479,6 +655,23 @@ int main(void) {
 						0x31, 0xDB, // xor ebx, ebx
 						0xCD, 0x80, // int 0x80
 					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV ECX, 200   ; for init", CLine: 3},
+						{Offset: 0x05, Mnemonic: "MOV EBX, 1     ; mutex id", CLine: 4},
+						{Offset: 0x0A, Mnemonic: "MOV EAX, 0x11  ; MutexLock", CLine: 4},
+						{Offset: 0x0F, Mnemonic: "INT 0x81", CLine: 4},
+						{Offset: 0x11, Mnemonic: "MOV EAX, [0x3FFFE0]", CLine: 5},
+						{Offset: 0x16, Mnemonic: "INC EAX", CLine: 6},
+						{Offset: 0x17, Mnemonic: "MOV [0x3FFFE0], EAX", CLine: 7},
+						{Offset: 0x1C, Mnemonic: "MOV EBX, 1     ; mutex id", CLine: 8},
+						{Offset: 0x21, Mnemonic: "MOV EAX, 0x12  ; MutexUnlock", CLine: 8},
+						{Offset: 0x26, Mnemonic: "INT 0x81", CLine: 8},
+						{Offset: 0x28, Mnemonic: "DEC ECX", CLine: 3},
+						{Offset: 0x29, Mnemonic: "JNE -38        ; for loop", CLine: 3},
+						{Offset: 0x2B, Mnemonic: "MOV EAX, 1     ; sys_exit", CLine: 10},
+						{Offset: 0x30, Mnemonic: "XOR EBX, EBX", CLine: 10},
+						{Offset: 0x32, Mnemonic: "INT 0x80", CLine: 10},
+					},
 				},
 				{
 					Name: "locker_b",
@@ -510,6 +703,23 @@ int main(void) {
 						0xB8, 0x01, 0x00, 0x00, 0x00,
 						0x31, 0xDB,
 						0xCD, 0x80,
+					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV ECX, 200", CLine: 3},
+						{Offset: 0x05, Mnemonic: "MOV EBX, 1", CLine: 4},
+						{Offset: 0x0A, Mnemonic: "MOV EAX, 0x11  ; MutexLock", CLine: 4},
+						{Offset: 0x0F, Mnemonic: "INT 0x81", CLine: 4},
+						{Offset: 0x11, Mnemonic: "MOV EAX, [0x3FFFE0]", CLine: 5},
+						{Offset: 0x16, Mnemonic: "INC EAX", CLine: 6},
+						{Offset: 0x17, Mnemonic: "MOV [0x3FFFE0], EAX", CLine: 7},
+						{Offset: 0x1C, Mnemonic: "MOV EBX, 1", CLine: 8},
+						{Offset: 0x21, Mnemonic: "MOV EAX, 0x12  ; MutexUnlock", CLine: 8},
+						{Offset: 0x26, Mnemonic: "INT 0x81", CLine: 8},
+						{Offset: 0x28, Mnemonic: "DEC ECX", CLine: 3},
+						{Offset: 0x29, Mnemonic: "JNE -38", CLine: 3},
+						{Offset: 0x2B, Mnemonic: "MOV EAX, 1     ; sys_exit", CLine: 10},
+						{Offset: 0x30, Mnemonic: "XOR EBX, EBX", CLine: 10},
+						{Offset: 0x32, Mnemonic: "INT 0x80", CLine: 10},
 					},
 				},
 			},
@@ -545,6 +755,17 @@ int main(void) {
 						0x31, 0xDB, // xor ebx, ebx
 						0xCD, 0x80, // int 0x80
 					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV EAX, 0x20  ; SemCreate", CLine: 3},
+						{Offset: 0x05, Mnemonic: "MOV EBX, 1     ; init=1", CLine: 3},
+						{Offset: 0x0A, Mnemonic: "INT 0x81       ; → eax=1", CLine: 3},
+						{Offset: 0x0C, Mnemonic: "MOV EAX, 0x20  ; SemCreate", CLine: 4},
+						{Offset: 0x11, Mnemonic: "MOV EBX, 0     ; init=0", CLine: 4},
+						{Offset: 0x16, Mnemonic: "INT 0x81       ; → eax=2", CLine: 4},
+						{Offset: 0x18, Mnemonic: "MOV EAX, 1     ; sys_exit", CLine: 5},
+						{Offset: 0x1D, Mnemonic: "XOR EBX, EBX", CLine: 5},
+						{Offset: 0x1F, Mnemonic: "INT 0x80", CLine: 5},
+					},
 				},
 				{
 					Name: "producer",
@@ -573,6 +794,20 @@ int main(void) {
 						0x31, 0xDB, // xor ebx, ebx
 						0xCD, 0x80, // int 0x80
 					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV ECX, 50    ; for init", CLine: 3},
+						{Offset: 0x05, Mnemonic: "MOV EBX, 1     ; sem=empty", CLine: 4},
+						{Offset: 0x0A, Mnemonic: "MOV EAX, 0x21  ; SemWait", CLine: 4},
+						{Offset: 0x0F, Mnemonic: "INT 0x81", CLine: 4},
+						{Offset: 0x11, Mnemonic: "MOV EBX, 2     ; sem=full", CLine: 7},
+						{Offset: 0x16, Mnemonic: "MOV EAX, 0x22  ; SemSignal", CLine: 7},
+						{Offset: 0x1B, Mnemonic: "INT 0x81", CLine: 7},
+						{Offset: 0x1D, Mnemonic: "DEC ECX", CLine: 3},
+						{Offset: 0x1E, Mnemonic: "JNE -27        ; for loop", CLine: 3},
+						{Offset: 0x20, Mnemonic: "MOV EAX, 1     ; sys_exit", CLine: 9},
+						{Offset: 0x25, Mnemonic: "XOR EBX, EBX", CLine: 9},
+						{Offset: 0x27, Mnemonic: "INT 0x80", CLine: 9},
+					},
 				},
 				{
 					Name: "consumer",
@@ -599,6 +834,20 @@ int main(void) {
 						0xB8, 0x01, 0x00, 0x00, 0x00,
 						0x31, 0xDB,
 						0xCD, 0x80,
+					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV ECX, 50", CLine: 3},
+						{Offset: 0x05, Mnemonic: "MOV EBX, 2     ; sem=full", CLine: 4},
+						{Offset: 0x0A, Mnemonic: "MOV EAX, 0x21  ; SemWait", CLine: 4},
+						{Offset: 0x0F, Mnemonic: "INT 0x81", CLine: 4},
+						{Offset: 0x11, Mnemonic: "MOV EBX, 1     ; sem=empty", CLine: 6},
+						{Offset: 0x16, Mnemonic: "MOV EAX, 0x22  ; SemSignal", CLine: 6},
+						{Offset: 0x1B, Mnemonic: "INT 0x81", CLine: 6},
+						{Offset: 0x1D, Mnemonic: "DEC ECX", CLine: 3},
+						{Offset: 0x1E, Mnemonic: "JNE -27", CLine: 3},
+						{Offset: 0x20, Mnemonic: "MOV EAX, 1     ; sys_exit", CLine: 8},
+						{Offset: 0x25, Mnemonic: "XOR EBX, EBX", CLine: 8},
+						{Offset: 0x27, Mnemonic: "INT 0x80", CLine: 8},
 					},
 				},
 			},
@@ -634,6 +883,17 @@ int main(void) {
 						0xB8, 0x01, 0x00, 0x00, 0x00,
 						0x31, 0xDB,
 						0xCD, 0x80,
+					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV EAX, 0x10  ; MutexCreate", CLine: 3},
+						{Offset: 0x05, Mnemonic: "INT 0x81       ; → fork 1", CLine: 3},
+						{Offset: 0x07, Mnemonic: "MOV EAX, 0x10", CLine: 4},
+						{Offset: 0x0C, Mnemonic: "INT 0x81       ; → fork 2", CLine: 4},
+						{Offset: 0x0E, Mnemonic: "MOV EAX, 0x10", CLine: 5},
+						{Offset: 0x13, Mnemonic: "INT 0x81       ; → fork 3", CLine: 5},
+						{Offset: 0x15, Mnemonic: "MOV EAX, 1     ; sys_exit", CLine: 6},
+						{Offset: 0x1A, Mnemonic: "XOR EBX, EBX", CLine: 6},
+						{Offset: 0x1C, Mnemonic: "INT 0x80", CLine: 6},
 					},
 				},
 				philoBytes("philo_0_naive", 0, 1, 2, "filo 0: izq=1, der=2"),
@@ -671,6 +931,17 @@ int main(void) {
 						0x31, 0xDB,
 						0xCD, 0x80,
 					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV EAX, 0x10  ; MutexCreate", CLine: 3},
+						{Offset: 0x05, Mnemonic: "INT 0x81", CLine: 3},
+						{Offset: 0x07, Mnemonic: "MOV EAX, 0x10", CLine: 4},
+						{Offset: 0x0C, Mnemonic: "INT 0x81", CLine: 4},
+						{Offset: 0x0E, Mnemonic: "MOV EAX, 0x10", CLine: 5},
+						{Offset: 0x13, Mnemonic: "INT 0x81", CLine: 5},
+						{Offset: 0x15, Mnemonic: "MOV EAX, 1     ; sys_exit", CLine: 6},
+						{Offset: 0x1A, Mnemonic: "XOR EBX, EBX", CLine: 6},
+						{Offset: 0x1C, Mnemonic: "INT 0x80", CLine: 6},
+					},
 				},
 				philoBytes("philo_0_safe", 0, 1, 2, "filo 0: 1 → 2"),
 				philoBytes("philo_1_safe", 1, 2, 3, "filo 1: 2 → 3"),
@@ -686,16 +957,18 @@ int main(void) {
 // shape is identical across philos; only the fork IDs vary, so the helper keeps
 // the demo table readable.
 func philoBytes(name string, idx, firstFork, secondFork int, label string) Proc {
+	first := itoa(firstFork)
+	second := itoa(secondFork)
 	return Proc{
 		Name: name,
 		Source: "// Filósofo #" + itoa(idx) + " — " + label + "\n" +
 			"int main(void) {\n" +
 			"    for (int i = 0; i < 10; i++) {\n" +
-			"        mutex_lock(" + itoa(firstFork) + ");\n" +
-			"        mutex_lock(" + itoa(secondFork) + ");\n" +
+			"        mutex_lock(" + first + ");\n" +
+			"        mutex_lock(" + second + ");\n" +
 			"        /* eat */\n" +
-			"        mutex_unlock(" + itoa(secondFork) + ");\n" +
-			"        mutex_unlock(" + itoa(firstFork) + ");\n" +
+			"        mutex_unlock(" + second + ");\n" +
+			"        mutex_unlock(" + first + ");\n" +
 			"    }\n" +
 			"    exit(0);\n" +
 			"}\n",
@@ -719,6 +992,40 @@ func philoBytes(name string, idx, firstFork, secondFork int, label string) Proc 
 			0xB8, 0x01, 0x00, 0x00, 0x00,
 			0x31, 0xDB,
 			0xCD, 0x80,
+		},
+		// Source layout (1-based):
+		//   1  // Filósofo #N — <label>
+		//   2  int main(void) {
+		//   3      for (int i = 0; i < 10; i++) {
+		//   4          mutex_lock(first);
+		//   5          mutex_lock(second);
+		//   6          /* eat */
+		//   7          mutex_unlock(second);
+		//   8          mutex_unlock(first);
+		//   9      }
+		//  10      exit(0);
+		//  11  }
+		SourceMap: []SourceLine{
+			{Offset: 0x00, Mnemonic: "MOV ECX, 10    ; for init", CLine: 3},
+			{Offset: 0x05, Mnemonic: "MOV EBX, " + first + "      ; first fork", CLine: 4},
+			{Offset: 0x0A, Mnemonic: "MOV EAX, 0x11  ; MutexLock", CLine: 4},
+			{Offset: 0x0F, Mnemonic: "INT 0x81", CLine: 4},
+			{Offset: 0x11, Mnemonic: "MOV EBX, " + second + "      ; second fork", CLine: 5},
+			{Offset: 0x16, Mnemonic: "MOV EAX, 0x11  ; MutexLock", CLine: 5},
+			{Offset: 0x1B, Mnemonic: "INT 0x81", CLine: 5},
+			{Offset: 0x1D, Mnemonic: "NOP            ; eat", CLine: 6},
+			{Offset: 0x1E, Mnemonic: "NOP", CLine: 6},
+			{Offset: 0x1F, Mnemonic: "MOV EBX, " + second, CLine: 7},
+			{Offset: 0x24, Mnemonic: "MOV EAX, 0x12  ; MutexUnlock", CLine: 7},
+			{Offset: 0x29, Mnemonic: "INT 0x81", CLine: 7},
+			{Offset: 0x2B, Mnemonic: "MOV EBX, " + first, CLine: 8},
+			{Offset: 0x30, Mnemonic: "MOV EAX, 0x12  ; MutexUnlock", CLine: 8},
+			{Offset: 0x35, Mnemonic: "INT 0x81", CLine: 8},
+			{Offset: 0x37, Mnemonic: "DEC ECX", CLine: 3},
+			{Offset: 0x38, Mnemonic: "JNE -53        ; for loop", CLine: 3},
+			{Offset: 0x3A, Mnemonic: "MOV EAX, 1     ; sys_exit", CLine: 10},
+			{Offset: 0x3F, Mnemonic: "XOR EBX, EBX", CLine: 10},
+			{Offset: 0x41, Mnemonic: "INT 0x80", CLine: 10},
 		},
 	}
 }

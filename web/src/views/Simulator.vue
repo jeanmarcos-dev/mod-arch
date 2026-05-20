@@ -9,7 +9,7 @@ import ProcessesPanel from '../components/ProcessesPanel.vue';
 import ConsolePanel from '../components/ConsolePanel.vue';
 import GlossaryModal from '../components/GlossaryModal.vue';
 import MemoryPanel from '../components/MemoryPanel.vue';
-import CodePanel from '../components/CodePanel.vue';
+import CodeAsmSplit from '../components/CodeAsmSplit.vue';
 
 const cpu = useCpuStore();
 const route = useRoute();
@@ -129,7 +129,7 @@ onUnmounted(() => {
             title="Vista hex dump de la memoria física. Puede saltar al EIP, al stack, o a cualquier dirección."
           ><MemoryStick :size="14" :stroke-width="2" /><span>MEMORIA</span></button>
         </div>
-        <CodePanel v-show="visible.code" />
+        <CodeAsmSplit v-show="visible.code" />
         <EventsLog v-show="visible.events" />
         <MemoryPanel v-show="visible.memory" />
         <ConsolePanel v-show="visible.console" />

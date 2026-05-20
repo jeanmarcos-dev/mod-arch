@@ -26,9 +26,19 @@ type Demo struct {
 
 // Proc is a single binary inside a Demo.
 type Proc struct {
-	Name   string
-	Bytes  []byte
-	Source string
+	Name      string
+	Bytes     []byte
+	Source    string
+	SourceMap []SourceLine
+}
+
+// SourceLine pins one machine instruction to the C line that motivated it.
+// Mirrors programs.SourceLine; lives here so the sim layer stays independent
+// of the programs package on its outbound DTO.
+type SourceLine struct {
+	Offset   uint32 `json:"offset"`
+	Mnemonic string `json:"mnemonic"`
+	CLine    int    `json:"c_line"`
 }
 
 // SendBufferSize is the buffer size of each client channel. If it fills up
@@ -49,10 +59,11 @@ func NewClient() *Client {
 
 // Simulator is an isolated simulator instance.
 type Simulator struct {
-	mu          sync.Mutex
-	kernel      *kernel.Kernel
-	programs    map[string]Demo
-	procSources map[int]string
+	mu             sync.Mutex
+	kernel         *kernel.Kernel
+	programs       map[string]Demo
+	procSources    map[int]string
+	procSourceMaps map[int][]SourceLine
 
 	clients  map[*Client]struct{}
 	clientMu sync.RWMutex
@@ -105,6 +116,7 @@ func (s *Simulator) LoadProgram(name string) error {
 	s.kernel.Reset()
 	pids := make([]int, 0, len(demo.Procs))
 	sources := make(map[int]string)
+	sourceMaps := make(map[int][]SourceLine)
 	for i, p := range demo.Procs {
 		pid, err := s.kernel.AddProcess(p.Name, p.Bytes)
 		if err != nil {
@@ -113,18 +125,23 @@ func (s *Simulator) LoadProgram(name string) error {
 		}
 		pids = append(pids, pid)
 		sources[pid] = demo.Procs[i].Source
+		if len(demo.Procs[i].SourceMap) > 0 {
+			sourceMaps[pid] = demo.Procs[i].SourceMap
+		}
 	}
 	s.procSources = sources
+	s.procSourceMaps = sourceMaps
 	snap := s.snapshotLocked()
 	procs := s.processListLocked()
 	s.mu.Unlock()
 
 	s.Broadcast(map[string]any{
-		"type":    "loaded",
-		"name":    name,
-		"pids":    pids,
-		"procs":   procs,
-		"sources": sources,
+		"type":        "loaded",
+		"name":        name,
+		"pids":        pids,
+		"procs":       procs,
+		"sources":     sources,
+		"source_maps": sourceMaps,
 	})
 	s.Broadcast(snap)
 	return nil
@@ -179,9 +196,12 @@ func (s *Simulator) StartRun(hz int) {
 				return
 			case <-ticker.C:
 				s.mu.Lock()
-				halted := s.kernel.AllHalted()
+				hasWork := s.kernel.HasWork()
 				s.mu.Unlock()
-				if halted {
+				if !hasWork {
+					// Park the loop only when nothing can advance: every
+					// core halted AND no pending IRQ on the way in. A
+					// future PushKey will rearm us via StepOnce.
 					s.StopRun()
 					return
 				}
@@ -209,6 +229,13 @@ func (s *Simulator) StopRun() {
 }
 
 // PushKey injects the first byte of key into the kernel keyboard buffer.
+//
+// PushKey models the keyboard controller raising IRQ 0x21. When the run loop
+// is idle (all cores parked in HLT waiting for input), the IRQ would sit in
+// PendingIRQs forever because no ticker is firing. We drive one StepOnce
+// inline so the boot core dispatches the interrupt immediately, the blocked
+// reader wakes up, and — if the simulation had work queued — the loop
+// restarts naturally on the next user action.
 func (s *Simulator) PushKey(key string) {
 	if key == "" {
 		return
@@ -216,7 +243,11 @@ func (s *Simulator) PushKey(key string) {
 	b := key[0]
 	s.mu.Lock()
 	s.kernel.PushKey(b)
+	running := s.running
 	s.mu.Unlock()
+	if !running {
+		_ = s.StepOnce()
+	}
 }
 
 // SetTimerQuantum adjusts the timer quantum.
@@ -229,6 +260,45 @@ func (s *Simulator) SetTimerQuantum(q int) {
 	snap := s.snapshotLocked()
 	s.mu.Unlock()
 	s.Broadcast(snap)
+}
+
+// SetNumCores rebuilds the underlying kernel with a fresh layout of n cores,
+// clamped to [1, kernel.MaxCores]. The simulator must lose all program state
+// because rescaling cores on the fly would mean redistributing PIDs, register
+// files, and kernel-stack frames — out of scope for a teaching simulator.
+//
+// If a run loop is active it is stopped first; the function broadcasts a
+// fresh snapshot so connected clients see the new core count immediately.
+func (s *Simulator) SetNumCores(n int) error {
+	if n < 1 {
+		return fmt.Errorf("núcleos inválido (%d): debe ser >= 1", n)
+	}
+	if n > kernel.MaxCores {
+		return fmt.Errorf("núcleos inválido (%d): el máximo soportado es %d", n, kernel.MaxCores)
+	}
+
+	s.mu.Lock()
+	wasRunning := s.running
+	s.mu.Unlock()
+	if wasRunning {
+		s.StopRun()
+	}
+
+	s.mu.Lock()
+	if s.kernel.NumCores() == n {
+		s.mu.Unlock()
+		return nil
+	}
+	s.kernel = kernel.NewMulti(cpu.DefaultMemSize, n)
+	s.procSources = nil
+	snap := s.snapshotLocked()
+	procs := s.processListLocked()
+	s.mu.Unlock()
+
+	s.Broadcast(map[string]any{"type": "reset"})
+	s.Broadcast(map[string]any{"type": "procs", "procs": procs})
+	s.Broadcast(snap)
+	return nil
 }
 
 // Reset clears all simulator state back to the initial values.
@@ -288,6 +358,7 @@ func (s *Simulator) snapshotLocked() map[string]any {
 		"wait_queue":    s.waitQueueLocked(),
 		"procs":         s.processListLocked(),
 		"sources":       s.procSources,
+		"source_maps":   s.procSourceMaps,
 		"cores":         cores,
 		"num_cores":     s.kernel.NumCores(),
 	}
