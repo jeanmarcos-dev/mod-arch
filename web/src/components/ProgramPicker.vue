@@ -102,13 +102,16 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border-strong);
   color: var(--amber);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 1px;
   text-transform: uppercase;
-  padding: 6px 12px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  box-sizing: border-box;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .trigger:hover {
@@ -145,33 +148,35 @@ onBeforeUnmount(() => {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  right: 0;
-  /* 60vh es más conservador que 70vh y evita choques contra el borde
-     inferior cuando hay 11 items con descripción larga. */
+  /* Anchor to trigger's left edge but grow past its width so descriptions
+     don't squish into 5-6 lines. Clamp to viewport so we never bleed off
+     the right edge on narrow screens. */
+  min-width: 360px;
+  max-width: calc(100vw - var(--space-4));
   max-height: 60vh;
   overflow-y: auto;
-  background: var(--bg-1);
+  background: var(--surface-2);
   border: 1px solid var(--border-strong);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-elevation-2, 0 8px 32px rgba(0, 0, 0, 0.6));
   z-index: 1000;
   display: flex;
   flex-direction: column;
 }
 
 .opt {
-  /* Es un <div role="button">, no <button>. Lo cambiamos porque <button> no
-     respeta la altura natural cuando el contenido es multilinea — los items
-     se superponian. Un div con padding + role/tabindex/handler tiene la
-     misma semantica accesible. */
+  /* It's a <div role="button"> rather than <button>: native <button> ignores
+     content-driven height when the inner text wraps, causing items to
+     overlap. A div with role/tabindex/handlers keeps the same a11y. */
   display: block;
   width: 100%;
   text-align: left;
   background: transparent;
   border-bottom: 1px solid var(--border);
-  padding: 12px 14px;
+  padding: 10px 14px;
   cursor: pointer;
   font-family: 'JetBrains Mono', monospace;
-  transition: background 0.1s ease;
+  transition: background var(--transition-fast);
   text-transform: none;
   letter-spacing: 0;
   color: var(--text);
@@ -213,7 +218,7 @@ onBeforeUnmount(() => {
 .opt-name {
   color: var(--amber);
   font-weight: 700;
-  font-size: 14px;
+  font-size: 12px;
   letter-spacing: 1px;
   text-transform: uppercase;
 }
@@ -227,13 +232,12 @@ onBeforeUnmount(() => {
 }
 
 .opt-desc {
-  color: var(--text);
-  font-size: 12px;
-  line-height: 1.5;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.45;
   font-style: italic;
-  /* Sin truncate: cada item crece a la altura natural de su descripción.
-     El dropdown tiene max-height + overflow-y:auto, así el scroll vertical
-     maneja los 11 items sin recortar contenido. */
+  /* No truncation: each item grows to fit its full description. The dropdown
+     has max-height + overflow-y:auto, so the scroll handles long lists. */
   white-space: normal;
   word-wrap: break-word;
 }

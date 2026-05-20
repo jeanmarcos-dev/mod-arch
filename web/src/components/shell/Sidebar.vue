@@ -77,7 +77,7 @@ function isActive(to: string): boolean {
       :aria-label="collapsed ? 'Expandir menú' : 'Contraer menú'"
       @click="prefs.toggleSidebar()"
     >
-      <component :is="collapsed ? ChevronRight : ChevronLeft" :size="14" :stroke-width="2" />
+      <component :is="collapsed ? ChevronRight : ChevronLeft" :size="16" :stroke-width="2.5" />
     </button>
   </aside>
 </template>
@@ -110,7 +110,7 @@ function isActive(to: string): boolean {
   width: 26px;
   height: 26px;
   background: var(--surface-2);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--amber);
   color: var(--amber);
   display: flex;
   align-items: center;
@@ -120,14 +120,22 @@ function isActive(to: string): boolean {
   font-size: 13px;
   border-radius: var(--radius-sm);
   z-index: 10;
-  transition: background var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
+  padding: 0;
+  box-shadow: 0 0 0 1px var(--surface-0), var(--shadow-glow-amber);
+  transition: background var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
 }
 
 .sidebar__toggle:hover {
-  background: rgba(255, 179, 71, 0.18);
-  border-color: var(--amber);
-  box-shadow: var(--shadow-glow-amber);
+  background: rgba(255, 179, 71, 0.22);
+  transform: scale(1.08);
 }
+
+.sidebar__toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 3px rgba(255, 179, 71, 0.45);
+}
+
+.sidebar__toggle svg { display: block; stroke-width: 2.5; }
 
 .sidebar__nav {
   display: flex;
