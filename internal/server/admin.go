@@ -15,6 +15,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
+	"github.com/jeanmarcos/modos-cpu/internal/store"
 )
 
 // AdminCookie is the name of the signed cookie that authenticates the admin.
@@ -144,6 +145,14 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/api/invites", s.requireAdminAPI(s.handleAdminCreateInvite))
 	mux.HandleFunc("DELETE /admin/api/invites/{token}", s.requireAdminAPI(s.handleAdminRevokeInvite))
 
+	mux.HandleFunc("GET /admin/api/settings", s.requireAdminAPI(s.handleAdminGetSettings))
+	mux.HandleFunc("PUT /admin/api/settings", s.requireAdminAPI(s.handleAdminSetSetting))
+
+	mux.HandleFunc("GET /admin/api/users", s.requireAdminAPI(s.handleAdminListUsers))
+	mux.HandleFunc("POST /admin/api/users/{id}/kick", s.requireAdminAPI(s.handleAdminKickUser))
+
+	mux.HandleFunc("GET /admin/api/audit", s.requireAdminAPI(s.handleAdminListAudit))
+
 	mux.HandleFunc("GET /admin", s.handleAdminSPA)
 	mux.HandleFunc("GET /admin/", s.handleAdminSPA)
 }
@@ -238,10 +247,16 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(AdminSessionTTL.Seconds()),
 	})
+	if st := s.manager.Store(); st != nil {
+		_ = st.AppendAudit(r.Context(), store.AuditEntry{
+			TS: time.Now().Unix(), Actor: "admin:" + creds.User, Action: "admin.login",
+		})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": creds.User})
 }
 
-func (s *Server) handleAdminLogout(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
+	s.audit(r, "admin.logout", "", "")
 	http.SetCookie(w, &http.Cookie{
 		Name:     AdminCookie,
 		Value:    "",
@@ -253,6 +268,37 @@ func (s *Server) handleAdminLogout(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// adminActor extracts the admin username from a verified cookie. Returns the
+// fallback "admin" when the cookie cannot be decoded (should not happen for
+// requests that already passed requireAdminAPI).
+func (s *Server) adminActor(r *http.Request) string {
+	if c, err := r.Cookie(AdminCookie); err == nil {
+		if user, err := s.verifyCookie(c.Value); err == nil {
+			return "admin:" + user
+		}
+	}
+	return "admin"
+}
+
+// audit safely appends an admin action to the audit log. metaJSON may be
+// empty.
+func (s *Server) audit(r *http.Request, action, target, metaJSON string) {
+	st := s.manager.Store()
+	if st == nil {
+		return
+	}
+	err := st.AppendAudit(r.Context(), store.AuditEntry{
+		TS:       time.Now().Unix(),
+		Actor:    s.adminActor(r),
+		Action:   action,
+		Target:   target,
+		MetaJSON: metaJSON,
+	})
+	if err != nil {
+		s.logger.Warn("audit: append failed", "action", action, "err", err)
+	}
+}
+
 func (s *Server) handleAdminKillSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if s.manager.Get(id) == nil {
@@ -260,6 +306,7 @@ func (s *Server) handleAdminKillSession(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.manager.Kill(id)
+	s.audit(r, "session.kill", id, "")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -283,6 +330,8 @@ func (s *Server) handleAdminSetLabel(w http.ResponseWriter, r *http.Request) {
 	}
 	sess.SetLabel(label)
 	sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
+	meta, _ := json.Marshal(map[string]any{"label": label})
+	s.audit(r, "session.label", id, string(meta))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "label": label})
 }
 
@@ -301,6 +350,8 @@ func (s *Server) handleAdminTogglePublic(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	sess.SetPublic(body.Public)
+	meta, _ := json.Marshal(map[string]any{"public": body.Public})
+	s.audit(r, "session.public", id, string(meta))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "public": body.Public})
 }
 
@@ -317,6 +368,8 @@ func (s *Server) handleAdminCreateInvite(w http.ResponseWriter, r *http.Request)
 		label = label[:32]
 	}
 	inv := s.manager.CreateInvite(label)
+	meta, _ := json.Marshal(map[string]any{"label": label})
+	s.audit(r, "invite.create", inv.Token, string(meta))
 
 	scheme := "http"
 	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
@@ -360,6 +413,7 @@ func (s *Server) handleAdminListInvites(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleAdminRevokeInvite(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 	s.manager.RevokeInvite(token)
+	s.audit(r, "invite.revoke", token, "")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

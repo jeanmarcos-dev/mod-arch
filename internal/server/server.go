@@ -27,6 +27,9 @@ const (
 	SessionCookie = "mc_sid"
 	// ViewCookie identifies a viewer subscribed via /v/<token>.
 	ViewCookie = "mc_view"
+	// ViewerPasswordCookie remembers that the viewer has cleared the
+	// per-instance password gate. Its value is a signed token.
+	ViewerPasswordCookie = "mc_view_pw"
 )
 
 // Server is the multi-tenant HTTP+WS frontend of the simulator.
@@ -74,6 +77,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /ws", s.handleWS)
 	mux.HandleFunc("GET /full", s.handleFull)
 	mux.HandleFunc("GET /v/{token}", s.handleViewer)
+	mux.HandleFunc("POST /v/{token}/auth", s.handleViewerAuth)
 	mux.HandleFunc("GET /_assets/{name}", s.handleAsset)
 	s.registerAdminRoutes(mux)
 	s.registerAuthRoutes(mux)
@@ -104,6 +108,11 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 			sess, err := s.getOrCreateSession(w, r)
 			if errors.Is(err, sessions.ErrCapReached) {
 				s.handleFull(w, r)
+				return
+			}
+			if errors.Is(err, ErrAccessDenied) {
+				_, reason := s.canCreateSession(r.Context())
+				s.writeAccessDeniedHTML(w, reason)
 				return
 			}
 			if err != nil {
@@ -176,13 +185,18 @@ func isHTMLPath(path string) bool {
 
 // getOrCreateSession reads the mc_sid cookie and reuses the session if it
 // exists; otherwise it creates a new ModeFull session. Returns ErrCapReached
-// when the public cap is full.
+// when the public cap is full, or ErrAccessDenied when access policy blocks
+// new sessions for this caller. Existing sessions keep working even after
+// access tightens — only new-creation is gated.
 func (s *Server) getOrCreateSession(w http.ResponseWriter, r *http.Request) (*sessions.Session, error) {
 	if c, err := r.Cookie(SessionCookie); err == nil {
 		if sess := s.manager.Get(c.Value); sess != nil {
 			sess.Touch()
 			return sess, nil
 		}
+	}
+	if ok, _ := s.canCreateSession(r.Context()); !ok {
+		return nil, ErrAccessDenied
 	}
 	sess, err := s.manager.Create(sessions.ModeFull)
 	if err != nil {
@@ -272,7 +286,8 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 
 // handleViewer handles /v/{token}: sets the viewer cookie, drops the owner
 // cookie if any (so the viewer cannot accidentally inherit owner powers), and
-// serves the frontend index.html.
+// serves the frontend index.html. When a viewer password is configured, the
+// caller must clear the gate first via POST /v/{token}/auth.
 func (s *Server) handleViewer(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 	sess := s.manager.GetByViewToken(token)
@@ -284,6 +299,13 @@ func (s *Server) handleViewer(w http.ResponseWriter, r *http.Request) {
 	}
 	sess.Touch()
 
+	if required, _ := s.viewerPasswordRequired(r.Context()); required {
+		if !s.hasValidViewerPasswordCookie(r) {
+			s.writeViewerPasswordForm(w, token, "")
+			return
+		}
+	}
+
 	clearCookie(w, SessionCookie)
 	http.SetCookie(w, &http.Cookie{
 		Name:     ViewCookie,
@@ -293,8 +315,6 @@ func (s *Server) handleViewer(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	// Serve index.html through a sub-request to "/" so the FileServer is not
-	// confused by the /v/<token> path.
 	if s.staticFS != nil {
 		r2 := r.Clone(r.Context())
 		r2.URL.Path = "/"
