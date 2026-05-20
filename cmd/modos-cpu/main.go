@@ -22,6 +22,7 @@ import (
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
 	"github.com/jeanmarcos/modos-cpu/internal/sim"
 	"github.com/jeanmarcos/modos-cpu/internal/staticui"
+	"github.com/jeanmarcos/modos-cpu/internal/store"
 	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
 	"github.com/jeanmarcos/modos-cpu/pkg/kernel"
 )
@@ -81,9 +82,23 @@ func runServer(args []string) {
 		logger.Warn("embedded frontend unavailable, serving placeholder", "err", err)
 	}
 
+	dbPath, err := store.DefaultPath()
+	if err != nil {
+		logger.Error("cannot resolve state db path", "err", err)
+		os.Exit(1)
+	}
+	st, err := store.Open(dbPath)
+	if err != nil {
+		logger.Error("cannot open state db", "path", dbPath, "err", err)
+		os.Exit(1)
+	}
+	defer func() { _ = st.Close() }()
+	logger.Info("state db ready", "path", dbPath)
+
 	manager := sessions.NewManager(sessions.Config{
 		Demos:         demos,
 		Logger:        logger,
+		Store:         st,
 		MaxPublic:     envInt("MAX_PUBLIC_SESSIONS", 10),
 		MaxPrivileged: envInt("MAX_PRIVILEGED_SESSIONS", 5),
 		IdleTTL:       envDuration("SESSION_TTL", 30*time.Minute),

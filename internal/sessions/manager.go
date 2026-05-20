@@ -9,6 +9,14 @@
 // (Role=Viewer) connected through a /v/<token> link. Viewers receive the
 // same events as the owner but the server filters out any mutating command
 // they try to send.
+//
+// # Persistence
+//
+// When a *store.Store is provided in Config, sessions and invites are
+// persisted to SQLite. Identity (id, mode), display state (label, public,
+// view_token) and timestamps survive process restarts; the *sim.Simulator
+// runtime itself is volatile and rebuilt fresh on rehydration. With no
+// store, the Manager works fully in-memory (used by unit tests).
 package sessions
 
 import (
@@ -21,6 +29,7 @@ import (
 	"time"
 
 	"github.com/jeanmarcos/modos-cpu/internal/sim"
+	"github.com/jeanmarcos/modos-cpu/internal/store"
 )
 
 // Manager errors signaling capacity caps.
@@ -51,6 +60,13 @@ func (m Mode) String() string {
 	default:
 		return "unknown"
 	}
+}
+
+func modeFromString(s string) Mode {
+	if s == "privileged" {
+		return ModePrivileged
+	}
+	return ModeFull
 }
 
 // Role describes the role of a WS client within a Session.
@@ -84,6 +100,8 @@ type Session struct {
 	Mode      Mode
 	CreatedAt time.Time
 
+	mgr *Manager // back-reference for persistence
+
 	mu           sync.RWMutex
 	viewToken    string // empty means share is disabled
 	label        string
@@ -105,11 +123,14 @@ func (s *Session) Label() string {
 	return s.label
 }
 
-// SetLabel updates the visible alias.
+// SetLabel updates the visible alias and persists it.
 func (s *Session) SetLabel(label string) {
 	s.mu.Lock()
 	s.label = label
 	s.mu.Unlock()
+	if s.mgr != nil {
+		s.mgr.persistLabel(s.ID, label)
+	}
 }
 
 // Public reports whether the session is listed on /full once the cap is hit.
@@ -119,11 +140,14 @@ func (s *Session) Public() bool {
 	return s.public
 }
 
-// SetPublic toggles public visibility on /full.
+// SetPublic toggles public visibility on /full and persists the change.
 func (s *Session) SetPublic(p bool) {
 	s.mu.Lock()
 	s.public = p
 	s.mu.Unlock()
+	if s.mgr != nil {
+		s.mgr.persistPublic(s.ID, p)
+	}
 }
 
 // LastActiveAt returns the last touch timestamp (thread-safe).
@@ -133,7 +157,8 @@ func (s *Session) LastActiveAt() time.Time {
 	return s.lastActiveAt
 }
 
-// Touch updates lastActiveAt to now.
+// Touch updates lastActiveAt to now. Stays in-memory; flushed to disk by the
+// cleanup pass to avoid an I/O per WS command.
 func (s *Session) Touch() {
 	s.mu.Lock()
 	s.lastActiveAt = time.Now()
@@ -144,6 +169,7 @@ func (s *Session) Touch() {
 type Config struct {
 	Demos         []sim.Demo
 	Logger        *slog.Logger
+	Store         *store.Store  // optional; when nil the Manager is in-memory only
 	MaxPublic     int           // default 10
 	MaxPrivileged int           // default 5
 	IdleTTL       time.Duration // default 30 min
@@ -165,8 +191,12 @@ type Manager struct {
 	mu          sync.RWMutex
 	sessions    map[string]*Session
 	byViewToken map[string]*Session
-	invites     map[string]*Invite // keyed by Token, only pending invites
 
+	// invites is only populated when store == nil; otherwise invite state
+	// lives in the database.
+	invites map[string]*Invite
+
+	store         *store.Store
 	demos         []sim.Demo
 	logger        *slog.Logger
 	maxPublic     int
@@ -180,7 +210,8 @@ type Manager struct {
 	peakSimultaneo int    // max concurrent sessions since startup
 }
 
-// NewManager builds an empty Manager.
+// NewManager builds an empty Manager. When Config.Store is set, persisted
+// sessions are rehydrated into the in-memory map with fresh Simulators.
 func NewManager(cfg Config) *Manager {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -197,16 +228,64 @@ func NewManager(cfg Config) *Manager {
 	if cfg.InviteTTL <= 0 {
 		cfg.InviteTTL = 24 * time.Hour
 	}
-	return &Manager{
+	m := &Manager{
 		sessions:      make(map[string]*Session),
 		byViewToken:   make(map[string]*Session),
 		invites:       make(map[string]*Invite),
+		store:         cfg.Store,
 		demos:         cfg.Demos,
 		logger:        cfg.Logger,
 		maxPublic:     cfg.MaxPublic,
 		maxPrivileged: cfg.MaxPrivileged,
 		idleTTL:       cfg.IdleTTL,
 		inviteTTL:     cfg.InviteTTL,
+	}
+	if m.store != nil {
+		m.hydrateFromStore()
+	}
+	return m
+}
+
+// hydrateFromStore loads every persisted session row into memory with a
+// fresh Simulator. Called once from NewManager. Sessions whose
+// last_active_at predates idleTTL are dropped instead of resurrected; this
+// keeps the cap clean across restarts.
+func (m *Manager) hydrateFromStore() {
+	ctx := context.Background()
+	rows, err := m.store.ListSessions(ctx)
+	if err != nil {
+		m.logger.Warn("store: hydrate sessions failed", "err", err)
+		return
+	}
+	threshold := time.Now().Add(-m.idleTTL).Unix()
+	for i := range rows {
+		row := rows[i]
+		if row.LastActiveAt < threshold {
+			if err := m.store.DeleteSession(ctx, row.ID); err != nil {
+				m.logger.Warn("store: prune idle session at boot", "id", row.ID, "err", err)
+			}
+			continue
+		}
+		sess := m.newSessionFromRow(row)
+		m.sessions[sess.ID] = sess
+		if sess.viewToken != "" {
+			m.byViewToken[sess.viewToken] = sess
+		}
+	}
+	m.logger.Info("sessions hydrated", "count", len(m.sessions))
+}
+
+func (m *Manager) newSessionFromRow(row store.SessionRow) *Session {
+	return &Session{
+		ID:           row.ID,
+		Sim:          sim.New(sim.Config{Demos: m.demos, Logger: m.logger}),
+		Mode:         modeFromString(row.Mode),
+		CreatedAt:    time.Unix(row.CreatedAt, 0),
+		mgr:          m,
+		viewToken:    row.ViewToken,
+		label:        row.Label,
+		public:       row.Public,
+		lastActiveAt: time.Unix(row.LastActiveAt, 0),
 	}
 }
 
@@ -239,12 +318,25 @@ func (m *Manager) Create(mode Mode) (*Session, error) {
 		Sim:          sim.New(sim.Config{Demos: m.demos, Logger: m.logger}),
 		Mode:         mode,
 		CreatedAt:    now,
+		mgr:          m,
 		public:       true,
 		lastActiveAt: now,
 	}
+	if m.store != nil {
+		err := m.store.CreateSession(context.Background(), store.SessionRow{
+			ID:           sess.ID,
+			Mode:         mode.String(),
+			Label:        "",
+			Public:       true,
+			CreatedAt:    now.Unix(),
+			LastActiveAt: now.Unix(),
+		})
+		if err != nil {
+			m.logger.Warn("store: persist session failed", "id", sess.ID, "err", err)
+			return nil, err
+		}
+	}
 	m.sessions[sess.ID] = sess
-	// Update metrics while still holding the map mutex so the concurrent
-	// count reflects the exact post-insert state.
 	current := len(m.sessions)
 	m.metricsMu.Lock()
 	m.totalCreated++
@@ -300,6 +392,12 @@ func (m *Manager) ActivateShare(sess *Session) string {
 	m.mu.Lock()
 	m.byViewToken[token] = sess
 	m.mu.Unlock()
+
+	if m.store != nil {
+		if err := m.store.UpdateSessionViewToken(context.Background(), sess.ID, token); err != nil {
+			m.logger.Warn("store: persist view_token failed", "id", sess.ID, "err", err)
+		}
+	}
 	m.logger.Info("share activated", "session", sess.ID, "token", token)
 	return token
 }
@@ -316,6 +414,11 @@ func (m *Manager) DeactivateShare(sess *Session) {
 		m.mu.Lock()
 		delete(m.byViewToken, token)
 		m.mu.Unlock()
+		if m.store != nil {
+			if err := m.store.UpdateSessionViewToken(context.Background(), sess.ID, ""); err != nil {
+				m.logger.Warn("store: clear view_token failed", "id", sess.ID, "err", err)
+			}
+		}
 		m.logger.Info("share deactivated", "session", sess.ID, "token", token)
 	}
 }
@@ -329,11 +432,18 @@ func (m *Manager) Kill(id string) {
 		return
 	}
 	delete(m.sessions, id)
-	if t := sess.ViewToken(); t != "" {
+	if t := sess.viewToken; t != "" {
 		delete(m.byViewToken, t)
 	}
 	m.mu.Unlock()
-	sess.Sim.StopRun() // idempotent
+	if sess.Sim != nil {
+		sess.Sim.StopRun() // idempotent
+	}
+	if m.store != nil {
+		if err := m.store.DeleteSession(context.Background(), id); err != nil {
+			m.logger.Warn("store: delete session failed", "id", id, "err", err)
+		}
+	}
 	m.logger.Info("session killed", "id", id)
 }
 
@@ -402,6 +512,26 @@ func (m *Manager) Programs() []map[string]any {
 	return list
 }
 
+// persistLabel writes a label change to the store. No-op when store is nil.
+func (m *Manager) persistLabel(id, label string) {
+	if m.store == nil {
+		return
+	}
+	if err := m.store.UpdateSessionLabel(context.Background(), id, label); err != nil {
+		m.logger.Warn("store: update label failed", "id", id, "err", err)
+	}
+}
+
+// persistPublic writes a public-flag change to the store. No-op when store is nil.
+func (m *Manager) persistPublic(id string, public bool) {
+	if m.store == nil {
+		return
+	}
+	if err := m.store.UpdateSessionPublic(context.Background(), id, public); err != nil {
+		m.logger.Warn("store: update public failed", "id", id, "err", err)
+	}
+}
+
 // newID returns a hex-encoded 16-char (8-byte) random identifier.
 func newID() string {
 	var buf [8]byte
@@ -417,35 +547,55 @@ var ErrInviteInvalid = errors.New("invite token invalid or expired")
 // CreateInvite generates a new Invite with the optional label. The returned
 // token is the one embedded in the `/?t=<token>` link the admin shares.
 func (m *Manager) CreateInvite(label string) *Invite {
+	now := time.Now()
 	inv := &Invite{
 		Token:     newID(),
 		Label:     label,
-		CreatedAt: time.Now(),
+		CreatedAt: now,
 	}
-	m.mu.Lock()
-	m.invites[inv.Token] = inv
-	m.mu.Unlock()
+	if m.store != nil {
+		err := m.store.CreateInvite(context.Background(), store.InviteRow{
+			Token:     inv.Token,
+			Label:     label,
+			CreatedAt: now.Unix(),
+			ExpiresAt: now.Add(m.inviteTTL).Unix(),
+		})
+		if err != nil {
+			m.logger.Warn("store: persist invite failed", "token", inv.Token, "err", err)
+		}
+	} else {
+		m.mu.Lock()
+		m.invites[inv.Token] = inv
+		m.mu.Unlock()
+	}
 	m.logger.Info("invite created", "token", inv.Token, "label", label)
 	return inv
 }
 
 // ConsumeInvite validates and marks an invite as used, returning the
-// associated label. If the token does not exist, expired, or was already
-// used, returns ErrInviteInvalid. Atomic: two concurrent calls with the same
-// token will see only one success.
+// associated label. Atomic: two concurrent calls with the same token will
+// see only one success.
 func (m *Manager) ConsumeInvite(token string) (string, error) {
+	if m.store != nil {
+		label, err := m.store.ConsumeInvite(context.Background(), token, time.Now().Unix())
+		if errors.Is(err, store.ErrNotFound) {
+			return "", ErrInviteInvalid
+		}
+		if err != nil {
+			m.logger.Warn("store: consume invite failed", "token", token, "err", err)
+			return "", ErrInviteInvalid
+		}
+		m.logger.Info("invite consumed", "token", token, "label", label)
+		return label, nil
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	inv, ok := m.invites[token]
-	if !ok {
-		return "", ErrInviteInvalid
-	}
-	if inv.UsedAt != nil {
+	if !ok || inv.UsedAt != nil {
 		return "", ErrInviteInvalid
 	}
 	if time.Since(inv.CreatedAt) > m.inviteTTL {
-		// The entry is left in the map for the cleanup goroutine to drop;
-		// meanwhile we return invalid so it cannot be used.
 		return "", ErrInviteInvalid
 	}
 	now := time.Now()
@@ -457,6 +607,23 @@ func (m *Manager) ConsumeInvite(token string) (string, error) {
 // ListInvites returns every PENDING invite (not used, not expired). Used by
 // the admin dashboard.
 func (m *Manager) ListInvites() []*Invite {
+	if m.store != nil {
+		rows, err := m.store.ListPendingInvites(context.Background(), time.Now().Unix())
+		if err != nil {
+			m.logger.Warn("store: list invites failed", "err", err)
+			return nil
+		}
+		out := make([]*Invite, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, &Invite{
+				Token:     r.Token,
+				Label:     r.Label,
+				CreatedAt: time.Unix(r.CreatedAt, 0),
+			})
+		}
+		return out
+	}
+
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make([]*Invite, 0, len(m.invites))
@@ -475,26 +642,42 @@ func (m *Manager) ListInvites() []*Invite {
 
 // RevokeInvite removes an unused invite. Idempotent.
 func (m *Manager) RevokeInvite(token string) {
-	m.mu.Lock()
-	delete(m.invites, token)
-	m.mu.Unlock()
+	if m.store != nil {
+		if err := m.store.RevokeInvite(context.Background(), token); err != nil {
+			m.logger.Warn("store: revoke invite failed", "token", token, "err", err)
+		}
+	} else {
+		m.mu.Lock()
+		delete(m.invites, token)
+		m.mu.Unlock()
+	}
 	m.logger.Info("invite revoked", "token", token)
 }
 
 // CleanupOnce performs one cleanup pass: kills sessions whose LastActiveAt
-// is older than IdleTTL, and drops invites that are used or expired. Returns
-// how many sessions were killed and how many invites pruned.
+// is older than IdleTTL, drops invites that are used or expired, and
+// flushes Touch timestamps from memory to disk. Returns how many sessions
+// were killed and how many invites pruned.
 func (m *Manager) CleanupOnce() (killedSessions, prunedInvites int) {
 	now := time.Now()
+	ctx := context.Background()
 
 	// Identify idle sessions under a short read lock, then Kill outside the
 	// lock so each Simulator's StopRun does not block the map.
 	m.mu.RLock()
 	deadIDs := make([]string, 0)
+	type liveTouch struct {
+		id string
+		ts int64
+	}
+	live := make([]liveTouch, 0, len(m.sessions))
 	for id, sess := range m.sessions {
-		if now.Sub(sess.LastActiveAt()) > m.idleTTL {
+		last := sess.LastActiveAt()
+		if now.Sub(last) > m.idleTTL {
 			deadIDs = append(deadIDs, id)
+			continue
 		}
+		live = append(live, liveTouch{id: id, ts: last.Unix()})
 	}
 	m.mu.RUnlock()
 	for _, id := range deadIDs {
@@ -502,14 +685,29 @@ func (m *Manager) CleanupOnce() (killedSessions, prunedInvites int) {
 		killedSessions++
 	}
 
-	m.mu.Lock()
-	for token, inv := range m.invites {
-		if inv.UsedAt != nil || now.Sub(inv.CreatedAt) > m.inviteTTL {
-			delete(m.invites, token)
-			prunedInvites++
+	if m.store != nil {
+		// Flush in-memory Touch timestamps for surviving sessions.
+		for _, lt := range live {
+			if err := m.store.UpdateSessionLastActive(ctx, lt.id, lt.ts); err != nil {
+				m.logger.Warn("store: flush last_active failed", "id", lt.id, "err", err)
+			}
 		}
+		n, err := m.store.DeleteExpiredInvites(ctx, now.Unix())
+		if err != nil {
+			m.logger.Warn("store: prune invites failed", "err", err)
+		} else {
+			prunedInvites += n
+		}
+	} else {
+		m.mu.Lock()
+		for token, inv := range m.invites {
+			if inv.UsedAt != nil || now.Sub(inv.CreatedAt) > m.inviteTTL {
+				delete(m.invites, token)
+				prunedInvites++
+			}
+		}
+		m.mu.Unlock()
 	}
-	m.mu.Unlock()
 
 	if killedSessions > 0 || prunedInvites > 0 {
 		m.logger.Info("cleanup pass", "killed_sessions", killedSessions, "pruned_invites", prunedInvites)
