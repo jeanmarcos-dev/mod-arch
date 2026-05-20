@@ -45,6 +45,21 @@ export interface IrqFire {
   seq: number;
 }
 
+// PCB copy events. pcb_save flies registers CPU → PCB row; pcb_restore is the
+// reverse. We carry the full register snapshot so the narrator can show the
+// most relevant ones (EIP, ESP, EAX) on the flying card.
+export interface PcbSave {
+  pid: number;
+  regs: Record<string, number>;
+  seq: number;
+}
+
+export interface PcbRestore {
+  pid: number;
+  regs: Record<string, number>;
+  seq: number;
+}
+
 type AnyHandler = (...args: unknown[]) => void;
 
 export interface NarratorOptions {
@@ -70,6 +85,8 @@ export function useNarrators(opts: NarratorOptions = {}) {
     modeSwitch: new Set(),
     ctxSwitch: new Set(),
     irqFire: new Set(),
+    pcbSave: new Set(),
+    pcbRestore: new Set(),
   };
 
   let seq = 0;
@@ -138,6 +155,22 @@ export function useNarrators(opts: NarratorOptions = {}) {
           seq,
         } satisfies IrqFire);
         break;
+      case 'pcb_save':
+        seq++;
+        fire('pcbSave', {
+          pid: ev.pid,
+          regs: ev.regs,
+          seq,
+        } satisfies PcbSave);
+        break;
+      case 'pcb_restore':
+        seq++;
+        fire('pcbRestore', {
+          pid: ev.pid,
+          regs: ev.regs,
+          seq,
+        } satisfies PcbRestore);
+        break;
     }
   });
 
@@ -149,5 +182,7 @@ export function useNarrators(opts: NarratorOptions = {}) {
     onModeSwitch(fn: (m: ModeSwitch) => void) { handlers.modeSwitch.add(fn as AnyHandler); },
     onCtxSwitch(fn: (m: CtxSwitch) => void) { handlers.ctxSwitch.add(fn as AnyHandler); },
     onIrqFire(fn: (m: IrqFire) => void) { handlers.irqFire.add(fn as AnyHandler); },
+    onPcbSave(fn: (m: PcbSave) => void) { handlers.pcbSave.add(fn as AnyHandler); },
+    onPcbRestore(fn: (m: PcbRestore) => void) { handlers.pcbRestore.add(fn as AnyHandler); },
   };
 }
