@@ -191,7 +191,7 @@ func (m *Memory) Read8(cpu *CPU, addr uint32, mode uint8) (uint8, error) {
 	}
 	v := m.Bytes[addr]
 	if cpu != nil {
-		cpu.Emit(EventMemRead{Addr: addr, Value: uint32(v), Size: 1})
+		cpu.Emit(EventMemRead{CoreID: cpu.CoreID, Addr: addr, Value: uint32(v), Size: 1})
 	}
 	return v, nil
 }
@@ -203,7 +203,7 @@ func (m *Memory) Read16(cpu *CPU, addr uint32, mode uint8) (uint16, error) {
 	}
 	v := binary.LittleEndian.Uint16(m.Bytes[addr:])
 	if cpu != nil {
-		cpu.Emit(EventMemRead{Addr: addr, Value: uint32(v), Size: 2})
+		cpu.Emit(EventMemRead{CoreID: cpu.CoreID, Addr: addr, Value: uint32(v), Size: 2})
 	}
 	return v, nil
 }
@@ -215,7 +215,7 @@ func (m *Memory) Read32(cpu *CPU, addr uint32, mode uint8) (uint32, error) {
 	}
 	v := binary.LittleEndian.Uint32(m.Bytes[addr:])
 	if cpu != nil {
-		cpu.Emit(EventMemRead{Addr: addr, Value: v, Size: 4})
+		cpu.Emit(EventMemRead{CoreID: cpu.CoreID, Addr: addr, Value: v, Size: 4})
 	}
 	return v, nil
 }
@@ -237,7 +237,7 @@ func (m *Memory) Write8(cpu *CPU, addr uint32, val uint8, mode uint8) error {
 	old := m.Bytes[addr]
 	m.Bytes[addr] = val
 	if cpu != nil {
-		cpu.Emit(EventMemWrite{Addr: addr, Old: uint32(old), New: uint32(val), Size: 1})
+		cpu.Emit(EventMemWrite{CoreID: cpu.CoreID, Addr: addr, Old: uint32(old), New: uint32(val), Size: 1})
 	}
 	return nil
 }
@@ -250,7 +250,7 @@ func (m *Memory) Write16(cpu *CPU, addr uint32, val uint16, mode uint8) error {
 	old := binary.LittleEndian.Uint16(m.Bytes[addr:])
 	binary.LittleEndian.PutUint16(m.Bytes[addr:], val)
 	if cpu != nil {
-		cpu.Emit(EventMemWrite{Addr: addr, Old: uint32(old), New: uint32(val), Size: 2})
+		cpu.Emit(EventMemWrite{CoreID: cpu.CoreID, Addr: addr, Old: uint32(old), New: uint32(val), Size: 2})
 	}
 	return nil
 }
@@ -263,7 +263,7 @@ func (m *Memory) Write32(cpu *CPU, addr uint32, val uint32, mode uint8) error {
 	old := binary.LittleEndian.Uint32(m.Bytes[addr:])
 	binary.LittleEndian.PutUint32(m.Bytes[addr:], val)
 	if cpu != nil {
-		cpu.Emit(EventMemWrite{Addr: addr, Old: old, New: val, Size: 4})
+		cpu.Emit(EventMemWrite{CoreID: cpu.CoreID, Addr: addr, Old: old, New: val, Size: 4})
 	}
 	return nil
 }

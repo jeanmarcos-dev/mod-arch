@@ -59,6 +59,7 @@ type Command struct {
 	Quantum int    `json:"quantum,omitempty"`
 	Key     string `json:"key,omitempty"`
 	Alias   string `json:"alias,omitempty"`
+	Cores   int    `json:"cores,omitempty"`
 }
 
 // handleWS resolves the session from cookies and services the WebSocket
@@ -228,6 +229,10 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 	case "unshare":
 		s.manager.DeactivateShare(sess)
 		sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
+	case "set_num_cores":
+		if err := sess.Sim.SetNumCores(cmd.Cores); err != nil {
+			c.Send <- map[string]any{"type": "error", "message": err.Error()}
+		}
 	case "set_alias":
 		alias, err := cleanLabel(cmd.Alias)
 		if err != nil {

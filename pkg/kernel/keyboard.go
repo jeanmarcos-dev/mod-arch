@@ -43,7 +43,7 @@ func (k *Kernel) blockCurrent(core *Core, reason string) []cpu.Event {
 	pcb.Core = -1
 
 	out := []cpu.Event{
-		cpu.EventPCBSave{PID: curPID, Regs: pcbRegsSnapshot(pcb)},
+		cpu.EventPCBSave{CoreID: core.ID, PID: curPID, Regs: pcbRegsSnapshot(pcb)},
 		cpu.EventProcessState{PID: curPID, State: string(StateBlocked), Reason: reason},
 	}
 
@@ -66,7 +66,7 @@ func (k *Kernel) blockCurrent(core *Core, reason string) []cpu.Event {
 	core.CurrentPID = 0
 	out = append(out,
 		cpu.EventCoreRelease{CoreID: core.ID, PID: curPID, Reason: reason},
-		cpu.EventHalt{PID: curPID},
+		cpu.EventHalt{CoreID: core.ID, PID: curPID},
 	)
 	return out
 }

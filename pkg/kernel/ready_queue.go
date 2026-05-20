@@ -59,12 +59,13 @@ func (q *ReadyQueue) Len() int {
 
 // Snapshot returns a copy of the queued PIDs in FIFO order. The result is
 // safe to embed in events without worrying about later mutations.
+//
+// Returns a non-nil empty slice for an empty queue so JSON consumers see
+// "ready_queue": [] instead of "ready_queue": null — frontend code that
+// spreads the value (e.g. [...ev.ready_queue]) would otherwise crash.
 func (q *ReadyQueue) Snapshot() []int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if len(q.items) == 0 {
-		return nil
-	}
 	out := make([]int, len(q.items))
 	copy(out, q.items)
 	return out

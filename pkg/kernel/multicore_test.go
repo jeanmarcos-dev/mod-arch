@@ -132,6 +132,46 @@ func TestMulticore_EmitsCoreAssign(t *testing.T) {
 	}
 }
 
+// TestHasWork_PendingIRQWakesParkedKernel guards the regression where every
+// core was halted (e.g. the only process is blocked in sys_read) and PushKey
+// queued IRQ 0x21 on the boot core but AllHalted still reported true. The
+// simulator stopped its run loop and the IRQ never dispatched, so the user
+// keystroke vanished. HasWork must keep the loop alive while any core has a
+// pending interrupt because the next Step will wake it via dispatchIRQ.
+func TestHasWork_PendingIRQWakesParkedKernel(t *testing.T) {
+	k := NewMulti(cpu.DefaultMemSize, 2)
+	for _, c := range k.Cores {
+		c.CPU.Halted = true
+	}
+	if k.HasWork() {
+		t.Fatal("HasWork = true on fully halted kernel without IRQs")
+	}
+	k.PushKey('x')
+	if !k.HasWork() {
+		t.Fatal("HasWork = false after PushKey enqueued IRQ on boot core")
+	}
+}
+
+// TestMulticore_ResetKeepsNonBootCoresHalted checks that Reset() leaves
+// non-boot cores Halted=true so AllHalted() is true on an empty kernel. The
+// per-core CPU.Reset clears Halted, so kernel.Reset has to put it back —
+// otherwise a Reset between demos would leave the run loop spinning forever
+// on idle cores.
+func TestMulticore_ResetKeepsNonBootCoresHalted(t *testing.T) {
+	k := NewMulti(cpu.DefaultMemSize, 3)
+	if _, err := k.AddProcess("p1", []byte{0x40, 0xF4}); err != nil {
+		t.Fatal(err)
+	}
+	k.Reset()
+	if !k.AllHalted() {
+		halted := make([]bool, 0, len(k.Cores))
+		for _, c := range k.Cores {
+			halted = append(halted, c.CPU.Halted)
+		}
+		t.Fatalf("AllHalted() = false after Reset; per-core Halted=%v", halted)
+	}
+}
+
 // TestMulticore_IdleCoreWhenSingleProcess covers the (intentional) asymmetry:
 // with N=2 cores but only 1 process, the second core sits idle (CurrentPID=0)
 // and AllHalted returns true once the lone process halts.

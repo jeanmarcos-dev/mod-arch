@@ -36,7 +36,7 @@ func (c *CPU) dispatchIRQ(vector uint8, source string) error {
 		return fmt.Errorf("dispatch IRQ %d: IDT[0x%02X] not installed", vector, vector)
 	}
 
-	c.Emit(EventIRQFire{Vector: vector, Source: source})
+	c.Emit(EventIRQFire{CoreID: c.CoreID, Vector: vector, Source: source})
 
 	// If the CPU was halted waiting for an IRQ, wake it up. This models the
 	// x86 behavior of HLT: "sleep until any interrupt arrives".
@@ -63,7 +63,7 @@ func (c *CPU) dispatchIRQ(vector uint8, source string) error {
 	c.Mode = ModeKernel
 	c.R.CS = SelKernelCode
 	if oldMode != ModeKernel {
-		c.Emit(EventModeSwitch{From: oldMode, To: ModeKernel, Cause: causeOf(source)})
+		c.Emit(EventModeSwitch{CoreID: c.CoreID, From: oldMode, To: ModeKernel, Cause: causeOf(source)})
 	}
 
 	// Push the interrupt frame now that we are on the kernel stack.
@@ -125,7 +125,7 @@ func (c *CPU) handleIRET() error {
 		c.Mode = ModeUser
 		c.R.ESP = c.SavedUserESP
 		c.R.SS = c.SavedUserSS
-		c.Emit(EventModeSwitch{From: oldMode, To: ModeUser, Cause: "IRET"})
+		c.Emit(EventModeSwitch{CoreID: c.CoreID, From: oldMode, To: ModeUser, Cause: "IRET"})
 	}
 
 	return nil

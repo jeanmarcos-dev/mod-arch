@@ -62,6 +62,12 @@ type CPU struct {
 	Mode uint8 // 0=kernel, 3=user
 	Mem  *Memory
 
+	// CoreID identifies which logical CPU emitted each event. Default 0
+	// matches the boot/single-core case; kernel.NewMulti sets it per core
+	// so the frontend can route reg/mem/instruction events to the right
+	// pane without mixing register files between cores.
+	CoreID int
+
 	// Halted is true after executing HLT. Subsequent steps do nothing until
 	// an IRQ wakes the CPU.
 	Halted bool
@@ -146,7 +152,7 @@ func (c *CPU) SetReg32(name string, val uint32) error {
 		return nil
 	}
 	*p = val
-	c.Emit(EventRegWrite{Reg: name, Old: old, New: val})
+	c.Emit(EventRegWrite{CoreID: c.CoreID, Reg: name, Old: old, New: val})
 	return nil
 }
 
@@ -197,7 +203,7 @@ func (c *CPU) FlagSet(flag uint32, on bool) {
 		c.R.EFLAGS &^= flag
 	}
 	if old != c.R.EFLAGS {
-		c.Emit(EventRegWrite{Reg: "EFLAGS", Old: old, New: c.R.EFLAGS})
+		c.Emit(EventRegWrite{CoreID: c.CoreID, Reg: "EFLAGS", Old: old, New: c.R.EFLAGS})
 	}
 }
 
@@ -244,6 +250,7 @@ func (c *CPU) Step() ([]Event, error) {
 		// return without error (the kernel handles cleanup).
 		if mf, ok := errors.AsType[*MemFault](err); ok {
 			c.Emit(EventPageFault{
+				CoreID:     c.CoreID,
 				Addr:       mf.Addr,
 				Mode:       mf.Mode,
 				PermNeeded: mf.PermNeeded,

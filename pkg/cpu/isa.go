@@ -49,7 +49,7 @@ func (c *CPU) setRegByIdx(i uint8, val uint32) {
 		return
 	}
 	*p = val
-	c.Emit(EventRegWrite{Reg: regNames[i], Old: old, New: val})
+	c.Emit(EventRegWrite{CoreID: c.CoreID, Reg: regNames[i], Old: old, New: val})
 }
 
 // fetch8 reads one instruction byte at EIP, requiring execute permission, and
@@ -352,7 +352,7 @@ func execInstruction(c *CPU) error {
 	case opcode == 0xF4:
 		c.emitInstr(startEIP, "HLT")
 		c.Halted = true
-		c.Emit(EventHalt{})
+		c.Emit(EventHalt{CoreID: c.CoreID})
 
 	case opcode == 0x90:
 		c.emitInstr(startEIP, "NOP")
@@ -376,6 +376,7 @@ func decodeModRM(b uint8) (mod, reg, rm uint8) {
 func (c *CPU) emitInstr(startEIP uint32, mnemonic string) {
 	bytes := append([]byte(nil), c.Mem.Bytes[startEIP:c.R.EIP]...)
 	c.Emit(EventInstruction{
+		CoreID: c.CoreID,
 		// PID is overwritten by the kernel once processes exist.
 		PID:      0,
 		EIP:      startEIP,

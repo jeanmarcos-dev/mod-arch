@@ -10,6 +10,7 @@ type Event interface {
 
 // EventInstruction is emitted at the start of each step, before any mutation.
 type EventInstruction struct {
+	CoreID   int    `json:"core_id"`
 	PID      int    `json:"pid"`
 	EIP      uint32 `json:"eip"`
 	Mnemonic string `json:"mnemonic"`
@@ -20,11 +21,13 @@ type EventInstruction struct {
 func (EventInstruction) Tag() string { return "instruction" }
 
 // EventRegWrite records a register change, so the frontend can flash the
-// register that changed.
+// register that changed. CoreID identifies which CPU core produced the
+// write; multicore demos rely on it to keep per-core state separated.
 type EventRegWrite struct {
-	Reg string `json:"reg"`
-	Old uint32 `json:"old"`
-	New uint32 `json:"new"`
+	CoreID int    `json:"core_id"`
+	Reg    string `json:"reg"`
+	Old    uint32 `json:"old"`
+	New    uint32 `json:"new"`
 }
 
 // Tag returns the event tag.
@@ -33,9 +36,10 @@ func (EventRegWrite) Tag() string { return "reg_write" }
 // EventMemRead is emitted when the CPU reads memory; the frontend highlights
 // the address.
 type EventMemRead struct {
-	Addr  uint32 `json:"addr"`
-	Value uint32 `json:"value"`
-	Size  int    `json:"size"` // 1, 2 or 4 bytes
+	CoreID int    `json:"core_id"`
+	Addr   uint32 `json:"addr"`
+	Value  uint32 `json:"value"`
+	Size   int    `json:"size"` // 1, 2 or 4 bytes
 }
 
 // Tag returns the event tag.
@@ -43,10 +47,11 @@ func (EventMemRead) Tag() string { return "mem_read" }
 
 // EventMemWrite is emitted when the CPU writes memory.
 type EventMemWrite struct {
-	Addr uint32 `json:"addr"`
-	Old  uint32 `json:"old"`
-	New  uint32 `json:"new"`
-	Size int    `json:"size"`
+	CoreID int    `json:"core_id"`
+	Addr   uint32 `json:"addr"`
+	Old    uint32 `json:"old"`
+	New    uint32 `json:"new"`
+	Size   int    `json:"size"`
 }
 
 // Tag returns the event tag.
@@ -62,9 +67,10 @@ func (EventMemWrite) Tag() string { return "mem_write" }
 // In all three cases the mode bit transition is performed by the CPU HARDWARE.
 // Software only decides what to do AFTER the change; it never flips the bit.
 type EventModeSwitch struct {
-	From  uint8  `json:"from"`  // 3 or 0
-	To    uint8  `json:"to"`    // 3 or 0
-	Cause string `json:"cause"` // "INT" | "IRET" | "fault"
+	CoreID int    `json:"core_id"`
+	From   uint8  `json:"from"`  // 3 or 0
+	To     uint8  `json:"to"`    // 3 or 0
+	Cause  string `json:"cause"` // "INT" | "IRET" | "fault"
 }
 
 // Tag returns the event tag.
@@ -78,6 +84,7 @@ func (EventModeSwitch) Tag() string { return "mode_switch" }
 // It is the companion to EventModeSwitch: IRQ_FIRE explains WHY the kernel is
 // being entered, while ModeSwitch documents WHEN the HW flips the bit.
 type EventIRQFire struct {
+	CoreID int    `json:"core_id"`
 	Vector uint8  `json:"vector"`
 	Source string `json:"source"` // "HW" | "SW"
 }
@@ -89,6 +96,7 @@ func (EventIRQFire) Tag() string { return "irq_fire" }
 // permissions. Unlike a failed mem_read/mem_write, this event triggers
 // INT 0x0E and may cause the kernel to kill the process.
 type EventPageFault struct {
+	CoreID     int    `json:"core_id"`
 	Addr       uint32 `json:"addr"`
 	Mode       uint8  `json:"mode"`
 	PermNeeded string `json:"perm_needed"` // "R", "W", "X"
@@ -100,17 +108,20 @@ func (EventPageFault) Tag() string { return "page_fault" }
 // EventHalt indicates the CPU executed HLT. On a real OS the CPU sleeps until
 // the next IRQ; in the simulator, if no process is READY, execution stops.
 type EventHalt struct {
-	PID int `json:"pid"`
+	CoreID int `json:"core_id"`
+	PID    int `json:"pid"`
 }
 
 // Tag returns the event tag.
 func (EventHalt) Tag() string { return "halt" }
 
 // EventPCBSave is emitted when the kernel saves a process's state before a
-// context switch.
+// context switch. CoreID identifies which core was running the process —
+// narrators use it to anchor the save animation at the right core panel.
 type EventPCBSave struct {
-	PID  int               `json:"pid"`
-	Regs map[string]uint32 `json:"regs"`
+	CoreID int               `json:"core_id"`
+	PID    int               `json:"pid"`
+	Regs   map[string]uint32 `json:"regs"`
 }
 
 // Tag returns the event tag.
@@ -119,8 +130,9 @@ func (EventPCBSave) Tag() string { return "pcb_save" }
 // EventPCBRestore is emitted when the kernel loads a process's state into the
 // CPU so execution can resume.
 type EventPCBRestore struct {
-	PID  int               `json:"pid"`
-	Regs map[string]uint32 `json:"regs"`
+	CoreID int               `json:"core_id"`
+	PID    int               `json:"pid"`
+	Regs   map[string]uint32 `json:"regs"`
 }
 
 // Tag returns the event tag.

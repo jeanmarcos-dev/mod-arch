@@ -114,6 +114,10 @@ func NewMulti(memSize, numCores int) *Kernel {
 			// true for an N-core kernel that only ran on one core.
 			c.Halted = true
 		}
+		// Tag the CPU with its core index so every event it emits carries
+		// CoreID — the frontend uses it to keep per-core register files
+		// separate instead of overwriting a global one.
+		c.CoreID = i
 		cores[i] = &Core{ID: i, CPU: c}
 	}
 
@@ -147,7 +151,9 @@ func (k *Kernel) NumCores() int {
 }
 
 // AllHalted is true when every core has Halted=true. The run loop in sim
-// uses it to decide when to stop the ticker.
+// uses it as the user-visible "machine is halted" signal it broadcasts to
+// the frontend; do not use it to decide whether the simulator still has
+// work to advance — see HasWork below.
 func (k *Kernel) AllHalted() bool {
 	for _, c := range k.Cores {
 		if !c.CPU.Halted {
@@ -157,6 +163,26 @@ func (k *Kernel) AllHalted() bool {
 	return true
 }
 
+// HasWork reports whether any core can still make progress on the next
+// Step: either it is actively running or it has an interrupt waiting to be
+// dispatched. Halted-with-pending-IRQ counts as work because dispatchIRQ
+// clears the halt as soon as the CPU runs one more cycle.
+//
+// The run loop polls this instead of AllHalted so that an asynchronous IRQ
+// arriving while every core is halted (e.g. PushKey on a process blocked in
+// sys_read) does not get stuck waiting for a ticker that already shut down.
+func (k *Kernel) HasWork() bool {
+	for _, c := range k.Cores {
+		if !c.CPU.Halted {
+			return true
+		}
+		if len(c.CPU.PendingIRQs) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // Reset clears the process table and reinstalls the IDT. Useful for loading a
 // fresh scenario from scratch. All cores go back to their initial state.
 func (k *Kernel) Reset() {
@@ -164,6 +190,12 @@ func (k *Kernel) Reset() {
 		c.CPU.Reset()
 		c.CurrentPID = 0
 		c.lastTimerFiredAt = 0
+		// CPU.Reset clears Halted; with no process loaded every core has
+		// nothing to run, so park them all halted. loadCPUFromPCB clears
+		// Halted on the core that receives the next AddProcess call.
+		// Without this Reset, the run loop would spin forever after a
+		// Reset on an idle kernel because AllHalted() would stay false.
+		c.CPU.Halted = true
 	}
 	k.Processes = make(map[int]*PCB)
 	k.Ready.Reset()
@@ -425,7 +457,7 @@ func (k *Kernel) killCurrent(core *Core, reason string) []cpu.Event {
 			writeKernelDWORD(core.CPU, core.CPU.R.ESP+4, uint32(nextPCB.Regs.CS))
 			writeKernelDWORD(core.CPU, core.CPU.R.ESP+8, nextPCB.Regs.EFLAGS)
 
-			out = append(out, cpu.EventPCBRestore{PID: nextPID, Regs: pcbRegsSnapshot(nextPCB)})
+			out = append(out, cpu.EventPCBRestore{CoreID: core.ID, PID: nextPID, Regs: pcbRegsSnapshot(nextPCB)})
 			nextPCB.State = StateRun
 			nextPCB.Core = core.ID
 			core.CurrentPID = nextPID
@@ -443,7 +475,7 @@ func (k *Kernel) killCurrent(core *Core, reason string) []cpu.Event {
 	core.CurrentPID = 0
 	out = append(out,
 		cpu.EventCoreRelease{CoreID: core.ID, PID: curPID, Reason: reason},
-		cpu.EventHalt{PID: curPID},
+		cpu.EventHalt{CoreID: core.ID, PID: curPID},
 	)
 	return out
 }

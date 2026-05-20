@@ -79,7 +79,7 @@ func (k *Kernel) scheduleNext(core *Core) []cpu.Event {
 	curPCB.State = StateReady
 	curPCB.Core = -1
 
-	out = append(out, cpu.EventPCBSave{PID: curPID, Regs: pcbRegsSnapshot(curPCB)})
+	out = append(out, cpu.EventPCBSave{CoreID: core.ID, PID: curPID, Regs: pcbRegsSnapshot(curPCB)})
 	out = append(out, cpu.EventProcessState{PID: curPID, State: string(StateReady), Reason: "preempted by timer"})
 
 	// 2. Push current to the tail of the ready queue.
@@ -122,7 +122,7 @@ func (k *Kernel) scheduleNext(core *Core) []cpu.Event {
 	writeKernelDWORD(core.CPU, core.CPU.R.ESP+4, uint32(nextPCB.Regs.CS))
 	writeKernelDWORD(core.CPU, core.CPU.R.ESP+8, nextPCB.Regs.EFLAGS)
 
-	out = append(out, cpu.EventPCBRestore{PID: nextPID, Regs: pcbRegsSnapshot(nextPCB)})
+	out = append(out, cpu.EventPCBRestore{CoreID: core.ID, PID: nextPID, Regs: pcbRegsSnapshot(nextPCB)})
 
 	nextPCB.State = StateRun
 	nextPCB.Core = core.ID
@@ -182,7 +182,7 @@ func (k *Kernel) switchTo(core *Core, pid int) []cpu.Event {
 	pcb.Core = core.ID
 	core.CurrentPID = pid
 	return []cpu.Event{
-		cpu.EventPCBRestore{PID: pid, Regs: pcbRegsSnapshot(pcb)},
+		cpu.EventPCBRestore{CoreID: core.ID, PID: pid, Regs: pcbRegsSnapshot(pcb)},
 		cpu.EventCoreAssign{CoreID: core.ID, PID: pid},
 		cpu.EventProcessState{PID: pid, State: string(StateRun)},
 	}
