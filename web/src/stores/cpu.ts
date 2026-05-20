@@ -136,7 +136,14 @@ export const useCpuStore = defineStore('cpu', () => {
   // ─── WS ─────────────────────────────────────────────────────────────────
   let ws: WebSocket | null = null;
 
+  // connect is idempotent. Re-mounting components that call connect() — for
+  // example navigating away from the Simulator and back through the shell —
+  // would otherwise leak a WebSocket per visit, each with its own onmessage
+  // handler pushing events to the log a second, third, fourth time.
   function connect() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const url = `${proto}://${location.host}/ws`;
     ws = new WebSocket(url);
@@ -146,6 +153,7 @@ export const useCpuStore = defineStore('cpu', () => {
     };
     ws.onclose = () => {
       connected.value = false;
+      ws = null;
       pushLog('⚠ desconectado', 'red');
     };
     ws.onerror = () => {

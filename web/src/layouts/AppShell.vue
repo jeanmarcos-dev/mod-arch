@@ -1,16 +1,26 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
+import { useCpuStore } from '../stores/cpu';
 import { usePreferencesStore } from '../stores/preferences';
 import Sidebar from '../components/shell/Sidebar.vue';
 import Topbar from '../components/shell/Topbar.vue';
 import SimulationMinibar from '../components/shell/SimulationMinibar.vue';
 
 const auth = useAuthStore();
+const cpu = useCpuStore();
 const prefs = usePreferencesStore();
 const route = useRoute();
 const router = useRouter();
+
+// Connect once when the shell mounts. The shell lives for the whole student
+// session, so child route changes don't trigger a reconnect. cpu.connect is
+// idempotent — calls from Simulator.vue (for the viewer route) are no-ops
+// here.
+onMounted(() => {
+  cpu.connect();
+});
 
 const items = [
   { to: '/', label: 'Vista general', icon: '▶', group: 'SIMULACIÓN' },
