@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"strings"
@@ -160,19 +161,35 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 // handleAdminSPA serves the SPA's index.html so the Vue Router can resolve
 // /admin, /admin/login, /admin/anything on the client. Auth is enforced at
 // the API layer; the HTML shell is identical for everyone, the SPA decides
-// what to render after calling /admin/api/me.
+// what to render after calling /admin/api/me. When admin is disabled at the
+// server level, the same index.html is served with a 404 status so the
+// generic NotFound view renders — no information about the admin panel's
+// existence is leaked.
 func (s *Server) handleAdminSPA(w http.ResponseWriter, r *http.Request) {
-	if !s.admin.enabled {
-		http.NotFound(w, r)
-		return
-	}
 	if s.staticFS == nil {
 		s.handlePlaceholder(w, r)
+		return
+	}
+	if !s.admin.enabled {
+		serveSPAStatus(w, s.staticFS, http.StatusNotFound)
 		return
 	}
 	r2 := r.Clone(r.Context())
 	r2.URL.Path = "/"
 	http.FileServer(http.FS(s.staticFS)).ServeHTTP(w, r2)
+}
+
+// serveSPAStatus writes index.html with the given status code so the client
+// shows the SPA NotFound view even when the response carries a real 404.
+func serveSPAStatus(w http.ResponseWriter, files fs.FS, status int) {
+	data, err := fs.ReadFile(files, "index.html")
+	if err != nil {
+		http.Error(w, "not found", status)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = w.Write(data)
 }
 
 // handleAdminMe reports the current admin identity to the SPA. Used by the

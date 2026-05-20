@@ -13,6 +13,11 @@ import (
 	"github.com/jeanmarcos/modos-cpu/internal/store"
 )
 
+var (
+	accessDeniedTmpl   = mustParseTemplate("access_denied", "templates/access_denied.html")
+	viewerPasswordTmpl = mustParseTemplate("viewer_password", "templates/viewer_password.html")
+)
+
 // Settings keys persisted in the settings table.
 const (
 	SettingAccessMode             = "access_mode"
@@ -94,18 +99,9 @@ func (s *Server) canCreateSession(ctx context.Context) (bool, string) {
 func (s *Server) writeAccessDeniedHTML(w http.ResponseWriter, reason string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusServiceUnavailable)
-	_, _ = w.Write([]byte(`<!doctype html>
-<html lang="es"><head><meta charset="utf-8"><title>Acceso restringido</title>
-<style>
-body{background:#0a0a0a;color:#e0e0e0;font-family:'JetBrains Mono',monospace;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:24px}
-.card{max-width:520px;text-align:center;border:1px solid #3a3a3a;background:rgba(0,0,0,.55);padding:32px}
-h1{font-family:'Major Mono Display',monospace;color:#ffb347;letter-spacing:6px;font-size:18px;margin:0 0 12px}
-p{color:#aaa;font-size:13px;line-height:1.6}
-</style></head><body><div class="card">
-<h1>ACCESO RESTRINGIDO</h1>
-<p>` + htmlEscape(reason) + `</p>
-<p>Si dispone de una invitación, abra el enlace que le facilitó el docente.</p>
-</div></body></html>`))
+	if err := accessDeniedTmpl.Execute(w, map[string]any{"Reason": reason}); err != nil {
+		s.logger.Warn("access_denied template execute failed", "err", err)
+	}
 }
 
 // hasValidViewerPasswordCookie verifies the HMAC signature on the cookie. The
@@ -144,38 +140,17 @@ func (s *Server) viewerPasswordCookieValue() string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-// writeViewerPasswordForm renders a self-contained HTML form that POSTs to
-// /v/{token}/auth. The optional errMsg is shown when the previous attempt
-// was rejected.
+// writeViewerPasswordForm renders the gate page that POSTs the password to
+// /v/{token}/auth. errMsg, when non-empty, surfaces the previous failure.
 func (s *Server) writeViewerPasswordForm(w http.ResponseWriter, token, errMsg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if errMsg != "" {
 		w.WriteHeader(http.StatusUnauthorized)
 	}
-	page := `<!doctype html>
-<html lang="es"><head><meta charset="utf-8"><title>Acceso · MODOS-CPU</title>
-<style>
-body{background:#0a0a0a;color:#e0e0e0;font-family:'JetBrains Mono',monospace;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:24px}
-.card{width:min(100%,380px);border:1px solid #3a3a3a;background:rgba(0,0,0,.55);padding:28px 26px}
-h1{font-family:'Major Mono Display',monospace;color:#ffb347;letter-spacing:6px;font-size:16px;margin:0 0 18px;text-align:center}
-p{color:#888;font-size:12px;line-height:1.5}
-label{display:flex;flex-direction:column;gap:6px;font-size:11px;letter-spacing:1px;color:#888;text-transform:uppercase}
-input{background:rgba(0,0,0,.55);border:1px solid #3a3a3a;color:#e0e0e0;padding:9px 10px;font-size:14px;font-family:inherit;outline:none}
-input:focus{border-color:#ffb347;box-shadow:0 0 6px rgba(255,179,71,.25)}
-button{margin-top:14px;width:100%;background:rgba(255,179,71,.12);border:1px solid #ffb347;color:#ffb347;padding:10px 12px;font-size:13px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;font-family:inherit}
-button:hover{background:rgba(255,179,71,.2)}
-.err{color:#ff7a7a;font-size:12px;border-left:2px solid #ff7a7a;padding-left:8px;margin:0 0 14px}
-</style></head><body><div class="card">
-<h1>VISTA RESTRINGIDA</h1>
-<p>Esta sesión compartida requiere una contraseña para ser observada.</p>`
-	if errMsg != "" {
-		page += `<p class="err">` + htmlEscape(errMsg) + `</p>`
+	data := map[string]any{"Token": token, "Error": errMsg}
+	if err := viewerPasswordTmpl.Execute(w, data); err != nil {
+		s.logger.Warn("viewer_password template execute failed", "err", err)
 	}
-	page += `<form method="post" action="/v/` + htmlEscape(token) + `/auth">
-<label>Contraseña<input name="password" type="password" autofocus required></label>
-<button type="submit">INGRESAR</button>
-</form></div></body></html>`
-	_, _ = w.Write([]byte(page))
 }
 
 // handleViewerAuth is the POST endpoint for the viewer password gate. On
@@ -214,24 +189,4 @@ func (s *Server) handleViewerAuth(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   int((24 * 7 * 3600)),
 	})
 	http.Redirect(w, r, "/v/"+token, http.StatusFound)
-}
-
-func htmlEscape(s string) string {
-	// Minimal escaper for the few characters that could appear in admin text.
-	out := make([]byte, 0, len(s))
-	for _, r := range s {
-		switch r {
-		case '&':
-			out = append(out, "&amp;"...)
-		case '<':
-			out = append(out, "&lt;"...)
-		case '>':
-			out = append(out, "&gt;"...)
-		case '"':
-			out = append(out, "&quot;"...)
-		default:
-			out = append(out, string(r)...)
-		}
-	}
-	return string(out)
 }

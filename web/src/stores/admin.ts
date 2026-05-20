@@ -85,15 +85,28 @@ export const useAdminStore = defineStore('admin', () => {
   const lastError = ref<string | null>(null);
 
   async function fetchMe(): Promise<boolean> {
+    return (await fetchMeStatus()) === 200;
+  }
+
+  // fetchMeStatus returns the raw HTTP status of /admin/api/me so the router
+  // can distinguish "unauthenticated" (401) from "admin disabled" (404) and
+  // hide the entire /admin namespace in the latter case.
+  async function fetchMeStatus(): Promise<number> {
     try {
-      const r = await send<{ user: string; stats: AdminStats }>('GET', '/admin/api/me');
-      user.value = r.user;
-      stats.value = r.stats;
-      return true;
+      const r = await fetch('/admin/api/me', { credentials: 'same-origin' });
+      if (r.ok) {
+        const data = (await r.json()) as { user: string; stats: AdminStats };
+        user.value = data.user;
+        stats.value = data.stats;
+      } else {
+        user.value = null;
+        stats.value = null;
+      }
+      return r.status;
     } catch {
       user.value = null;
       stats.value = null;
-      return false;
+      return 0;
     }
   }
 
@@ -192,6 +205,7 @@ export const useAdminStore = defineStore('admin', () => {
     audit,
     lastError,
     fetchMe,
+    fetchMeStatus,
     login,
     logout,
     refresh,

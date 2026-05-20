@@ -23,5 +23,9 @@ internal/staticui/dist/
 *.log
 coverage.out
 
+# Local environment overrides — .env.sample is the committed template.
+.env
+.env.local
+
 # Site-specific deploy automation (homelab hostnames, IPs, runbooks).
 /deploy.local/

@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jeanmarcos/modos-cpu/internal/envfile"
 	"github.com/jeanmarcos/modos-cpu/internal/programs"
 	"github.com/jeanmarcos/modos-cpu/internal/server"
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
@@ -28,6 +29,9 @@ import (
 )
 
 func main() {
+	if err := envfile.Load(".env"); err != nil {
+		fmt.Fprintf(os.Stderr, "warn: load .env failed: %v\n", err)
+	}
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "cli":

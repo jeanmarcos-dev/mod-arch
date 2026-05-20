@@ -1,0 +1,83 @@
+<script setup lang="ts">
+import { useRoute } from 'vue-router';
+
+const route = useRoute();
+</script>
+
+<template>
+  <div class="not-found">
+    <div class="card">
+      <h1>404</h1>
+      <p class="path">{{ route.fullPath }}</p>
+      <p class="hint">La página que buscaba no existe.</p>
+      <div class="links">
+        <a href="/">↩ ir al simulador</a>
+        <a href="/login">↪ iniciar sesión</a>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.not-found {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(ellipse at center, rgba(255, 179, 71, 0.05), transparent 60%),
+    var(--bg, #0a0a0a);
+}
+
+.card {
+  width: min(100%, 480px);
+  text-align: center;
+  border: 1px solid var(--border, #3a3a3a);
+  background: rgba(0, 0, 0, 0.55);
+  padding: 36px 28px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+h1 {
+  font-family: 'Major Mono Display', monospace;
+  font-size: 64px;
+  color: var(--amber, #ffb347);
+  letter-spacing: 12px;
+  margin: 0 0 16px;
+  text-shadow: 0 0 14px rgba(255, 179, 71, 0.35);
+}
+
+.path {
+  font-size: 13px;
+  color: var(--text, #e0e0e0);
+  background: rgba(255, 179, 71, 0.06);
+  border: 1px solid rgba(255, 179, 71, 0.15);
+  padding: 6px 10px;
+  word-break: break-all;
+  margin: 0 0 14px;
+}
+
+.hint {
+  color: var(--text-dim, #888);
+  font-size: 12px;
+  margin: 0 0 22px;
+  line-height: 1.5;
+}
+
+.links {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.links a {
+  color: var(--text-dim, #888);
+  text-decoration: none;
+}
+
+.links a:hover {
+  color: var(--amber, #ffb347);
+}
+</style>
