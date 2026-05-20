@@ -2,6 +2,9 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import { useNarrators, type MemWrite, type MemRead } from '../../lib/narratorBus';
 import { usePreferencesStore } from '../../stores/preferences';
+import { useCpuStore } from '../../stores/cpu';
+
+const cpu = useCpuStore();
 
 // A flight is one animated byte traveling from the source anchor (CPU
 // register grid) to the destination anchor (a row inside the memory hex
@@ -58,8 +61,21 @@ const narrators = useNarrators();
 
 const MAX_FLIGHTS = 12;
 
-function launch(kind: 'write' | 'read', addr: number, value: number, seq: number) {
-  const from = rectCenter(document.querySelector(props.sourceSelector));
+function sourceFor(coreId: number): Element | null {
+  // Prefer the strip of the core that actually issued the read/write so the
+  // byte appears to launch from there. Fall back to the single-panel anchor
+  // for views that do not split CPU state per core (e.g. Memory.vue).
+  return (
+    document.querySelector(`[data-narrator-anchor="cpu-${coreId}"]`)
+    ?? document.querySelector(props.sourceSelector)
+  );
+}
+
+function launch(kind: 'write' | 'read', addr: number, value: number, seq: number, coreId: number) {
+  // Drop bytes from cores the user is filtering out — keeps the animation
+  // surface aligned with the rest of the UI.
+  if (!cpu.isCoreVisible(coreId)) return;
+  const from = rectCenter(sourceFor(coreId));
   const to = rectCenter(props.target ? props.target(addr) : defaultTarget(addr));
   if (!from || !to) return;
 
@@ -90,8 +106,8 @@ function launch(kind: 'write' | 'read', addr: number, value: number, seq: number
   }, ttl + 50);
 }
 
-narrators.onMemWrite((m: MemWrite) => launch('write', m.addr, m.newValue, m.seq));
-narrators.onMemRead((m: MemRead) => launch('read', m.addr, m.value, -m.seq));
+narrators.onMemWrite((m: MemWrite) => launch('write', m.addr, m.newValue, m.seq, m.coreId));
+narrators.onMemRead((m: MemRead) => launch('read', m.addr, m.value, -m.seq, m.coreId));
 
 // rAF tick to expire flights even when the timeout drifts (e.g. tab in
 // background returns). Kept lightweight; bails out as soon as the array is

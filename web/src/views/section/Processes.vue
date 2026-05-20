@@ -28,6 +28,12 @@ function coreRunning(pid: number) {
   return cpu.cores.find(c => c.current_pid === pid);
 }
 
+// visibleCores honors the SimBar filter. Used both for the per-core CPU
+// strips at the top and for the "current" highlight on the PCB cards —
+// processes running on a hidden core no longer steal the highlight.
+const visibleCores = computed(() => cpu.cores.filter(c => cpu.isCoreVisible(c.id)));
+const visibleRunPIDs = computed(() => new Set(visibleCores.value.map(c => c.current_pid).filter(p => p > 0)));
+
 function pcbValue(p: PCBInfo, reg: string): number {
   // For RUN processes the PCB snapshot is stale until the next pcb_save —
   // the live truth lives in the core executing it. We pull the live value
@@ -63,7 +69,9 @@ const unsubscribe = cpu.subscribe((ev: CpuEvent) => {
       fromPid: ev.from_pid,
       toPid: ev.to_pid,
       ts: Date.now(),
-      ready: [...ev.ready_queue],
+      // ready_queue serializes as null when the queue is empty; guard so the
+      // spread does not crash with TypeError.
+      ready: [...(ev.ready_queue ?? [])],
     });
     if (switches.value.length > MAX_SWITCHES) {
       switches.value = switches.value.slice(0, MAX_SWITCHES);
@@ -121,13 +129,13 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
       </header>
 
       <section
-        :class="['cpu-strip-grid', { 'cpu-strip-grid--multi': cpu.numCores > 1 }]"
-        data-narrator-anchor="cpu"
+        :class="['cpu-strip-grid', { 'cpu-strip-grid--multi': visibleCores.length > 1 }]"
       >
         <article
-          v-for="core in cpu.cores"
+          v-for="core in visibleCores"
           :key="`core-${core.id}`"
           :class="['cpu-strip', { 'cpu-strip--idle': core.current_pid === 0, 'cpu-strip--halted': core.halted }]"
+          :data-narrator-anchor="`cpu-${core.id}`"
         >
           <div class="cpu-strip__head">
             <span class="cpu-strip__label">{{ cpu.numCores > 1 ? `CORE C${core.id}` : 'CPU en uso' }}</span>
@@ -152,7 +160,7 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
           :class="[
             'pcb-card',
             stateClass(p.state),
-            { 'pcb-card--current': p.pid === cpu.currentPID, 'pcb-card--flash': cpu.flashingPIDs.has(p.pid) },
+            { 'pcb-card--current': visibleRunPIDs.has(p.pid), 'pcb-card--flash': cpu.flashingPIDs.has(p.pid) },
           ]"
         >
           <header class="pcb-card__head">

@@ -33,9 +33,12 @@ const idt = reactive<IDTRow[]>([
 ]);
 
 // Recent mode switches feed. We could parse the log but a structured ring
-// buffer is cheaper and keeps the markup clean.
+// buffer is cheaper and keeps the markup clean. coreId tracks which core
+// produced the switch so multicore demos do not look like a single thread
+// flipping back and forth.
 interface ModeSwitchRow {
   id: number;
+  coreId: number;
   from: 'USER' | 'KERNEL';
   to: 'USER' | 'KERNEL';
   cause: string;
@@ -46,10 +49,15 @@ const switches = ref<ModeSwitchRow[]>([]);
 let nextId = 1;
 const MAX_SWITCHES = 12;
 
+// Mode-switch feed honors the SimBar core filter so transitions from hidden
+// cores stop polluting the timeline.
+const visibleSwitches = computed(() => switches.value.filter(s => cpu.isCoreVisible(s.coreId)));
+
 const unsubscribe = cpu.subscribe((ev: CpuEvent) => {
   if (ev.type === 'mode_switch') {
     switches.value.unshift({
       id: nextId++,
+      coreId: ev.core_id,
       from: ev.from === 3 ? 'USER' : 'KERNEL',
       to: ev.to === 3 ? 'USER' : 'KERNEL',
       cause: ev.cause,
@@ -107,12 +115,29 @@ const narratorHint = computed(() =>
           :class="['ints-page__mode-chip', `ints-page__mode-chip--${modeKey}`]"
           data-narrator-anchor="cpu"
         >
-          <span class="ints-page__mode-caption">CPU en</span>
+          <span class="ints-page__mode-caption">
+            {{ cpu.numCores > 1 ? `CORE C${cpu.selectedCoreId} en` : 'CPU en' }}
+          </span>
           <Term
             :term="cpu.mode === 3 ? 'USER MODE (PL3)' : 'KERNEL MODE (PL0)'"
             mode="label"
             class="ints-page__mode-value"
           >{{ modeLabel }}</Term>
+          <div v-if="cpu.numCores > 1" class="ints-page__core-strip" role="group" aria-label="Filtro de núcleos visibles">
+            <button
+              v-for="c in cpu.cores"
+              :key="`core-${c.id}`"
+              type="button"
+              :aria-pressed="cpu.isCoreVisible(c.id)"
+              :class="['ints-page__core-pill', `ints-page__core-pill--${c.mode === 3 ? 'user' : 'kernel'}`, {
+                'ints-page__core-pill--active': cpu.isCoreVisible(c.id),
+                'ints-page__core-pill--focus': c.id === cpu.selectedCoreId && cpu.isCoreVisible(c.id),
+              }]"
+              :title="`C${c.id} · ${c.mode === 3 ? 'USER' : 'KERNEL'}${c.current_pid ? ' · P' + c.current_pid : ' · ocioso'} — click para mostrar/ocultar, doble click para enfocar`"
+              @click="cpu.toggleCoreSelection(c.id)"
+              @dblclick="cpu.selectOnlyCore(c.id)"
+            >C{{ c.id }} · {{ c.mode === 3 ? 'U' : 'K' }}</button>
+          </div>
         </div>
         <div class="ints-page__hero-text">
           <h2 class="ints-page__title">
@@ -179,11 +204,14 @@ const narratorHint = computed(() =>
               <Term term="KERNEL MODE (PL0)">KERNEL</Term> en vivo
             </span>
           </header>
-          <div v-if="switches.length === 0" class="ints-feed__empty">
-            Sin transiciones aún. Avance la simulación con un programa que invoque syscalls.
+          <div v-if="visibleSwitches.length === 0" class="ints-feed__empty">
+            {{ switches.length === 0
+              ? 'Sin transiciones aún. Avance la simulación con un programa que invoque syscalls.'
+              : 'Sin transiciones de los núcleos visibles. Active más núcleos en la SimBar para verlas.' }}
           </div>
-          <ol v-else class="ints-feed">
-            <li v-for="s in switches" :key="s.id" class="ints-feed__row">
+          <ol v-else :class="['ints-feed', { 'ints-feed--multi': cpu.numCores > 1 }]">
+            <li v-for="s in visibleSwitches" :key="s.id" class="ints-feed__row">
+              <span v-if="cpu.numCores > 1" class="ints-feed__core" :title="`Disparado por el núcleo C${s.coreId}`">C{{ s.coreId }}</span>
               <Term
                 :term="s.from === 'USER' ? 'USER MODE (PL3)' : 'KERNEL MODE (PL0)'"
                 mode="label"
@@ -275,6 +303,37 @@ const narratorHint = computed(() =>
   font-size: 28px;
   margin-top: var(--space-1);
   text-shadow: 0 0 12px currentColor;
+}
+
+.ints-page__core-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: var(--space-3);
+  justify-content: center;
+}
+.ints-page__core-pill {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 2px 6px;
+  background: transparent;
+  border: 1px solid currentColor;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.ints-page__core-pill--user { color: var(--cyan); }
+.ints-page__core-pill--kernel { color: var(--amber); }
+.ints-page__core-pill--active {
+  background: rgba(255, 179, 71, 0.18);
+  box-shadow: var(--shadow-glow-amber);
+  color: var(--amber);
+}
+.ints-page__core-pill--focus {
+  text-decoration: underline dotted var(--amber);
+  text-underline-offset: 2px;
 }
 
 .ints-page__hero-text {
@@ -448,6 +507,20 @@ const narratorHint = computed(() =>
   font-size: 12px;
   padding: 4px var(--space-2);
   border-bottom: 1px dashed rgba(255, 179, 71, 0.06);
+}
+.ints-feed--multi .ints-feed__row {
+  grid-template-columns: auto auto auto auto 1fr auto;
+}
+.ints-feed__core {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--amber);
+  background: rgba(255, 179, 71, 0.08);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+  white-space: nowrap;
 }
 
 .ints-feed__chip {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useCpuStore } from '../stores/cpu';
-import { onUpdated, ref } from 'vue';
+import { computed, onUpdated, ref } from 'vue';
 
 const cpu = useCpuStore();
 const scroller = ref<HTMLElement | null>(null);
@@ -18,16 +18,25 @@ function colorOf(c: string) {
     default:       return 'var(--amber)';
   }
 }
+
+// Hide log lines tagged with a core that the SimBar filter has hidden.
+// Entries without a coreId (scheduler, syscalls, sync ops, session info)
+// stay visible regardless of the filter.
+const visibleLog = computed(() => cpu.log.filter(
+  e => e.coreId === undefined || cpu.isCoreVisible(e.coreId),
+));
 </script>
 
 <template>
   <div class="panel log" ref="scroller">
     <div class="panel-title">EVENT_LOG</div>
-    <div v-for="(e, i) in cpu.log" :key="i" class="line" :style="{ color: colorOf(e.color) }">
+    <div v-for="(e, i) in visibleLog" :key="i" class="line" :style="{ color: colorOf(e.color) }">
       {{ e.text }}
     </div>
-    <div v-if="cpu.log.length === 0" class="empty">
-      Cargue un programa y presione STEP para ver eventos.
+    <div v-if="visibleLog.length === 0" class="empty">
+      {{ cpu.log.length === 0
+        ? 'Cargue un programa y presione STEP para ver eventos.'
+        : 'Sin eventos para los núcleos visibles. Active más núcleos en la SimBar.' }}
     </div>
   </div>
 </template>

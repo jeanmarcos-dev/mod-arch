@@ -22,6 +22,7 @@ const narrators = useNarrators();
 
 interface BannerInfo {
   id: number;
+  coreId: number;
   from: 'user' | 'kernel';
   to: 'user' | 'kernel';
   cause: string;
@@ -34,8 +35,10 @@ let bannerTimer = 0;
 let pulseTimer = 0;
 
 narrators.onModeSwitch((ev: ModeSwitch) => {
+  // Respect the SimBar filter: do not announce flips on hidden cores.
+  if (!cpu.isCoreVisible(ev.coreId)) return;
   seq++;
-  banner.value = { id: seq, from: ev.from, to: ev.to, cause: ev.cause };
+  banner.value = { id: seq, coreId: ev.coreId, from: ev.from, to: ev.to, cause: ev.cause };
   pulse.value = true;
 
   // Scale dwell + pulse by the global animation speed so projector mode reads
@@ -75,6 +78,7 @@ function label(m: 'user' | 'kernel') {
 
     <Transition name="mf-banner">
       <div v-if="banner" :key="banner.id" class="mode-flip__banner">
+        <span v-if="cpu.numCores > 1" class="mode-flip__core">C{{ banner.coreId }}</span>
         <span class="mode-flip__chip mode-flip__chip--from">{{ label(banner.from) }}</span>
         <span class="mode-flip__arrow">→</span>
         <span class="mode-flip__chip mode-flip__chip--to">{{ label(banner.to) }}</span>
@@ -149,6 +153,18 @@ function label(m: 'user' | 'kernel') {
 
 .mode-flip__chip--from { color: var(--text-dim); }
 .mode-flip__chip--to   { color: var(--amber); text-shadow: var(--shadow-glow-amber); }
+
+.mode-flip__core {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 179, 71, 0.18);
+  color: var(--amber);
+  border: 1px solid var(--amber);
+  margin-right: 2px;
+}
 
 .mode-flip__arrow {
   color: var(--text-dim);

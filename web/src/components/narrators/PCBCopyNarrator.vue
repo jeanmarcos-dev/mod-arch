@@ -2,6 +2,9 @@
 import { onUnmounted, ref } from 'vue';
 import { useNarrators, type PcbSave, type PcbRestore } from '../../lib/narratorBus';
 import { usePreferencesStore } from '../../stores/preferences';
+import { useCpuStore } from '../../stores/cpu';
+
+const cpu = useCpuStore();
 
 // PCBCopyNarrator animates the kernel's pcb_save / pcb_restore work. On
 // pcb_save a card flies from the CPU anchor to the row of the PID whose
@@ -26,7 +29,11 @@ interface Trip {
 
 const props = withDefaults(
   defineProps<{
-    /** CSS selector for the CPU side (register file). */
+    /**
+     * CSS selector for the CPU side (register file) when no per-core anchor
+     * exists. Kept as a fallback so single-core demos and views without core
+     * panels still light up.
+     */
     cpuSelector?: string;
     /** Function returning the PCB row element for a given PID. */
     pcbTarget?: (pid: number) => Element | null;
@@ -38,6 +45,16 @@ const props = withDefaults(
     ttlMs: 1300,
   },
 );
+
+// Resolve the CPU-side anchor for a given core. Multicore views render one
+// `data-narrator-anchor="cpu-<id>"` per strip; falling back to the generic
+// "cpu" anchor keeps the legacy single-core panels working unchanged.
+function cpuAnchorFor(coreId: number): Element | null {
+  return (
+    document.querySelector(`[data-narrator-anchor="cpu-${coreId}"]`)
+    ?? document.querySelector(props.cpuSelector)
+  );
+}
 
 const trips = ref<Trip[]>([]);
 const root = ref<HTMLElement | null>(null);
@@ -69,7 +86,10 @@ function pickRegs(regs: Record<string, number>): { name: string; val: string }[]
 const narrators = useNarrators();
 
 function launch(kind: 'save' | 'restore', payload: PcbSave | PcbRestore) {
-  const cpuEl = document.querySelector(props.cpuSelector);
+  // Skip events from cores hidden by the SimBar filter so the user does not
+  // see arcs flying from off-screen anchors.
+  if (!cpu.isCoreVisible(payload.coreId)) return;
+  const cpuEl = cpuAnchorFor(payload.coreId);
   const pcbEl = props.pcbTarget ? props.pcbTarget(payload.pid) : defaultPcbTarget(payload.pid);
   if (!cpuEl || !pcbEl) return;
 

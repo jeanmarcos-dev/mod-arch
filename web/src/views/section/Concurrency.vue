@@ -19,8 +19,10 @@ const singleCoreHint = computed(() => cpu.numCores < 2);
 
 const cores = computed(() => {
   // Fall back to a synthetic core[0] view when the snapshot has not yet
-  // populated cpu.cores (first connection).
-  if (cpu.cores.length > 0) return cpu.cores;
+  // populated cpu.cores (first connection). When the SimBar filter hides a
+  // core, drop it from the grid so the layout reflects the same set as the
+  // rest of the app.
+  if (cpu.cores.length > 0) return cpu.cores.filter(c => cpu.isCoreVisible(c.id));
   return [{
     id: 0,
     regs: { ...cpu.regs },

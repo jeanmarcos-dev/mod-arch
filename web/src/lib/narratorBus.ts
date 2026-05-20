@@ -14,6 +14,8 @@ export interface MemWrite {
   size: number;
   /** Process id active when the write happened. */
   pid: number;
+  /** Core that produced the event; lets narrators route per core. */
+  coreId: number;
   /** Monotonic id used as Vue key in animations. */
   seq: number;
 }
@@ -23,6 +25,7 @@ export interface MemRead {
   value: number;
   size: number;
   pid: number;
+  coreId: number;
   seq: number;
 }
 
@@ -30,6 +33,7 @@ export interface ModeSwitch {
   from: 'user' | 'kernel';
   to: 'user' | 'kernel';
   cause: string;
+  coreId: number;
   seq: number;
 }
 
@@ -42,6 +46,7 @@ export interface CtxSwitch {
 export interface IrqFire {
   vector: number;
   source: string;
+  coreId: number;
   seq: number;
 }
 
@@ -50,12 +55,16 @@ export interface IrqFire {
 // most relevant ones (EIP, ESP, EAX) on the flying card.
 export interface PcbSave {
   pid: number;
+  /** Core whose register file is being copied out. */
+  coreId: number;
   regs: Record<string, number>;
   seq: number;
 }
 
 export interface PcbRestore {
   pid: number;
+  /** Core whose register file is being loaded. */
+  coreId: number;
   regs: Record<string, number>;
   seq: number;
 }
@@ -116,7 +125,8 @@ export function useNarrators(opts: NarratorOptions = {}) {
           old: ev.old,
           newValue: ev.new,
           size: ev.size,
-          pid: cpu.currentPID,
+          pid: cpu.cores.find(c => c.id === ev.core_id)?.current_pid ?? cpu.currentPID,
+          coreId: ev.core_id,
           seq,
         } satisfies MemWrite);
         break;
@@ -126,7 +136,8 @@ export function useNarrators(opts: NarratorOptions = {}) {
           addr: ev.addr,
           value: ev.value,
           size: ev.size,
-          pid: cpu.currentPID,
+          pid: cpu.cores.find(c => c.id === ev.core_id)?.current_pid ?? cpu.currentPID,
+          coreId: ev.core_id,
           seq,
         } satisfies MemRead);
         break;
@@ -136,6 +147,7 @@ export function useNarrators(opts: NarratorOptions = {}) {
           from: ev.from === 3 ? 'user' : 'kernel',
           to: ev.to === 3 ? 'user' : 'kernel',
           cause: ev.cause,
+          coreId: ev.core_id,
           seq,
         } satisfies ModeSwitch);
         break;
@@ -152,6 +164,7 @@ export function useNarrators(opts: NarratorOptions = {}) {
         fire('irqFire', {
           vector: ev.vector,
           source: ev.source,
+          coreId: ev.core_id,
           seq,
         } satisfies IrqFire);
         break;
@@ -159,6 +172,7 @@ export function useNarrators(opts: NarratorOptions = {}) {
         seq++;
         fire('pcbSave', {
           pid: ev.pid,
+          coreId: ev.core_id,
           regs: ev.regs,
           seq,
         } satisfies PcbSave);
@@ -167,6 +181,7 @@ export function useNarrators(opts: NarratorOptions = {}) {
         seq++;
         fire('pcbRestore', {
           pid: ev.pid,
+          coreId: ev.core_id,
           regs: ev.regs,
           seq,
         } satisfies PcbRestore);

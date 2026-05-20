@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useCpuStore, REGISTERS } from '../stores/cpu';
+import { useCpuStore, REGISTERS, type CoreInfo } from '../stores/cpu';
 import { computed } from 'vue';
 
 const cpu = useCpuStore();
@@ -28,60 +28,93 @@ const SEG_HELP: Record<string, string> = {
   SS: 'Stack Segment selector. Asociado al stack del proceso actual.',
 };
 
-const flagsString = computed(() => {
-  const f = cpu.regs.EFLAGS ?? 0;
+function flagsString(eflags: number): string {
   return [
-    f & 0x001 ? 'C' : '-',
-    f & 0x040 ? 'Z' : '-',
-    f & 0x080 ? 'S' : '-',
-    f & 0x200 ? 'I' : '-',
-    f & 0x800 ? 'O' : '-',
+    eflags & 0x001 ? 'C' : '-',
+    eflags & 0x040 ? 'Z' : '-',
+    eflags & 0x080 ? 'S' : '-',
+    eflags & 0x200 ? 'I' : '-',
+    eflags & 0x800 ? 'O' : '-',
   ].join('');
-});
+}
 
 const FLAGS_HELP = 'Flags activos: C=Carry (overflow no signado), Z=Zero (resultado fue 0), S=Sign (resultado negativo), I=Interrupt (IRQs habilitadas), O=Overflow (overflow signado). - = apagado.';
-
 const PL_HELP = 'PL = Privilege Level. PL3 = USER (procesos comunes, sin permiso de tocar memoria/recursos kernel). PL0 = KERNEL (privilegios totales). El HW cambia el PL automáticamente en INT/IRET/excepción — el SW no puede setearlo directamente.';
+
+// Cores currently visible in the SimBar filter, sorted by id for stable
+// vertical order. Empty array falls back to a synthetic boot core so the
+// panel never blanks while the snapshot is in flight.
+const visibleCores = computed<CoreInfo[]>(() => {
+  const filtered = cpu.cores.filter(c => cpu.isCoreVisible(c.id));
+  if (filtered.length > 0) return filtered;
+  return [{
+    id: 0,
+    regs: { ...cpu.regs },
+    segments: { ...cpu.segments },
+    mode: cpu.mode,
+    halted: cpu.halted,
+    tick: cpu.tick,
+    current_pid: cpu.currentPID,
+  }];
+});
+
+// changedRegs flash lives on the top-level mirror, which always reflects the
+// focused core. Only highlight registers on that core to keep the contract
+// simple — other cores update their values without flashing.
+function shouldFlash(core: CoreInfo, reg: string): boolean {
+  return core.id === cpu.selectedCoreId && cpu.changedRegs.has(reg);
+}
 </script>
 
 <template>
   <div class="panel cpu">
     <div class="panel-title">CPU · REGISTROS</div>
-    <div
-      class="reg-row clickable"
-      v-for="r in REGISTERS"
-      :key="r"
-      :class="{ flash: cpu.changedRegs.has(r) }"
-      :title="REG_HELP[r] + '\n\n— click para abrir el glosario —'"
-      @click="cpu.openGlossary(r)"
+    <section
+      v-for="core in visibleCores"
+      :key="`core-${core.id}`"
+      :class="['cpu-core', { 'cpu-core--focus': core.id === cpu.selectedCoreId, 'cpu-core--halted': core.halted }]"
     >
-      <span class="reg-name">{{ r }}</span>
-      <span class="reg-val">{{ hex(cpu.regs[r] ?? 0) }}</span>
-    </div>
-    <div class="separator"></div>
-    <div class="reg-row clickable" :title="FLAGS_HELP + '\n\n— click para abrir el glosario —'" @click="cpu.openGlossary('EFLAGS')">
-      <span class="reg-name">FLAGS</span>
-      <span class="reg-val">{{ flagsString }}</span>
-    </div>
-    <div class="reg-row clickable" :title="SEG_HELP.CS + '\n\n— click para abrir el glosario —'" @click="cpu.openGlossary('CS')">
-      <span class="reg-name">CS</span>
-      <span class="reg-val">{{ hex(cpu.segments.CS, 4) }}</span>
-    </div>
-    <div class="reg-row clickable" :title="SEG_HELP.DS + '\n\n— click para abrir el glosario —'" @click="cpu.openGlossary('DS')">
-      <span class="reg-name">DS</span>
-      <span class="reg-val">{{ hex(cpu.segments.DS, 4) }}</span>
-    </div>
-    <div class="reg-row clickable" :title="SEG_HELP.SS + '\n\n— click para abrir el glosario —'" @click="cpu.openGlossary('SS')">
-      <span class="reg-name">SS</span>
-      <span class="reg-val">{{ hex(cpu.segments.SS, 4) }}</span>
-    </div>
-    <div class="separator"></div>
-    <div class="reg-row clickable" :title="PL_HELP + '\n\n— click para abrir el glosario —'" @click="cpu.openGlossary('PL')">
-      <span class="reg-name">PL</span>
-      <span class="reg-val" :style="{ color: cpu.mode === 3 ? 'var(--green)' : 'var(--red-soft)' }">
-        {{ cpu.mode }} ({{ cpu.mode === 3 ? 'user' : 'kernel' }})
-      </span>
-    </div>
+      <header v-if="visibleCores.length > 1" class="cpu-core__head">
+        <span class="cpu-core__id">C{{ core.id }}</span>
+        <span class="cpu-core__pid">{{ core.current_pid ? `P${core.current_pid}` : 'idle' }}</span>
+        <span v-if="core.halted" class="cpu-core__tag">HALT</span>
+      </header>
+      <div
+        class="reg-row clickable"
+        v-for="r in REGISTERS"
+        :key="r"
+        :class="{ flash: shouldFlash(core, r) }"
+        :title="REG_HELP[r] + '\n\n— click para abrir el glosario —'"
+        @click="cpu.openGlossary(r)"
+      >
+        <span class="reg-name">{{ r }}</span>
+        <span class="reg-val">{{ hex(core.regs[r] ?? 0) }}</span>
+      </div>
+      <div class="separator"></div>
+      <div class="reg-row clickable" :title="FLAGS_HELP + '\n\n— click para abrir el glosario —'" @click="cpu.openGlossary('EFLAGS')">
+        <span class="reg-name">FLAGS</span>
+        <span class="reg-val">{{ flagsString(core.regs.EFLAGS ?? 0) }}</span>
+      </div>
+      <div class="reg-row clickable" :title="SEG_HELP.CS + '\n\n— click para abrir el glosario —'" @click="cpu.openGlossary('CS')">
+        <span class="reg-name">CS</span>
+        <span class="reg-val">{{ hex(core.segments.CS, 4) }}</span>
+      </div>
+      <div class="reg-row clickable" :title="SEG_HELP.DS + '\n\n— click para abrir el glosario —'" @click="cpu.openGlossary('DS')">
+        <span class="reg-name">DS</span>
+        <span class="reg-val">{{ hex(core.segments.DS, 4) }}</span>
+      </div>
+      <div class="reg-row clickable" :title="SEG_HELP.SS + '\n\n— click para abrir el glosario —'" @click="cpu.openGlossary('SS')">
+        <span class="reg-name">SS</span>
+        <span class="reg-val">{{ hex(core.segments.SS, 4) }}</span>
+      </div>
+      <div class="separator"></div>
+      <div class="reg-row clickable" :title="PL_HELP + '\n\n— click para abrir el glosario —'" @click="cpu.openGlossary('PL')">
+        <span class="reg-name">PL</span>
+        <span class="reg-val" :style="{ color: core.mode === 3 ? 'var(--green)' : 'var(--red-soft)' }">
+          {{ core.mode }} ({{ core.mode === 3 ? 'user' : 'kernel' }})
+        </span>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -104,6 +137,50 @@ const PL_HELP = 'PL = Privilege Level. PL3 = USER (procesos comunes, sin permiso
     padding: 8px 6px;
     font-size: 15px;
   }
+}
+
+.cpu-core {
+  display: flex;
+  flex-direction: column;
+}
+.cpu-core + .cpu-core {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+.cpu-core--halted {
+  opacity: 0.85;
+}
+
+.cpu-core__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  border-bottom: 1px dashed var(--border);
+  margin-bottom: 4px;
+}
+.cpu-core__id {
+  color: var(--amber);
+  font-weight: 600;
+}
+.cpu-core--focus .cpu-core__id {
+  text-decoration: underline dotted var(--amber);
+  text-underline-offset: 2px;
+}
+.cpu-core__pid {
+  color: var(--text-dim);
+}
+.cpu-core__tag {
+  margin-left: auto;
+  font-size: 9px;
+  padding: 0 4px;
+  border: 1px solid var(--red-soft, #ff7a7a);
+  color: var(--red-soft, #ff7a7a);
+  border-radius: var(--radius-sm);
 }
 
 .reg-row {

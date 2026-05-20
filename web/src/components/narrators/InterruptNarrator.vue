@@ -66,16 +66,32 @@ function hex(n: number, w = 6): string {
   return '0x' + (n >>> 0).toString(16).padStart(w, '0').toUpperCase();
 }
 
-function snapshotFrame() {
+// snapshotFrame reads EIP/CS/EFLAGS from the core that actually triggered the
+// event, not the one the user happens to be inspecting. In single-core mode
+// the two collapse to the same core; in multicore an IRQ on C1 must show C1's
+// frame regardless of whether the SimBar is parked on C0.
+function snapshotFrame(coreId: number) {
+  const core = cpu.cores.find(c => c.id === coreId);
+  const regs = core?.regs ?? cpu.regs;
+  const segs = core?.segments ?? cpu.segments;
   return {
-    EIP: hex(cpu.regs.EIP || 0),
-    CS: hex(cpu.segments.CS || 0, 4),
-    EFLAGS: hex(cpu.regs.EFLAGS || 0, 4),
+    EIP: hex(regs.EIP || 0),
+    CS: hex(segs.CS || 0, 4),
+    EFLAGS: hex(regs.EFLAGS || 0, 4),
   };
 }
 
 let seq = 0;
-const enterStack = ref<number[]>([]);
+// One enter-stack per core so an IRET on C1 pops the IRQ that C1 took, not
+// whichever vector landed last on any core. Without the per-core split, IRET
+// arcs in a 2-core demo would chase the wrong vector half the time.
+const enterStacks = ref<Record<number, number[]>>({});
+function pushEnter(coreId: number, vec: number) {
+  (enterStacks.value[coreId] ??= []).push(vec);
+}
+function popEnter(coreId: number): number | undefined {
+  return enterStacks.value[coreId]?.pop();
+}
 
 function spawn(h: Omit<Hop, 'id'>) {
   seq++;
@@ -90,6 +106,7 @@ function spawn(h: Omit<Hop, 'id'>) {
 }
 
 narrators.onIrqFire((ev: IrqFire) => {
+  if (!cpu.isCoreVisible(ev.coreId)) return;
   const cpuEl = document.querySelector(props.cpuSelector);
   const idtEl = props.idtTarget ? props.idtTarget(ev.vector) : defaultIdtTarget(ev.vector);
   if (!cpuEl || !idtEl) return;
@@ -102,9 +119,9 @@ narrators.onIrqFire((ev: IrqFire) => {
     fromX: from.x, fromY: from.y,
     toX: to.x, toY: to.y,
     kind: 'enter', source: ev.source,
-    frame: snapshotFrame(),
+    frame: snapshotFrame(ev.coreId),
   });
-  enterStack.value.push(ev.vector);
+  pushEnter(ev.coreId, ev.vector);
 });
 
 narrators.onModeSwitch((ev: ModeSwitch) => {
@@ -112,8 +129,9 @@ narrators.onModeSwitch((ev: ModeSwitch) => {
   // (a fault elevating into kernel) are handled by ModeFlipNarrator.
   if (ev.to !== 'user') return;
   if (!/iret/i.test(ev.cause)) return;
+  if (!cpu.isCoreVisible(ev.coreId)) return;
 
-  const vec = enterStack.value.pop();
+  const vec = popEnter(ev.coreId);
   if (vec === undefined) return;
 
   const cpuEl = document.querySelector(props.cpuSelector);
@@ -128,13 +146,13 @@ narrators.onModeSwitch((ev: ModeSwitch) => {
     fromX: idtCenter.x, fromY: idtCenter.y,
     toX: cpuCenter.x, toY: cpuCenter.y,
     kind: 'iret', source: ev.cause,
-    frame: snapshotFrame(),
+    frame: snapshotFrame(ev.coreId),
   });
 });
 
 onUnmounted(() => {
   hops.value = [];
-  enterStack.value = [];
+  enterStacks.value = {};
 });
 
 // The arrow path is a quadratic bezier whose control point sits above the
