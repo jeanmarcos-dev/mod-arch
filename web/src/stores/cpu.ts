@@ -13,7 +13,7 @@ export type CpuEvent =
   | { type: 'halt'; pid?: number }
   | { type: 'tick'; value: number }
   | { type: 'state'; halted?: boolean; running?: boolean; hz?: number }
-  | { type: 'snapshot'; regs: Record<string, number>; segments: Record<string, number>; mode: number; halted: boolean; tick: number; timer_quantum?: number; current_pid?: number; ready_queue?: number[]; wait_queue?: WaitInfo[]; procs?: PCBInfo[]; sources?: Record<string, string> }
+  | { type: 'snapshot'; regs: Record<string, number>; segments: Record<string, number>; mode: number; halted: boolean; tick: number; timer_quantum?: number; current_pid?: number; ready_queue?: number[]; wait_queue?: WaitInfo[]; procs?: PCBInfo[]; sources?: Record<string, string>; cores?: CoreInfo[]; num_cores?: number }
   | { type: 'programs'; list: ProgramInfo[] }
   | { type: 'loaded'; name: string; pids: number[]; procs: PCBInfo[]; sources: Record<string, string> }
   | { type: 'reset' }
@@ -24,8 +24,34 @@ export type CpuEvent =
   | { type: 'process_state'; pid: number; state: string; reason?: string }
   | { type: 'syscall'; pid: number; num: number; name: string; args: number[]; result: number }
   | { type: 'console_out'; pid: number; bytes: number[]; text: string }
+  | { type: 'core_assign'; core_id: number; pid: number }
+  | { type: 'core_release'; core_id: number; pid: number; reason?: string }
+  | { type: 'mutex_op'; core_id: number; pid: number; mutex_id: number; op: 'create' | 'acquired' | 'waiting' | 'released' | 'handoff'; next_pid?: number; waiters?: number[] }
+  | { type: 'sem_op'; core_id: number; pid: number; sem_id: number; op: 'create' | 'wait_immediate' | 'wait_blocked' | 'signal' | 'handoff'; count: number; next_pid?: number; waiters?: number[] }
   | { type: 'session_info'; id: string; mode: string; role: string; label: string; view_token: string; user_id?: string; user_name?: string; user_email?: string }
   | { type: 'error'; message: string };
+
+export interface CoreInfo {
+  id: number;
+  regs: Record<string, number>;
+  segments: Record<string, number>;
+  mode: number;
+  halted: boolean;
+  tick: number;
+  current_pid: number;
+}
+
+export interface MutexState {
+  id: number;
+  holder: number;
+  waiters: number[];
+}
+
+export interface SemaphoreState {
+  id: number;
+  count: number;
+  waiters: number[];
+}
 
 export interface SessionInfo {
   id: string;
@@ -41,6 +67,7 @@ export interface SessionInfo {
 export interface ProgramInfo {
   name: string;
   description: string;
+  category?: string;
   size: number;
   procs?: string[];
 }
@@ -101,6 +128,15 @@ export const useCpuStore = defineStore('cpu', () => {
   const currentPID = ref(0);
   const readyQueue = ref<number[]>([]);
   const waitQueue = ref<WaitInfo[]>([]);
+
+  // ─── Multicore + sync primitives ─────────────────────────────────────────
+  // cores tracks per-core state. numCores comes from the snapshot. mutexes
+  // and semaphores are kept up-to-date via the mutex_op / sem_op events so
+  // the /concurrencia view can render the lock tables without re-querying.
+  const cores = ref<CoreInfo[]>([]);
+  const numCores = ref(1);
+  const mutexes = ref<MutexState[]>([]);
+  const semaphores = ref<SemaphoreState[]>([]);
   // Fuente C (escrita a mano) por PID, para mostrar en el panel CÓDIGO.
   const procSources = ref<Record<number, string>>({});
   // PIDs que cambiaron en el último evento (para animación flash)
@@ -205,6 +241,8 @@ export const useCpuStore = defineStore('cpu', () => {
             procSources.value[Number(pid)] = src;
           }
         }
+        if (ev.cores) cores.value = ev.cores;
+        if (ev.num_cores !== undefined) numCores.value = ev.num_cores;
         changedRegs.clear();
         break;
       case 'programs':
@@ -262,6 +300,8 @@ export const useCpuStore = defineStore('cpu', () => {
         currentPID.value = 0;
         consoleChunks.value = [];
         procSources.value = {};
+        mutexes.value = [];
+        semaphores.value = [];
         break;
       case 'procs':
         procs.value = ev.procs;
@@ -333,6 +373,78 @@ export const useCpuStore = defineStore('cpu', () => {
         // memory panel filters, etc.) — the store carries no aggregated
         // counter for it because that would grow unbounded across runs.
         break;
+      case 'core_assign': {
+        const c = cores.value.find(x => x.id === ev.core_id);
+        if (c) c.current_pid = ev.pid;
+        pushLog(`◈ core ${ev.core_id} ← P${ev.pid}`, 'amber');
+        break;
+      }
+      case 'core_release': {
+        const c = cores.value.find(x => x.id === ev.core_id);
+        if (c) c.current_pid = 0;
+        pushLog(`◇ core ${ev.core_id} ↛ P${ev.pid}${ev.reason ? ' (' + ev.reason + ')' : ''}`, 'amber');
+        break;
+      }
+      case 'mutex_op': {
+        let m = mutexes.value.find(x => x.id === ev.mutex_id);
+        if (!m) {
+          m = { id: ev.mutex_id, holder: -1, waiters: [] };
+          mutexes.value.push(m);
+        }
+        switch (ev.op) {
+          case 'create':
+            // Object already added above; nothing else to track.
+            pushLog(`🔒 mutex ${ev.mutex_id} creado por P${ev.pid}`, 'green');
+            break;
+          case 'acquired':
+            m.holder = ev.pid;
+            m.waiters = ev.waiters ?? [];
+            pushLog(`🔒 mutex ${ev.mutex_id} adquirido por P${ev.pid}`, 'green');
+            break;
+          case 'waiting':
+            m.waiters = ev.waiters ?? [];
+            pushLog(`⏸ P${ev.pid} esperando mutex ${ev.mutex_id}`, 'yellow');
+            break;
+          case 'released':
+            m.holder = -1;
+            m.waiters = ev.waiters ?? [];
+            pushLog(`🔓 mutex ${ev.mutex_id} liberado por P${ev.pid}`, 'cyan');
+            break;
+          case 'handoff':
+            m.holder = ev.next_pid ?? -1;
+            m.waiters = ev.waiters ?? [];
+            pushLog(`↪ mutex ${ev.mutex_id}: P${ev.pid} → P${ev.next_pid}`, 'green');
+            break;
+        }
+        break;
+      }
+      case 'sem_op': {
+        let s = semaphores.value.find(x => x.id === ev.sem_id);
+        if (!s) {
+          s = { id: ev.sem_id, count: ev.count, waiters: [] };
+          semaphores.value.push(s);
+        }
+        s.count = ev.count;
+        s.waiters = ev.waiters ?? [];
+        switch (ev.op) {
+          case 'create':
+            pushLog(`◯ semáforo ${ev.sem_id} creado (count=${ev.count})`, 'green');
+            break;
+          case 'wait_immediate':
+            pushLog(`↓ P${ev.pid} wait sem ${ev.sem_id} (count=${ev.count})`, 'cyan');
+            break;
+          case 'wait_blocked':
+            pushLog(`⏸ P${ev.pid} bloqueado en sem ${ev.sem_id}`, 'yellow');
+            break;
+          case 'signal':
+            pushLog(`↑ P${ev.pid} signal sem ${ev.sem_id} (count=${ev.count})`, 'green');
+            break;
+          case 'handoff':
+            pushLog(`↪ sem ${ev.sem_id}: P${ev.pid} → P${ev.next_pid}`, 'green');
+            break;
+        }
+        break;
+      }
     }
     // Fan-out to subscribers AFTER the store has reacted, so they can read
     // the up-to-date snapshot in their handler.
@@ -397,6 +509,7 @@ export const useCpuStore = defineStore('cpu', () => {
     changedRegs,
     programs, selectedProgram, log, connected, lastError,
     procs, currentPID, readyQueue, waitQueue, flashingPIDs, procSources,
+    cores, numCores, mutexes, semaphores,
     subscribe,
     consoleChunks, faultShake,
     glossarySearch, glossaryOpenSignal,
