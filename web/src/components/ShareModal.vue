@@ -66,7 +66,7 @@ function deactivate() {
           <template v-else>
             <label class="field-label">Enlace para compartir</label>
             <div class="link-row">
-              <input class="link-input" readonly :value="link" @click="($event.target as HTMLInputElement).select()" />
+              <input class="link-input" name="share_link" aria-label="Enlace de la sesión compartida" readonly :value="link" @click="($event.target as HTMLInputElement).select()" />
               <button class="copy-btn" @click="copyLink">
                 {{ copied ? '✓ COPIADO' : '⎘ COPIAR' }}
               </button>

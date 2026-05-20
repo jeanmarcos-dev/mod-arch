@@ -16,8 +16,8 @@
   --red: #ff3a3a;
   --red-soft: #ff7a7a;
   --text: #e8e3d4;
-  --text-dim: #8b8675;
-  --text-muted: #4a4742;
+  --text-dim: #aaa491;
+  --text-muted: #7d7868;
 
   /* Surfaces layer on top of bg-0; use them for cards/popovers/menus so the
      stack can be re-themed without touching individual components. */

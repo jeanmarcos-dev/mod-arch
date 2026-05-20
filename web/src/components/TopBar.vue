@@ -63,9 +63,11 @@ defineEmits<{ (e: 'open-glossary'): void; (e: 'open-share'): void }>();
           @keydown.enter="onAliasCommit"
           class="alias-input"
           type="text"
+          name="alias"
           maxlength="32"
           placeholder="su alias..."
           autocomplete="off"
+          aria-label="Alias visible para los espectadores"
         />
         <button class="btn-login-mini" @click.prevent="goToLogin" title="Iniciar sesión con nombre y correo (opcional)">⤴</button>
       </label>
@@ -88,15 +90,17 @@ defineEmits<{ (e: 'open-glossary'): void; (e: 'open-share'): void }>();
       <div class="config">
         <label class="cfg-item" title="Velocidad del modo RUN automático. Más Hz = pasos por segundo más rápidos.">
           <span>Hz</span>
-          <input type="number" min="1" max="60" v-model.number="cpu.stepHz" />
+          <input type="number" name="step_hz" min="1" max="60" v-model.number="cpu.stepHz" aria-label="Hz del modo RUN automático" />
         </label>
         <label class="cfg-item" title="Quantum: cuántos ticks del CPU corre un proceso antes de que el timer dispare IRQ 0x20 y el scheduler le ceda el CPU a otro proceso. 0 = timer apagado.">
           <span>Quantum</span>
           <input
             type="number"
+            name="timer_quantum"
             min="0"
             max="200"
             :value="cpu.timerQuantum"
+            aria-label="Quantum del timer (ticks por proceso)"
             @change="(e) => cpu.setQuantum(Number((e.target as HTMLInputElement).value))"
           />
         </label>

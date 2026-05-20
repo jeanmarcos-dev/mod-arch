@@ -118,6 +118,8 @@ const currentESP = computed(() => cpu.regs.ESP >>> 0);
       <input
         v-if="view === 'custom'"
         v-model="customAddr"
+        name="memory_address"
+        aria-label="Dirección de memoria a inspeccionar"
         class="addr-input"
         placeholder="0x100000"
       />

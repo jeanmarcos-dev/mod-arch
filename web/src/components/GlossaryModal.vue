@@ -356,6 +356,8 @@ function toggle(term: string) {
         <h2>⌕ GLOSARIO</h2>
         <input
           v-model="search"
+          name="glossary_search"
+          aria-label="Buscar en el glosario"
           class="search"
           placeholder="buscar (IRQ, PL, PCB, scheduler...)"
           autofocus

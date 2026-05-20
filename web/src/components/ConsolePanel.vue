@@ -63,6 +63,8 @@ function focusInput() {
       </label>
       <input
         ref="keyInput"
+        name="kbd_input"
+        aria-label="Teclado simulado (cada tecla genera IRQ 0x21)"
         class="key-input"
         type="text"
         inputmode="text"
