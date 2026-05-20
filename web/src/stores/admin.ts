@@ -28,6 +28,37 @@ export interface InviteRow {
   url: string;
 }
 
+export interface AccessSettings {
+  access_mode: 'open' | 'invite_only' | 'closed';
+  viewer_password_required: boolean;
+  viewer_password_set: boolean;
+}
+
+export interface UserSessionBrief {
+  id: string;
+  mode: string;
+  label: string;
+  last_active: number;
+}
+
+export interface UserRow {
+  id: string;
+  name: string;
+  email?: string;
+  student_id?: string;
+  last_login_at: number;
+  sessions: UserSessionBrief[];
+}
+
+export interface AuditRow {
+  id: number;
+  ts: number;
+  actor: string;
+  action: string;
+  target?: string;
+  meta?: string;
+}
+
 async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
   const opts: RequestInit = {
     method,
@@ -48,6 +79,9 @@ export const useAdminStore = defineStore('admin', () => {
   const stats = ref<AdminStats | null>(null);
   const sessions = ref<SessionRow[]>([]);
   const invites = ref<InviteRow[]>([]);
+  const settings = ref<AccessSettings | null>(null);
+  const users = ref<UserRow[]>([]);
+  const audit = ref<AuditRow[]>([]);
   const lastError = ref<string | null>(null);
 
   async function fetchMe(): Promise<boolean> {
@@ -88,15 +122,21 @@ export const useAdminStore = defineStore('admin', () => {
   }
 
   async function refresh() {
-    const [s, i, me] = await Promise.all([
+    const [s, i, me, set, u, a] = await Promise.all([
       send<SessionRow[]>('GET', '/admin/api/sessions'),
       send<InviteRow[]>('GET', '/admin/api/invites'),
       send<{ user: string; stats: AdminStats }>('GET', '/admin/api/me'),
+      send<AccessSettings>('GET', '/admin/api/settings').catch(() => null),
+      send<UserRow[]>('GET', '/admin/api/users').catch(() => []),
+      send<AuditRow[]>('GET', '/admin/api/audit').catch(() => []),
     ]);
     sessions.value = s ?? [];
     invites.value = i ?? [];
     user.value = me.user;
     stats.value = me.stats;
+    settings.value = set;
+    users.value = u ?? [];
+    audit.value = a ?? [];
   }
 
   async function killSession(id: string) {
@@ -129,11 +169,27 @@ export const useAdminStore = defineStore('admin', () => {
     await refresh();
   }
 
+  async function setSetting(key: string, value: string) {
+    await send<{ ok: boolean }>('PUT', '/admin/api/settings', { key, value });
+    await refresh();
+  }
+
+  async function kickUser(id: string) {
+    await send<{ ok: boolean; sessions_killed: number }>(
+      'POST',
+      `/admin/api/users/${id}/kick`,
+    );
+    await refresh();
+  }
+
   return {
     user,
     stats,
     sessions,
     invites,
+    settings,
+    users,
+    audit,
     lastError,
     fetchMe,
     login,
@@ -144,5 +200,7 @@ export const useAdminStore = defineStore('admin', () => {
     togglePublic,
     createInvite,
     revokeInvite,
+    setSetting,
+    kickUser,
   };
 });

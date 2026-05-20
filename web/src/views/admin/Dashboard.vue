@@ -74,6 +74,43 @@ async function revokeInvite(token: string) {
   await run(() => admin.revokeInvite(token), 'Invitación revocada');
 }
 
+const newViewerPassword = ref('');
+
+async function setAccessMode(mode: 'open' | 'invite_only' | 'closed') {
+  await run(() => admin.setSetting('access_mode', mode), 'Modo de acceso actualizado');
+}
+
+async function toggleViewerPasswordRequired(required: boolean) {
+  await run(
+    () => admin.setSetting('viewer_password_required', String(required)),
+    required ? 'Contraseña requerida' : 'Contraseña no requerida',
+  );
+}
+
+async function setViewerPassword() {
+  const v = newViewerPassword.value.trim();
+  if (!v) return;
+  await run(() => admin.setSetting('viewer_password', v), 'Contraseña actualizada');
+  newViewerPassword.value = '';
+}
+
+async function clearViewerPassword() {
+  if (!confirm('¿Eliminar la contraseña de vista?')) return;
+  await run(() => admin.setSetting('viewer_password', ''), 'Contraseña eliminada');
+}
+
+async function kickUser(id: string, name: string) {
+  if (!confirm(`¿Expulsar al usuario ${name}? Sus sesiones activas se cerrarán.`)) return;
+  await run(() => admin.kickUser(id), 'Usuario expulsado');
+}
+
+function formatTimestamp(unix: number): string {
+  if (!unix) return '—';
+  const d = new Date(unix * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 async function run(fn: () => Promise<void>, okMsg: string) {
   try {
     await fn();
@@ -224,6 +261,146 @@ onUnmounted(() => {
         </tbody>
       </table>
       <p v-else class="empty">No hay invitaciones pendientes</p>
+    </section>
+
+    <section class="panel" v-if="admin.settings">
+      <header class="panel-head">
+        <h2>Control de acceso</h2>
+      </header>
+
+      <div class="settings-grid">
+        <div class="setting">
+          <span class="k">Modo de acceso</span>
+          <div class="seg">
+            <button
+              :class="{ active: admin.settings.access_mode === 'open' }"
+              @click="setAccessMode('open')"
+            >Abierto</button>
+            <button
+              :class="{ active: admin.settings.access_mode === 'invite_only' }"
+              @click="setAccessMode('invite_only')"
+            >Sólo invitación</button>
+            <button
+              :class="{ active: admin.settings.access_mode === 'closed' }"
+              @click="setAccessMode('closed')"
+            >Cerrado</button>
+          </div>
+          <p class="hint">
+            <template v-if="admin.settings.access_mode === 'open'">
+              Cualquier persona puede abrir el simulador y obtener una sesión nueva.
+            </template>
+            <template v-else-if="admin.settings.access_mode === 'invite_only'">
+              Sólo se permiten sesiones nuevas mediante un enlace de invitación.
+            </template>
+            <template v-else>
+              No se aceptan sesiones nuevas. Las sesiones activas continúan funcionando.
+            </template>
+          </p>
+        </div>
+
+        <div class="setting">
+          <span class="k">Contraseña para espectadores</span>
+          <div class="row">
+            <label class="check">
+              <input
+                type="checkbox"
+                :checked="admin.settings.viewer_password_required"
+                :disabled="!admin.settings.viewer_password_set"
+                @change="toggleViewerPasswordRequired(($event.target as HTMLInputElement).checked)"
+              />
+              <span>Exigir contraseña al abrir <code>/v/&lt;token&gt;</code></span>
+            </label>
+          </div>
+          <form class="row pw-form" @submit.prevent="setViewerPassword">
+            <input
+              v-model="newViewerPassword"
+              type="password"
+              placeholder="Nueva contraseña (mínimo 4)"
+              minlength="4"
+              maxlength="64"
+            />
+            <button type="submit" :disabled="newViewerPassword.trim().length < 4">
+              {{ admin.settings.viewer_password_set ? 'Cambiar' : 'Establecer' }}
+            </button>
+            <button
+              v-if="admin.settings.viewer_password_set"
+              type="button"
+              class="ghost danger"
+              @click="clearViewerPassword"
+            >Eliminar</button>
+          </form>
+          <p class="hint">
+            Cuando está activa, los espectadores deben introducir esta contraseña antes de
+            ver una sesión compartida. Cambia el hash invalida cookies anteriores.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <header class="panel-head">
+        <h2>Usuarios identificados</h2>
+      </header>
+
+      <table v-if="admin.users.length" class="grid">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Correo</th>
+            <th>ID estudiante</th>
+            <th>Último ingreso</th>
+            <th>Sesiones activas</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="u in admin.users" :key="u.id">
+            <td>{{ u.name }}</td>
+            <td class="dim">{{ u.email || '—' }}</td>
+            <td class="dim">{{ u.student_id || '—' }}</td>
+            <td class="dim">{{ formatTimestamp(u.last_login_at) }}</td>
+            <td>
+              <span v-if="u.sessions.length" class="pill">{{ u.sessions.length }} activa(s)</span>
+              <span v-else class="dim">—</span>
+            </td>
+            <td class="row-actions">
+              <button
+                class="danger"
+                :disabled="!u.sessions.length"
+                @click="kickUser(u.id, u.name)"
+              >expulsar</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="empty">Aún no hay usuarios identificados</p>
+    </section>
+
+    <section class="panel">
+      <header class="panel-head">
+        <h2>Registro de auditoría</h2>
+      </header>
+      <table v-if="admin.audit.length" class="grid audit-grid">
+        <thead>
+          <tr>
+            <th>Cuándo</th>
+            <th>Actor</th>
+            <th>Acción</th>
+            <th>Objetivo</th>
+            <th>Meta</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="e in admin.audit" :key="e.id">
+            <td class="dim mono">{{ formatTimestamp(e.ts) }}</td>
+            <td class="mono">{{ e.actor }}</td>
+            <td><span class="pill">{{ e.action }}</span></td>
+            <td class="mono">{{ e.target || '—' }}</td>
+            <td class="mono dim">{{ e.meta || '' }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="empty">El registro está vacío</p>
     </section>
 
     <transition name="toast">
@@ -488,6 +665,105 @@ button.danger:hover:not(:disabled) {
   color: var(--text-dim, #888);
   font-size: 12px;
   letter-spacing: 1px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  padding: 14px;
+}
+
+@media (max-width: 760px) {
+  .settings-grid { grid-template-columns: 1fr; }
+}
+
+.setting {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.setting .k {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim, #888);
+}
+
+.setting .hint {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.seg {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border, #3a3a3a);
+}
+
+.seg button {
+  flex: 1;
+  border: 0;
+  border-right: 1px solid var(--border, #3a3a3a);
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--text-dim, #888);
+  border-radius: 0;
+  padding: 8px 10px;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.seg button:last-child { border-right: 0; }
+
+.seg button.active {
+  background: rgba(255, 179, 71, 0.18);
+  color: var(--amber, #ffb347);
+  box-shadow: inset 0 0 6px rgba(255, 179, 71, 0.25);
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.row.pw-form input {
+  flex: 1;
+  min-width: 160px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--border, #3a3a3a);
+  color: var(--text, #e0e0e0);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 6px 10px;
+  outline: none;
+}
+
+.row.pw-form input:focus {
+  border-color: var(--amber, #ffb347);
+  box-shadow: 0 0 6px rgba(255, 179, 71, 0.2);
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text, #e0e0e0);
+}
+
+.check code {
+  background: rgba(255, 179, 71, 0.08);
+  color: var(--amber, #ffb347);
+  padding: 1px 4px;
+  font-size: 11px;
+}
+
+.audit-grid td.mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
 }
 
 .toast {

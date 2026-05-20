@@ -167,13 +167,17 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]userResponse, 0, len(users))
 	for _, u := range users {
+		sess := sessionsByUser[u.ID]
+		if sess == nil {
+			sess = []userSessionBrief{}
+		}
 		out = append(out, userResponse{
 			ID:          u.ID,
 			Name:        u.Name,
 			Email:       u.Email,
 			StudentID:   u.StudentID,
 			LastLoginAt: u.LastLoginAt,
-			Sessions:    sessionsByUser[u.ID],
+			Sessions:    sess,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
