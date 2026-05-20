@@ -10,7 +10,11 @@ import (
 	"io/fs"
 )
 
-//go:embed dist
+// The all: prefix is required so Vite-generated chunks whose filenames start
+// with "_" (vue export helpers, async chunks) are not silently skipped by the
+// default //go:embed dotfile/underscore filter.
+//
+//go:embed all:dist
 var distEmbed embed.FS
 
 // Files devuelve el filesystem con los archivos del frontend listos para servir.
