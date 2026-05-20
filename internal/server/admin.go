@@ -133,24 +133,24 @@ func (s *Server) requireAdminAPI(next http.HandlerFunc) http.HandlerFunc {
 // disabled (env vars missing), the SPA catch-all returns 404 so the surface
 // is not advertised.
 func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /admin/login", s.handleAdminLogin)
-	mux.HandleFunc("POST /admin/logout", s.handleAdminLogout)
+	mux.HandleFunc("POST /admin/login", s.limitByIP(s.loginLimit, s.handleAdminLogin))
+	mux.HandleFunc("POST /admin/logout", s.requireCSRF(s.handleAdminLogout))
 
 	mux.HandleFunc("GET /admin/api/me", s.handleAdminMe)
 	mux.HandleFunc("GET /admin/api/sessions", s.requireAdminAPI(s.handleAdminListSessions))
-	mux.HandleFunc("POST /admin/api/sessions/{id}/kill", s.requireAdminAPI(s.handleAdminKillSession))
-	mux.HandleFunc("POST /admin/api/sessions/{id}/label", s.requireAdminAPI(s.handleAdminSetLabel))
-	mux.HandleFunc("POST /admin/api/sessions/{id}/public", s.requireAdminAPI(s.handleAdminTogglePublic))
+	mux.HandleFunc("POST /admin/api/sessions/{id}/kill", s.requireAdminAPI(s.requireCSRF(s.handleAdminKillSession)))
+	mux.HandleFunc("POST /admin/api/sessions/{id}/label", s.requireAdminAPI(s.requireCSRF(s.handleAdminSetLabel)))
+	mux.HandleFunc("POST /admin/api/sessions/{id}/public", s.requireAdminAPI(s.requireCSRF(s.handleAdminTogglePublic)))
 
 	mux.HandleFunc("GET /admin/api/invites", s.requireAdminAPI(s.handleAdminListInvites))
-	mux.HandleFunc("POST /admin/api/invites", s.requireAdminAPI(s.handleAdminCreateInvite))
-	mux.HandleFunc("DELETE /admin/api/invites/{token}", s.requireAdminAPI(s.handleAdminRevokeInvite))
+	mux.HandleFunc("POST /admin/api/invites", s.requireAdminAPI(s.requireCSRF(s.handleAdminCreateInvite)))
+	mux.HandleFunc("DELETE /admin/api/invites/{token}", s.requireAdminAPI(s.requireCSRF(s.handleAdminRevokeInvite)))
 
 	mux.HandleFunc("GET /admin/api/settings", s.requireAdminAPI(s.handleAdminGetSettings))
-	mux.HandleFunc("PUT /admin/api/settings", s.requireAdminAPI(s.handleAdminSetSetting))
+	mux.HandleFunc("PUT /admin/api/settings", s.requireAdminAPI(s.requireCSRF(s.handleAdminSetSetting)))
 
 	mux.HandleFunc("GET /admin/api/users", s.requireAdminAPI(s.handleAdminListUsers))
-	mux.HandleFunc("POST /admin/api/users/{id}/kick", s.requireAdminAPI(s.handleAdminKickUser))
+	mux.HandleFunc("POST /admin/api/users/{id}/kick", s.requireAdminAPI(s.requireCSRF(s.handleAdminKickUser)))
 
 	mux.HandleFunc("GET /admin/api/audit", s.requireAdminAPI(s.handleAdminListAudit))
 
@@ -174,6 +174,7 @@ func (s *Server) handleAdminSPA(w http.ResponseWriter, r *http.Request) {
 		serveSPAStatus(w, s.staticFS, http.StatusNotFound)
 		return
 	}
+	s.ensureCSRFCookie(w, r)
 	r2 := r.Clone(r.Context())
 	r2.URL.Path = "/"
 	http.FileServer(http.FS(s.staticFS)).ServeHTTP(w, r2)
@@ -199,6 +200,7 @@ func (s *Server) handleAdminMe(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	s.ensureCSRFCookie(w, r)
 	c, err := r.Cookie(AdminCookie)
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "no autenticado"})
@@ -300,13 +302,19 @@ func (s *Server) adminActor(r *http.Request) string {
 // audit safely appends an admin action to the audit log. metaJSON may be
 // empty.
 func (s *Server) audit(r *http.Request, action, target, metaJSON string) {
+	s.auditFromContext(r, s.adminActor(r), action, target, metaJSON)
+}
+
+// auditFromContext is the same as audit but takes an explicit actor — used by
+// student auth flows that need to record "user:<id>" instead of "admin:*".
+func (s *Server) auditFromContext(r *http.Request, actor, action, target, metaJSON string) {
 	st := s.manager.Store()
 	if st == nil {
 		return
 	}
 	err := st.AppendAudit(r.Context(), store.AuditEntry{
 		TS:       time.Now().Unix(),
-		Actor:    s.adminActor(r),
+		Actor:    actor,
 		Action:   action,
 		Target:   target,
 		MetaJSON: metaJSON,
@@ -341,9 +349,10 @@ func (s *Server) handleAdminSetLabel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "body inválido"})
 		return
 	}
-	label := strings.TrimSpace(body.Label)
-	if len(label) > 32 {
-		label = label[:32]
+	label, err := cleanLabel(body.Label)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
 	}
 	sess.SetLabel(label)
 	sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
@@ -380,9 +389,10 @@ func (s *Server) handleAdminCreateInvite(w http.ResponseWriter, r *http.Request)
 		// Body is optional; an empty label is acceptable.
 		body.Label = ""
 	}
-	label := strings.TrimSpace(body.Label)
-	if len(label) > 32 {
-		label = label[:32]
+	label, err := cleanLabel(body.Label)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
 	}
 	inv := s.manager.CreateInvite(label)
 	meta, _ := json.Marshal(map[string]any{"label": label})

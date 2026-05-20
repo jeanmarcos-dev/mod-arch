@@ -8,8 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"regexp"
-	"strings"
 	"time"
 
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
@@ -19,15 +17,10 @@ import (
 // magicLinkTTL is how long an emailed login token remains usable.
 const magicLinkTTL = 15 * time.Minute
 
-var (
-	emailRE     = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
-	studentIDRE = regexp.MustCompile(`^[A-Za-z0-9._\-]{1,32}$`)
-)
-
 func (s *Server) registerAuthRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
+	mux.HandleFunc("POST /api/auth/login", s.limitByIP(s.authLimit, s.requireCSRF(s.handleAuthLogin)))
 	mux.HandleFunc("GET /api/auth/me", s.handleAuthMe)
-	mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
+	mux.HandleFunc("POST /api/auth/logout", s.requireCSRF(s.handleAuthLogout))
 	mux.HandleFunc("GET /auth/magic", s.handleAuthMagic)
 }
 
@@ -52,20 +45,19 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "JSON inválido"})
 		return
 	}
-	name := strings.TrimSpace(req.Name)
-	email := strings.ToLower(strings.TrimSpace(req.Email))
-	sid := strings.TrimSpace(req.StudentID)
-
-	if name == "" || len(name) > 32 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "el nombre es obligatorio y no puede exceder 32 caracteres"})
+	name, err := cleanName(req.Name)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return
 	}
-	if email != "" && !emailRE.MatchString(email) {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "el correo no tiene un formato válido"})
+	email, err := cleanEmail(req.Email)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return
 	}
-	if sid != "" && !studentIDRE.MatchString(sid) {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "el ID de estudiante solo admite letras, números, punto y guión"})
+	sid, err := cleanStudentID(req.StudentID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return
 	}
 
@@ -99,6 +91,8 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 			magicSent = true
 		}
 	}
+
+	s.auditFromContext(r, "user:"+user.ID, "auth.login", sess.ID, "")
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":         true,
@@ -178,6 +172,7 @@ func (s *Server) issueMagicLink(r *http.Request, email string) error {
 
 // handleAuthMe reports the user attached to the caller's session, if any.
 func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
+	s.ensureCSRFCookie(w, r)
 	user, ok := s.currentUser(r)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "no autenticado"})
@@ -191,9 +186,13 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	sess, role := s.resolveSessionAndRole(r)
 	if sess != nil && role == sessions.RoleOwner {
+		prevUser := sess.UserID()
 		sess.SetUserID("")
 		sess.SetLabel("")
 		sess.Sim.Broadcast(s.sessionInfoMessage(sess, role))
+		if prevUser != "" {
+			s.auditFromContext(r, "user:"+prevUser, "auth.logout", sess.ID, "")
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -243,6 +242,7 @@ func (s *Server) handleAuthMagic(w http.ResponseWriter, r *http.Request) {
 	sess.SetUserID(user.ID)
 	sess.SetLabel(user.Name)
 	sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
+	s.auditFromContext(r, "user:"+user.ID, "auth.magic", sess.ID, "")
 
 	http.Redirect(w, r, "/", http.StatusFound)
 }

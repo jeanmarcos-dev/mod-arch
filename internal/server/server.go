@@ -38,9 +38,19 @@ type Server struct {
 	logger   *slog.Logger
 	staticFS fs.FS
 
-	fullTmpl *template.Template
-	admin    adminConfig
+	fullTmpl   *template.Template
+	admin      adminConfig
+	loginLimit *RateLimiter
+	authLimit  *RateLimiter
 }
+
+// Rate limit defaults for login surfaces. Tight enough to make brute force
+// pointless while comfortable for legitimate retries.
+const (
+	loginLimitMax        = 5
+	loginLimitWindow     = 15 * time.Minute
+	rateLimitCleanupTick = 5 * time.Minute
+)
 
 // Config holds the Server construction parameters.
 type Config struct {
@@ -55,11 +65,13 @@ func New(cfg Config) *Server {
 		cfg.Logger = slog.Default()
 	}
 	s := &Server{
-		manager:  cfg.Manager,
-		logger:   cfg.Logger,
-		staticFS: cfg.StaticFS,
-		fullTmpl: mustParseTemplate("full", "templates/full.html"),
-		admin:    loadAdminConfig(),
+		manager:    cfg.Manager,
+		logger:     cfg.Logger,
+		staticFS:   cfg.StaticFS,
+		fullTmpl:   mustParseTemplate("full", "templates/full.html"),
+		admin:      loadAdminConfig(),
+		loginLimit: NewRateLimiter(context.Background(), loginLimitMax, loginLimitWindow, rateLimitCleanupTick),
+		authLimit:  NewRateLimiter(context.Background(), loginLimitMax, loginLimitWindow, rateLimitCleanupTick),
 	}
 	if s.admin.enabled {
 		cfg.Logger.Info("admin enabled", "user", s.admin.user)
@@ -92,41 +104,58 @@ func (s *Server) Routes(mux *http.ServeMux) {
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	if isHTMLPath(path) {
-		if token := r.URL.Query().Get("t"); token != "" {
-			if s.consumePrivInvite(w, r, token) {
-				return
-			}
-			// Fall through to normal cookie/cap flow when consume fails.
-		}
-		if c, err := r.Cookie(ViewCookie); err == nil {
-			if sess := s.manager.GetByViewToken(c.Value); sess != nil {
-				sess.Touch()
-			} else {
-				clearCookie(w, ViewCookie)
-			}
-		} else {
-			sess, err := s.getOrCreateSession(w, r)
-			if errors.Is(err, sessions.ErrCapReached) {
-				s.handleFull(w, r)
-				return
-			}
-			if errors.Is(err, ErrAccessDenied) {
-				_, reason := s.canCreateSession(r.Context())
-				s.writeAccessDeniedHTML(w, reason)
-				return
-			}
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			_ = sess
+		if done := s.bootstrapHTMLRequest(w, r); done {
+			return
 		}
 	}
 	if s.staticFS != nil {
+		if isHTMLPath(path) {
+			s.ensureCSRFCookie(w, r)
+		}
 		s.serveSPA(w, r, path)
 		return
 	}
 	s.handlePlaceholder(w, r)
+}
+
+// bootstrapHTMLRequest resolves the HTML-shaped request: consumes invite
+// tokens, refreshes viewer cookies, and creates or attaches an owner session.
+// Returns true when the response has already been written (cap-full, access
+// denied, internal error, or invite redirect) and the caller should bail.
+func (s *Server) bootstrapHTMLRequest(w http.ResponseWriter, r *http.Request) bool {
+	if token := r.URL.Query().Get("t"); token != "" {
+		if s.consumePrivInvite(w, r, token) {
+			return true
+		}
+	}
+	if c, err := r.Cookie(ViewCookie); err == nil {
+		if sess := s.manager.GetByViewToken(c.Value); sess != nil {
+			sess.Touch()
+		} else {
+			clearCookie(w, ViewCookie)
+		}
+		return false
+	}
+	if _, err := s.getOrCreateSession(w, r); err != nil {
+		return s.handleSessionError(w, r, err)
+	}
+	return false
+}
+
+// handleSessionError translates the errors returned by getOrCreateSession
+// into the appropriate HTTP response.
+func (s *Server) handleSessionError(w http.ResponseWriter, r *http.Request, err error) bool {
+	if errors.Is(err, sessions.ErrCapReached) {
+		s.handleFull(w, r)
+		return true
+	}
+	if errors.Is(err, ErrAccessDenied) {
+		_, reason := s.canCreateSession(r.Context())
+		s.writeAccessDeniedHTML(w, reason)
+		return true
+	}
+	http.Error(w, err.Error(), http.StatusInternalServerError)
+	return true
 }
 
 // serveSPA hands the request to the embedded FileServer. HTML-shaped paths

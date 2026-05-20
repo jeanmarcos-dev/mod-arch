@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -52,17 +53,51 @@ func newJarClient() *http.Client {
 }
 
 // postJSON sends a JSON body and returns the (already-drained) status code
-// and body bytes. Closing happens inside so callers do not have to.
-func postJSON(t *testing.T, c *http.Client, url string, body any) (int, []byte) {
+// and body bytes. It primes the CSRF cookie via GET /api/auth/me when the
+// jar does not already have one, then echoes the cookie back in the header
+// — mirroring what the SPA does in production.
+func postJSON(t *testing.T, c *http.Client, target string, body any) (int, []byte) {
 	t.Helper()
+	csrf := ensureCSRFToken(t, c, target)
 	buf, _ := json.Marshal(body)
-	resp, err := c.Post(url, "application/json", bytes.NewReader(buf))
+	req, _ := http.NewRequest(http.MethodPost, target, bytes.NewReader(buf))
+	req.Header.Set("Content-Type", "application/json")
+	if csrf != "" {
+		req.Header.Set(CSRFHeader, csrf)
+	}
+	resp, err := c.Do(req)
 	if err != nil {
-		t.Fatalf("POST %s: %v", url, err)
+		t.Fatalf("POST %s: %v", target, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	out, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, out
+}
+
+func ensureCSRFToken(t *testing.T, c *http.Client, target string) string {
+	t.Helper()
+	u, err := url.Parse(target)
+	if err != nil || c.Jar == nil {
+		return ""
+	}
+	base := &url.URL{Scheme: u.Scheme, Host: u.Host}
+	if v := lookupCookie(c.Jar.Cookies(base), CSRFCookie); v != "" {
+		return v
+	}
+	resp, err := c.Get(base.String() + "/api/auth/me")
+	if err == nil {
+		_ = resp.Body.Close()
+	}
+	return lookupCookie(c.Jar.Cookies(base), CSRFCookie)
+}
+
+func lookupCookie(cookies []*http.Cookie, name string) string {
+	for _, k := range cookies {
+		if k.Name == name {
+			return k.Value
+		}
+	}
+	return ""
 }
 
 func TestAuth_LoginCreatesUserAndSession(t *testing.T) {
@@ -162,13 +197,12 @@ func TestAuth_LogoutDetachesUser(t *testing.T) {
 	_, _ = postJSON(t, c, ts.URL+"/api/auth/login", map[string]string{
 		"name": "Ada", "email": "ada@ucv.ve",
 	})
-	resp, _ := c.Post(ts.URL+"/api/auth/logout", "application/json", nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("logout status=%d", resp.StatusCode)
+	status, _ := postJSON(t, c, ts.URL+"/api/auth/logout", map[string]any{})
+	if status != http.StatusOK {
+		t.Errorf("logout status=%d", status)
 	}
-	_ = resp.Body.Close()
 
-	resp, _ = c.Get(ts.URL + "/api/auth/me")
+	resp, _ := c.Get(ts.URL + "/api/auth/me")
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("after logout /me = %d, want 401", resp.StatusCode)
 	}

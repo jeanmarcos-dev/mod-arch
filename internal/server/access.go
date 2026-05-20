@@ -176,6 +176,7 @@ func (s *Server) handleViewerAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(pass)); err != nil {
+		s.auditFromContext(r, "anon", "viewer_pw.fail", token, "")
 		s.writeViewerPasswordForm(w, token, "contraseña incorrecta")
 		return
 	}
@@ -188,5 +189,6 @@ func (s *Server) handleViewerAuth(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int((24 * 7 * 3600)),
 	})
+	s.auditFromContext(r, "anon", "viewer_pw.ok", token, "")
 	http.Redirect(w, r, "/v/"+token, http.StatusFound)
 }

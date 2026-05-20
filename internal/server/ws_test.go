@@ -235,6 +235,60 @@ func TestWS_TwoSessionsAreIsolated(t *testing.T) {
 	}
 }
 
+func TestWS_RejectsForeignOrigin(t *testing.T) {
+	t.Setenv("ALLOWED_ORIGINS", "localhost:5173")
+	_, ts, wsURL := startTestServer(t)
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	jar, _ := cookiejar.New(nil)
+	httpClient := &http.Client{Jar: jar}
+	resp, err := httpClient.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatalf("warmup get: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	_, dialResp, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPClient:   httpClient,
+		HTTPHeader:   http.Header{"Origin": []string{"http://evil.example.com"}},
+		Subprotocols: nil,
+	})
+	if err == nil {
+		t.Fatal("expected dial to fail when Origin is foreign")
+	}
+	if dialResp != nil && dialResp.Body != nil {
+		_ = dialResp.Body.Close()
+	}
+}
+
+func TestAllowedWSOrigins(t *testing.T) {
+	t.Run("default when unset", func(t *testing.T) {
+		t.Setenv("ALLOWED_ORIGINS", "")
+		got := allowedWSOrigins()
+		if len(got) != len(defaultAllowedOrigins) {
+			t.Fatalf("got %v, want defaults", got)
+		}
+	})
+	t.Run("parse csv", func(t *testing.T) {
+		t.Setenv("ALLOWED_ORIGINS", "a.example.com, b.example.com ,")
+		got := allowedWSOrigins()
+		want := []string{"a.example.com", "b.example.com"}
+		if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	})
+	t.Run("all empty falls back to defaults", func(t *testing.T) {
+		t.Setenv("ALLOWED_ORIGINS", " , , ")
+		got := allowedWSOrigins()
+		if len(got) != len(defaultAllowedOrigins) {
+			t.Fatalf("got %v, want defaults", got)
+		}
+	})
+}
+
 func send(t *testing.T, ctx context.Context, conn *websocket.Conn, cmd Command) {
 	t.Helper()
 	data, _ := json.Marshal(cmd)

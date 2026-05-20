@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -12,6 +13,38 @@ import (
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
 	"github.com/jeanmarcos/modos-cpu/internal/sim"
 )
+
+// defaultAllowedOrigins are the host patterns accepted on WS upgrades when
+// the ALLOWED_ORIGINS env var is unset. coder/websocket matches these against
+// the host portion of the Origin header, so no scheme is included. Both the
+// Vite dev server and the embedded production bundle are covered out of the
+// box; production deployments behind a real domain must set ALLOWED_ORIGINS.
+var defaultAllowedOrigins = []string{
+	"localhost:5173",
+	"localhost:8080",
+}
+
+// allowedWSOrigins parses ALLOWED_ORIGINS (comma-separated) and falls back to
+// the defaults. The result is the exact value that websocket.AcceptOptions
+// expects in OriginPatterns.
+func allowedWSOrigins() []string {
+	raw := strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS"))
+	if raw == "" {
+		return defaultAllowedOrigins
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return defaultAllowedOrigins
+	}
+	return out
+}
 
 const (
 	writeTimeout = 5 * time.Second
@@ -40,10 +73,15 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	sess.Touch()
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true,
+		OriginPatterns: allowedWSOrigins(),
 	})
 	if err != nil {
-		s.logger.Warn("ws accept failed", "err", err, "session", sess.ID)
+		s.logger.Warn("ws accept failed",
+			"err", err,
+			"session", sess.ID,
+			"origin", r.Header.Get("Origin"),
+			"ip", clientIP(r),
+		)
 		return
 	}
 
@@ -191,9 +229,10 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 		s.manager.DeactivateShare(sess)
 		sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
 	case "set_alias":
-		alias := strings.TrimSpace(cmd.Alias)
-		if len(alias) > 32 {
-			alias = alias[:32]
+		alias, err := cleanLabel(cmd.Alias)
+		if err != nil {
+			c.Send <- map[string]any{"type": "error", "message": err.Error()}
+			return
 		}
 		sess.SetLabel(alias)
 		sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
