@@ -197,6 +197,11 @@ func (c *CPU) FlagOn(flag uint32) bool {
 //  3. Otherwise, fetch-decode-execute the instruction at EIP.
 //
 // Tick is incremented in every case.
+//
+// The returned slice is detached from c.events so callers can safely run more
+// code that emits additional events (e.g. the kernel running a syscall handler
+// that calls Mem.Read8) without the new emissions appearing twice — once in
+// the returned slice and once in a later DrainEvents call.
 func (c *CPU) Step() ([]Event, error) {
 	c.events = nil
 
@@ -204,15 +209,15 @@ func (c *CPU) Step() ([]Event, error) {
 		vec := c.PendingIRQs[0]
 		c.PendingIRQs = c.PendingIRQs[1:]
 		if err := c.dispatchIRQ(vec, "HW"); err != nil {
-			return c.events, err
+			return c.DrainEvents(), err
 		}
 		c.Tick++
-		return c.events, nil
+		return c.DrainEvents(), nil
 	}
 
 	if c.Halted {
 		c.Tick++
-		return c.events, nil
+		return c.DrainEvents(), nil
 	}
 
 	if err := c.execNext(); err != nil {
@@ -226,16 +231,16 @@ func (c *CPU) Step() ([]Event, error) {
 				PermNeeded: mf.PermNeeded,
 			})
 			if disp := c.dispatchIRQ(0x0E, "fault"); disp != nil {
-				return c.events, disp
+				return c.DrainEvents(), disp
 			}
 			c.Tick++
-			return c.events, nil
+			return c.DrainEvents(), nil
 		}
-		return c.events, err
+		return c.DrainEvents(), err
 	}
 
 	c.Tick++
-	return c.events, nil
+	return c.DrainEvents(), nil
 }
 
 // execNext is the CPU inner loop: fetch the opcode at EIP, decode, execute.

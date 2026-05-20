@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, reactive, ref } from 'vue';
 import { useCpuStore, type CpuEvent } from '../../stores/cpu';
 import { usePreferencesStore } from '../../stores/preferences';
 import ModeFlipNarrator from '../../components/narrators/ModeFlipNarrator.vue';
+import InterruptNarrator from '../../components/narrators/InterruptNarrator.vue';
 
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
@@ -97,10 +98,14 @@ const narratorHint = computed(() =>
 <template>
   <div class="ints-page">
     <ModeFlipNarrator />
+    <InterruptNarrator />
 
     <div class="ints-page__content">
       <header class="ints-page__hero">
-        <div :class="['ints-page__mode-chip', `ints-page__mode-chip--${modeKey}`]">
+        <div
+          :class="['ints-page__mode-chip', `ints-page__mode-chip--${modeKey}`]"
+          data-narrator-anchor="cpu"
+        >
           <span class="ints-page__mode-caption">CPU en</span>
           <span class="ints-page__mode-value">{{ modeLabel }}</span>
         </div>
@@ -136,6 +141,7 @@ const narratorHint = computed(() =>
                 v-for="r in idt"
                 :key="r.vec"
                 :class="['ints-table__row', { 'ints-table__row--active': rowActive(r) }]"
+                :data-narrator-anchor="`idt-${r.vec}`"
               >
                 <td class="ints-table__vec">{{ r.hex }}</td>
                 <td>{{ r.name }}</td>
