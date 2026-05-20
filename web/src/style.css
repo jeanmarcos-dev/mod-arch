@@ -1,6 +1,7 @@
 /* Tema retro-CRT heredado de filosofos-so. */
 
 :root {
+  /* Palette. */
   --bg-0: #07090e;
   --bg-1: #0d1218;
   --bg-2: #131a22;
@@ -17,9 +18,105 @@
   --text: #e8e3d4;
   --text-dim: #8b8675;
   --text-muted: #4a4742;
+
+  /* Surfaces layer on top of bg-0; use them for cards/popovers/menus so the
+     stack can be re-themed without touching individual components. */
+  --surface-0: var(--bg-0);
+  --surface-1: var(--bg-1);
+  --surface-2: var(--bg-2);
+  --surface-3: #1a212c;
+
+  /* Spacing scale (4px base). Anything outside the scale is a smell. */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* Radii kept conservative — CRT aesthetic is angular by default. */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+
+  /* Transitions share a single easing curve so motion feels coherent. */
+  --ease-out-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --transition-fast: 120ms var(--ease-out-soft);
+  --transition-base: 200ms var(--ease-out-soft);
+  --transition-slow: 320ms var(--ease-out-soft);
+
+  /* Glows and elevations. Glow tokens encode color; elevation tokens encode
+     depth and stay color-agnostic so dropping a new theme stays trivial. */
+  --shadow-glow-amber: 0 0 12px rgba(255, 179, 71, 0.25);
+  --shadow-glow-amber-strong: 0 0 18px rgba(255, 179, 71, 0.55);
+  --shadow-glow-green: 0 0 12px rgba(127, 255, 170, 0.30);
+  --shadow-glow-red: 0 0 12px rgba(255, 58, 58, 0.35);
+  --shadow-elevation-1: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-elevation-2: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  /* Focus ring: an inner solid + outer glow so it reads on every surface. */
+  --focus-ring-inner: 0 0 0 1px var(--amber);
+  --focus-ring-outer: 0 0 0 3px rgba(255, 179, 71, 0.35);
+  --focus-ring: var(--focus-ring-inner), var(--focus-ring-outer);
+
+  /* Z-index scale. Components reference tokens, never raw numbers. */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-overlay: 500;
+  --z-modal: 600;
+  --z-toast: 700;
+  --z-crt-overlay: 1000;
+
+  /* Density multiplier for table rows / list items. Tightening this token
+     gives a "compact" mode without touching individual components. */
+  --row-density: 1;
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* Single accessible focus treatment for keyboard users. Mouse clicks rely on
+   :focus alone (set on individual elements), keyboard traversal triggers the
+   stronger outline so it reads on every surface. */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Text selection color matches the amber accent so highlights look intentional
+   on top of the CRT background. */
+::selection {
+  background: rgba(255, 179, 71, 0.35);
+  color: var(--text);
+}
+
+a {
+  color: var(--amber);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+a:hover {
+  color: var(--yellow);
+  text-shadow: var(--shadow-glow-amber);
+}
+
+/* Honor the user's OS preference for reduced motion. The CRT scanline overlay
+   stays — it is a static gradient, not animation — but any keyframe or
+   transition is collapsed so vestibular-sensitive users are not bothered. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 html, body {
   height: 100%;
