@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -82,6 +83,14 @@ type Command struct {
 	VisibleCore []int  `json:"visible_cores,omitempty"`
 	Mode        string `json:"mode,omitempty"`
 	Narrators   *bool  `json:"narrators,omitempty"`
+
+	// Whiteboard pointer payload (cmd="pointer"). PointerX/Y are normalized
+	// to [0, 1] relative to the owner's viewport so viewers can re-project on
+	// any window size. Route is the owner's current path; viewers only render
+	// the cursor when their route matches.
+	PointerX     float64 `json:"x,omitempty"`
+	PointerY     float64 `json:"y,omitempty"`
+	PointerRoute string  `json:"route,omitempty"`
 }
 
 // handleWS resolves the session from cookies and services the WebSocket
@@ -241,9 +250,12 @@ var viewerSafeCommands = map[string]bool{
 
 // ownerOnlyCommands lists commands that only the owner may issue. presence is
 // listed here so a viewer that crafts a fake presence does not overwrite the
-// host's broadcast.
+// host's broadcast. The whiteboard cursor (pointer / pointer_off) is also
+// owner-only — viewers receive but never emit.
 var ownerOnlyCommands = map[string]bool{
-	"presence": true,
+	"presence":    true,
+	"pointer":     true,
+	"pointer_off": true,
 }
 
 // dispatch routes a Command to the session's Simulator. When role is Viewer,
@@ -309,6 +321,10 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 		s.handlePresence(cmd, sess)
 	case "hand_raise":
 		s.handleHandRaise(sess, role)
+	case "pointer":
+		s.handleOwnerPointer(cmd, sess)
+	case "pointer_off":
+		s.handleOwnerPointerOff(sess)
 	default:
 		c.Send <- map[string]any{"type": "error", "message": "comando desconocido: " + cmd.Cmd}
 	}
@@ -347,6 +363,42 @@ func (s *Server) handlePresence(cmd Command, sess *sessions.Session) {
 		"mode":      mode,
 		"narrators": narrators,
 		"at":        now.Unix(),
+	}, sim.RoleViewer)
+}
+
+// whiteboardRoutePattern accepts the same shape the SPA's router accepts: a
+// leading slash followed by path-safe characters. We cap at 64 chars so a
+// malformed client cannot flood viewers with arbitrary strings.
+var whiteboardRoutePattern = regexp.MustCompile(`^/[A-Za-z0-9/_:\-]{0,63}$`)
+
+// handleOwnerPointer broadcasts a pointer position from the owner to every
+// viewer. The payload is intentionally lossy: only the most recent position
+// matters, so we do not buffer or audit. Validation rejects malformed
+// coordinates so a buggy client cannot move cursors off-screen.
+func (s *Server) handleOwnerPointer(cmd Command, sess *sessions.Session) {
+	if cmd.PointerX < 0 || cmd.PointerX > 1 || cmd.PointerY < 0 || cmd.PointerY > 1 {
+		return
+	}
+	route := strings.TrimSpace(cmd.PointerRoute)
+	if !whiteboardRoutePattern.MatchString(route) {
+		return
+	}
+	sess.Sim.BroadcastTo(map[string]any{
+		"type":  "owner_pointer",
+		"x":     cmd.PointerX,
+		"y":     cmd.PointerY,
+		"route": route,
+		"ts":    time.Now().UnixMilli(),
+	}, sim.RoleViewer)
+}
+
+// handleOwnerPointerOff signals the viewer overlays to clear: the owner
+// turned the whiteboard toggle off or moved to a non-broadcasting route.
+func (s *Server) handleOwnerPointerOff(sess *sessions.Session) {
+	sess.Sim.BroadcastTo(map[string]any{
+		"type": "owner_pointer",
+		"off":  true,
+		"ts":   time.Now().UnixMilli(),
 	}, sim.RoleViewer)
 }
 

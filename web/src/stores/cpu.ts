@@ -30,11 +30,12 @@ export type CpuEvent =
   | { type: 'console_out'; pid: number; bytes: number[]; text: string }
   | { type: 'core_assign'; core_id: number; pid: number }
   | { type: 'core_release'; core_id: number; pid: number; reason?: string }
-  | { type: 'mutex_op'; core_id: number; pid: number; mutex_id: number; op: 'create' | 'acquired' | 'waiting' | 'released' | 'handoff'; next_pid?: number; waiters?: number[] }
+  | { type: 'mutex_op'; core_id: number; pid: number; mutex_id: number; op: 'create' | 'acquired' | 'waiting' | 'released' | 'handoff' | 'rejected'; next_pid?: number; waiters?: number[] }
   | { type: 'sem_op'; core_id: number; pid: number; sem_id: number; op: 'create' | 'wait_immediate' | 'wait_blocked' | 'signal' | 'handoff'; count: number; next_pid?: number; waiters?: number[] }
   | { type: 'session_info'; id: string; mode: string; role: string; label: string; view_token: string; user_id?: string; user_name?: string; user_email?: string; presence?: { section: string; cores: number[]; mode?: string; narrators?: boolean } }
   | { type: 'presence'; section: string; cores: number[]; mode?: string; narrators?: boolean; at?: number }
   | { type: 'hand_raise'; label: string; at?: number }
+  | { type: 'owner_pointer'; x?: number; y?: number; route?: string; ts?: number; off?: boolean }
   | { type: 'error'; message: string };
 
 export interface CoreInfo {
@@ -828,6 +829,9 @@ export const useCpuStore = defineStore('cpu', () => {
             m.waiters = ev.waiters ?? [];
             pushLog(`↪ mutex ${ev.mutex_id}: P${ev.pid} → P${ev.next_pid}`, 'green');
             break;
+          case 'rejected':
+            pushLog(`✗ mutex ${ev.mutex_id}: P${ev.pid} intentó liberarlo sin poseerlo (rechazado)`, 'red');
+            break;
         }
         break;
       }
@@ -951,6 +955,18 @@ export const useCpuStore = defineStore('cpu', () => {
     send({ cmd: 'hand_raise' });
   }
 
+  // Owner-only: broadcast the local pointer to every viewer. x, y are
+  // already normalized to [0, 1] by the caller; the server rejects anything
+  // outside that range so a buggy throttle cannot move cursors off-screen.
+  function sendPointer(x: number, y: number, routePath: string) {
+    if (sessionInfo.value.role !== 'owner') return;
+    send({ cmd: 'pointer', x, y, route: routePath });
+  }
+  function sendPointerOff() {
+    if (sessionInfo.value.role !== 'owner') return;
+    send({ cmd: 'pointer_off' });
+  }
+
   // viewerLink arma la URL completa que el owner puede copiar para compartir.
   function viewerLink(): string {
     const t = sessionInfo.value.view_token;
@@ -974,7 +990,7 @@ export const useCpuStore = defineStore('cpu', () => {
     sessionInfo, isViewer, viewerLink,
     lastPresence, handRaiseSignal, lastHandRaiseLabel,
     connect, load, step, run, pause, reset, clearLog, setQuantum, setSpeed, pushKey, openGlossary,
-    share, unshare, setAlias, setNumCores, sendPresence, raiseHand,
+    share, unshare, setAlias, setNumCores, sendPresence, raiseHand, sendPointer, sendPointerOff,
     // Test seam: vitest fakes the WebSocket by dispatching events directly
     // through this entry point. Production code uses the real ws.onmessage.
     __applyEvent: applyEvent,

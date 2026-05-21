@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import {
   LayoutDashboard,
@@ -11,18 +11,24 @@ import {
   BookOpen,
   Settings,
   UserRound,
+  ShieldUser,
 } from '@lucide/vue';
 import { useCpuStore } from '../stores/cpu';
 import { usePreferencesStore } from '../stores/preferences';
+import { useAuthStore } from '../stores/auth';
 import Sidebar from '../components/shell/Sidebar.vue';
 import Topbar from '../components/shell/Topbar.vue';
 import SimBar from '../components/shell/SimBar.vue';
 import ConnectionBanner from '../components/shell/ConnectionBanner.vue';
 import GlossaryModal from '../components/GlossaryModal.vue';
+import WhiteboardCursor from '../components/whiteboard/WhiteboardCursor.vue';
 import ViewerShell from './ViewerShell.vue';
+import { useWhiteboardStore } from '../stores/whiteboard';
 
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
+const auth = useAuthStore();
+const whiteboard = useWhiteboardStore();
 const route = useRoute();
 
 // Any cpu.openGlossary('EIP') call from a panel opens the popup right where
@@ -40,6 +46,10 @@ watch(() => cpu.glossaryOpenSignal, (n, prev) => {
 // here.
 onMounted(() => {
   cpu.connect();
+  // Fetch the identity so the sidebar can surface the "Panel admin" link to
+  // moderators / DB-admins on first load. If the user is anonymous fetchMe
+  // returns false and the entry stays hidden.
+  if (!auth.user) auth.fetchMe();
 });
 
 // The breadcrumb was removed from the topbar, so the section name now lives
@@ -54,17 +64,28 @@ watch(
   { immediate: true },
 );
 
-const items = [
-  { to: '/', label: 'Vista general', icon: LayoutDashboard, group: 'SIMULACIÓN' },
-  { to: '/procesos', label: 'Procesos', icon: ListOrdered, group: 'SIMULACIÓN' },
-  { to: '/memoria', label: 'Memoria', icon: MemoryStick, group: 'SIMULACIÓN' },
-  { to: '/interrupciones', label: 'Interrupciones', icon: Zap, group: 'SIMULACIÓN' },
-  { to: '/concurrencia', label: 'Concurrencia', icon: Layers, group: 'SIMULACIÓN' },
-  { to: '/sesiones', label: 'Mis sesiones', icon: FolderClock, group: 'HERRAMIENTAS' },
-  { to: '/glosario', label: 'Glosario', icon: BookOpen, group: 'HERRAMIENTAS' },
-  { to: '/preferencias', label: 'Preferencias', icon: Settings, group: 'HERRAMIENTAS' },
-  { to: '/perfil', label: 'Perfil', icon: UserRound, group: 'HERRAMIENTAS' },
-];
+// The "Panel admin" item only appears for users whose backend-reported role
+// gives them /admin access. The link itself navigates out of the AppShell —
+// AdminShell handles its own gating, so this entry is purely a discovery
+// affordance, not the authorization boundary.
+const items = computed(() => {
+  const base = [
+    { to: '/', label: 'Vista general', icon: LayoutDashboard, group: 'SIMULACIÓN' },
+    { to: '/procesos', label: 'Procesos', icon: ListOrdered, group: 'SIMULACIÓN' },
+    { to: '/memoria', label: 'Memoria', icon: MemoryStick, group: 'SIMULACIÓN' },
+    { to: '/interrupciones', label: 'Interrupciones', icon: Zap, group: 'SIMULACIÓN' },
+    { to: '/concurrencia', label: 'Concurrencia', icon: Layers, group: 'SIMULACIÓN' },
+    { to: '/sesiones', label: 'Mis sesiones', icon: FolderClock, group: 'HERRAMIENTAS' },
+    { to: '/glosario', label: 'Glosario', icon: BookOpen, group: 'HERRAMIENTAS' },
+    { to: '/preferencias', label: 'Preferencias', icon: Settings, group: 'HERRAMIENTAS' },
+    { to: '/perfil', label: 'Perfil', icon: UserRound, group: 'HERRAMIENTAS' },
+  ];
+  const role = auth.user?.role;
+  if (role === 'admin' || role === 'moderator') {
+    base.push({ to: '/admin', label: 'Panel admin', icon: ShieldUser, group: 'HERRAMIENTAS' });
+  }
+  return base;
+});
 
 // Routes where the SimBar (controls + status chips) is meaningful. Tool
 // routes like /perfil, /preferencias, /glosario, /sesiones don't drive the
@@ -108,6 +129,54 @@ watch(
   },
   { immediate: true },
 );
+
+// Whiteboard: while the owner has the toggle on, sample the pointer at 20fps
+// and broadcast normalized viewport coords. The watcher binds/unbinds the
+// listener based on role + toggle so non-owners never carry the cost.
+const POINTER_HZ = 20;
+const POINTER_INTERVAL_MS = Math.round(1000 / POINTER_HZ);
+let pointerLastSent = 0;
+let pointerLastX = -1;
+let pointerLastY = -1;
+
+function onPointerMove(ev: PointerEvent) {
+  const now = performance.now();
+  if (now - pointerLastSent < POINTER_INTERVAL_MS) return;
+  pointerLastSent = now;
+  const x = ev.clientX / window.innerWidth;
+  const y = ev.clientY / window.innerHeight;
+  if (x < 0 || x > 1 || y < 0 || y > 1) return;
+  // Skip identical-coord echoes (cursor parked) to spare the wire.
+  if (x === pointerLastX && y === pointerLastY) return;
+  pointerLastX = x;
+  pointerLastY = y;
+  cpu.sendPointer(x, y, route.path);
+}
+
+function attachPointer() {
+  window.addEventListener('pointermove', onPointerMove, { passive: true });
+}
+function detachPointer() {
+  window.removeEventListener('pointermove', onPointerMove);
+}
+
+watch(
+  [() => cpu.sessionInfo.role, () => whiteboard.broadcasting],
+  ([role, broadcasting], [prevRole, prevBroadcasting] = [undefined, undefined]) => {
+    const active = role === 'owner' && broadcasting;
+    const wasActive = prevRole === 'owner' && prevBroadcasting;
+    if (active && !wasActive) attachPointer();
+    if (!active && wasActive) {
+      detachPointer();
+      // If we just turned off (or lost the owner role), make sure viewers
+      // drop the cursor promptly instead of waiting for the staleness timer.
+      cpu.sendPointerOff();
+    }
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(detachPointer);
 </script>
 
 <template>
@@ -135,6 +204,10 @@ watch(
       :initial-search="cpu.glossarySearch"
       @close="glossaryOpen = false"
     />
+
+    <!-- Whiteboard overlay: paints the owner's pointer for viewers. Cheap
+         to keep mounted (renders nothing until an owner_pointer arrives). -->
+    <WhiteboardCursor />
   </div>
 </template>
 

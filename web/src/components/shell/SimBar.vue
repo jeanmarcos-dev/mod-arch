@@ -17,10 +17,12 @@ import {
   LogIn,
   LogOut,
   GripHorizontal,
+  Crosshair,
 } from '@lucide/vue';
 import { useCpuStore } from '../../stores/cpu';
 import { useAuthStore } from '../../stores/auth';
 import { useSimBarStore } from '../../stores/simBar';
+import { useWhiteboardStore } from '../../stores/whiteboard';
 import { useDraggable } from '../../composables/useDraggable';
 import ProgramPicker from '../ProgramPicker.vue';
 import ShareModal from '../ShareModal.vue';
@@ -31,6 +33,7 @@ import HandRaiseBadge from './HandRaiseBadge.vue';
 const cpu = useCpuStore();
 const auth = useAuthStore();
 const bar = useSimBarStore();
+const whiteboard = useWhiteboardStore();
 const router = useRouter();
 
 const panelRef = ref<HTMLElement | null>(null);
@@ -49,6 +52,16 @@ const loggedIn = computed(() => Boolean(cpu.sessionInfo.user_name));
 const viewer = computed(() => cpu.isViewer());
 const canShare = computed(() => (cpu.sessionInfo?.role ?? 'none') === 'owner');
 const isShared = computed(() => Boolean(cpu.sessionInfo?.view_token));
+const whiteboardOn = computed(() => whiteboard.broadcasting);
+
+// Toggling the whiteboard is a no-op for non-owners (button is hidden in
+// that case anyway). When turning OFF we also send pointer_off so viewers
+// drop the cursor immediately instead of waiting for the staleness timer.
+function toggleWhiteboard() {
+  const next = !whiteboard.broadcasting;
+  whiteboard.setBroadcasting(next);
+  if (!next) cpu.sendPointerOff();
+}
 
 function onLoad() {
   if (!cpu.selectedProgram) return;
@@ -312,6 +325,17 @@ function dockHeaderDblClick() {
           <button
             v-if="canShare"
             type="button"
+            :class="['sim-bar__share sim-bar__whiteboard', { 'sim-bar__whiteboard--on': whiteboardOn }]"
+            :title="whiteboardOn ? 'Pizarra activa — su puntero se muestra a los espectadores en la misma vista' : 'Comparta su puntero como pizarra para señalar en vivo'"
+            @click="toggleWhiteboard"
+          >
+            <Crosshair :size="14" :stroke-width="2" />
+            <span>{{ whiteboardOn ? 'Pizarra' : 'Pizarra' }}</span>
+          </button>
+
+          <button
+            v-if="canShare"
+            type="button"
             :class="['sim-bar__share', { 'sim-bar__share--on': isShared }]"
             :title="isShared ? 'Sesión compartida — clic para gestionarla' : 'Generar un enlace para que otros vean la sesión en modo lectura'"
             @click="openShare"
@@ -366,7 +390,7 @@ function dockHeaderDblClick() {
   border-bottom: 1px dashed var(--border);
   border-top-left-radius: var(--radius-md);
   border-top-right-radius: var(--radius-md);
-  background: rgba(255, 179, 71, 0.04);
+  background: rgba(var(--accent-rgb), 0.04);
   min-height: 36px;
   font-size: 9px;
   letter-spacing: 2px;
@@ -396,7 +420,7 @@ function dockHeaderDblClick() {
   font-size: 10px;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  background: rgba(255, 179, 71, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
   border: 1px solid var(--border);
   color: var(--amber);
   border-radius: var(--radius-sm);
@@ -405,7 +429,7 @@ function dockHeaderDblClick() {
   transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 .sim-bar__dock-btn:hover {
-  background: rgba(255, 179, 71, 0.16);
+  background: rgba(var(--accent-rgb), 0.16);
   border-color: var(--amber);
   box-shadow: var(--shadow-glow-amber);
 }
@@ -464,7 +488,7 @@ function dockHeaderDblClick() {
 
 .sim-btn {
   font-family: inherit;
-  background: rgba(255, 179, 71, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
   border: 1px solid var(--border-strong);
   color: var(--amber);
   font-size: 11px;
@@ -483,7 +507,7 @@ function dockHeaderDblClick() {
 }
 .sim-btn > svg { flex-shrink: 0; }
 .sim-btn:hover:not(:disabled) {
-  background: rgba(255, 179, 71, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
   box-shadow: var(--shadow-glow-amber);
 }
 .sim-btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -525,7 +549,7 @@ function dockHeaderDblClick() {
   transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 .icon-btn:hover, .icon-btn--on {
-  background: rgba(255, 179, 71, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   color: var(--amber);
   border-color: var(--border-strong);
 }
@@ -534,7 +558,7 @@ function dockHeaderDblClick() {
   height: 22px;
   border: none;
 }
-.icon-btn--ghost:hover { background: rgba(255, 179, 71, 0.10); color: var(--amber); }
+.icon-btn--ghost:hover { background: rgba(var(--accent-rgb), 0.10); color: var(--amber); }
 .icon-btn > svg { display: block; }
 
 .sim-bar__popover {
@@ -602,11 +626,11 @@ function dockHeaderDblClick() {
 }
 .sim-bar__core-pick:hover:not(:disabled) {
   color: var(--amber);
-  background: rgba(255, 179, 71, 0.10);
+  background: rgba(var(--accent-rgb), 0.10);
   border-color: var(--border-strong);
 }
 .sim-bar__core-pick--active {
-  background: rgba(255, 179, 71, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
   color: var(--amber);
   border-color: var(--amber);
   box-shadow: var(--shadow-glow-amber);
@@ -624,7 +648,7 @@ function dockHeaderDblClick() {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba(255, 179, 71, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0 4px 0 8px;
@@ -647,7 +671,7 @@ function dockHeaderDblClick() {
 
 .sim-bar__share {
   font-family: inherit;
-  background: rgba(255, 179, 71, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
   border: 1px solid var(--border);
   color: var(--text-dim);
   font-size: 10px;
@@ -664,7 +688,18 @@ function dockHeaderDblClick() {
   transition: background var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
   white-space: nowrap;
 }
-.sim-bar__share:hover { background: rgba(255, 179, 71, 0.12); color: var(--amber); border-color: var(--border-strong); }
+.sim-bar__share:hover { background: rgba(var(--accent-rgb), 0.12); color: var(--amber); border-color: var(--border-strong); }
+
+/* Whiteboard reuses the share-button geometry but flips to a green "active"
+   palette when the owner is broadcasting their pointer, mirroring the
+   "compartiendo" affordance for sharing. */
+.sim-bar__whiteboard--on {
+  background: rgba(127, 255, 170, 0.10);
+  color: var(--green);
+  border-color: var(--green);
+  box-shadow: var(--shadow-glow-green);
+}
+
 .sim-bar__share--on {
   background: rgba(127, 255, 170, 0.10);
   color: var(--green);
