@@ -17,8 +17,10 @@ import Sidebar from '../components/shell/Sidebar.vue';
 import ViewerTopBar from '../components/shell/ViewerTopBar.vue';
 import SimStatusRow from '../components/shell/SimStatusRow.vue';
 import ConnectionBanner from '../components/shell/ConnectionBanner.vue';
+import MobileMenuButton from '../components/shell/MobileMenuButton.vue';
 import GlossaryModal from '../components/GlossaryModal.vue';
 import WhiteboardCursor from '../components/whiteboard/WhiteboardCursor.vue';
+import WhiteboardClickRipple from '../components/whiteboard/WhiteboardClickRipple.vue';
 
 const cpu = useCpuStore();
 const viewer = useViewerStore();
@@ -106,6 +108,10 @@ watch(() => cpu.lastPresence.section, (s) => { lastAutoSection.value = s; });
 watch(
   () => route.path,
   (newPath, oldPath) => {
+    // Close the mobile drawer on any navigation so the overlay does not
+    // linger after the user picked a section.
+    if (prefs.sidebarMobileOpen) prefs.closeSidebarMobile();
+
     if (!oldPath || newPath === oldPath) return;
     if (!viewer.autofollow) return;
     // If we landed here because of an applyPresence call, the path will match
@@ -147,6 +153,7 @@ watch(() => cpu.glossaryOpenSignal, (n, prev) => {
 <template>
   <div :class="['shell', `shell--mode-${prefs.mode}`, { 'shell--disconnected': !cpu.connected }]">
     <ConnectionBanner />
+    <MobileMenuButton />
     <Sidebar :items="items" />
     <div class="shell__main">
       <ViewerTopBar />
@@ -167,6 +174,7 @@ watch(() => cpu.glossaryOpenSignal, (n, prev) => {
     />
 
     <WhiteboardCursor />
+    <WhiteboardClickRipple />
   </div>
 </template>
 
@@ -182,6 +190,10 @@ watch(() => cpu.glossaryOpenSignal, (n, prev) => {
 
 .shell--disconnected {
   padding-top: 36px;
+}
+
+@media (max-width: 768px) {
+  .shell--disconnected { padding-top: 28px; }
 }
 
 .shell__main {

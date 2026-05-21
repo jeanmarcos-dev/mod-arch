@@ -36,6 +36,7 @@ export type CpuEvent =
   | { type: 'presence'; section: string; cores: number[]; mode?: string; narrators?: boolean; focus?: Focus; at?: number }
   | { type: 'hand_raise'; label: string; at?: number }
   | { type: 'owner_pointer'; anchor?: string; offset_x?: number; offset_y?: number; route?: string; ts?: number; off?: boolean }
+  | { type: 'owner_click'; anchor?: string; offset_x?: number; offset_y?: number; route?: string; ts?: number }
   | { type: 'error'; message: string };
 
 export interface CoreInfo {
@@ -1008,6 +1009,14 @@ export const useCpuStore = defineStore('cpu', () => {
     if (sessionInfo.value.role !== 'owner') return;
     send({ cmd: 'pointer_off' });
   }
+  // Owner-only: announce a click-ripple at a specific anchor + offset. The
+  // server validates the anchor regex and offset range, then broadcasts an
+  // owner_click event to viewers; the WhiteboardClickRipple overlay renders
+  // a short-lived pulse on the same anchor in the viewer's DOM.
+  function sendClick(anchor: string, offsetX: number, offsetY: number, routePath: string) {
+    if (sessionInfo.value.role !== 'owner') return;
+    send({ cmd: 'click', anchor, offset_x: offsetX, offset_y: offsetY, route: routePath });
+  }
 
   // viewerLink arma la URL completa que el owner puede copiar para compartir.
   function viewerLink(): string {
@@ -1032,7 +1041,7 @@ export const useCpuStore = defineStore('cpu', () => {
     sessionInfo, isViewer, viewerLink,
     lastPresence, handRaiseSignal, lastHandRaiseLabel,
     connect, load, step, run, pause, reset, clearLog, setQuantum, setSpeed, pushKey, openGlossary,
-    share, unshare, setAlias, setNumCores, sendPresence, sendFocus, raiseHand, sendPointer, sendPointerOff,
+    share, unshare, setAlias, setNumCores, sendPresence, sendFocus, raiseHand, sendPointer, sendPointerOff, sendClick,
     // Test seam: vitest fakes the WebSocket by dispatching events directly
     // through this entry point. Production code uses the real ws.onmessage.
     __applyEvent: applyEvent,

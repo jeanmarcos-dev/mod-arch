@@ -281,6 +281,7 @@ var ownerOnlyCommands = map[string]bool{
 	"presence":    true,
 	"pointer":     true,
 	"pointer_off": true,
+	"click":       true,
 }
 
 // dispatch routes a Command to the session's Simulator. When role is Viewer,
@@ -350,6 +351,8 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 		s.handleOwnerPointer(cmd, sess)
 	case "pointer_off":
 		s.handleOwnerPointerOff(sess)
+	case "click":
+		s.handleOwnerClick(cmd, sess)
 	default:
 		c.Send <- map[string]any{"type": "error", "message": "comando desconocido: " + cmd.Cmd}
 	}
@@ -528,6 +531,33 @@ func (s *Server) handleOwnerPointerOff(sess *sessions.Session) {
 		"type": "owner_pointer",
 		"off":  true,
 		"ts":   time.Now().UnixMilli(),
+	}, sim.RoleViewer)
+}
+
+// handleOwnerClick is the click-ripple equivalent of the pointer cursor: the
+// owner clicked on a panel and the viewers paint a short-lived pulse on the
+// same anchor + offset so the audience sees where the host is signaling. We
+// reuse the pointer coordinate validation since the two payloads share the
+// same anchor + offset semantics.
+func (s *Server) handleOwnerClick(cmd Command, sess *sessions.Session) {
+	if cmd.PointerOffsetX < 0 || cmd.PointerOffsetX > 1 || cmd.PointerOffsetY < 0 || cmd.PointerOffsetY > 1 {
+		return
+	}
+	anchor := strings.TrimSpace(cmd.PointerAnchor)
+	if !whiteboardAnchorPattern.MatchString(anchor) {
+		return
+	}
+	route := strings.TrimSpace(cmd.PointerRoute)
+	if !whiteboardRoutePattern.MatchString(route) {
+		return
+	}
+	sess.Sim.BroadcastTo(map[string]any{
+		"type":     "owner_click",
+		"anchor":   anchor,
+		"offset_x": cmd.PointerOffsetX,
+		"offset_y": cmd.PointerOffsetY,
+		"route":    route,
+		"ts":       time.Now().UnixMilli(),
 	}, sim.RoleViewer)
 }
 

@@ -20,8 +20,10 @@ import Sidebar from '../components/shell/Sidebar.vue';
 import Topbar from '../components/shell/Topbar.vue';
 import SimBar from '../components/shell/SimBar.vue';
 import ConnectionBanner from '../components/shell/ConnectionBanner.vue';
+import MobileMenuButton from '../components/shell/MobileMenuButton.vue';
 import GlossaryModal from '../components/GlossaryModal.vue';
 import WhiteboardCursor from '../components/whiteboard/WhiteboardCursor.vue';
+import WhiteboardClickRipple from '../components/whiteboard/WhiteboardClickRipple.vue';
 import ViewerShell from './ViewerShell.vue';
 import { useWhiteboardStore } from '../stores/whiteboard';
 
@@ -63,6 +65,12 @@ watch(
   },
   { immediate: true },
 );
+
+// Close the mobile drawer on every navigation so a tap that ends up on the
+// same route also clears the overlay.
+watch(() => route.path, () => {
+  if (prefs.sidebarMobileOpen) prefs.closeSidebarMobile();
+});
 
 // The "Panel admin" item only appears for users whose backend-reported role
 // gives them /admin access. The link itself navigates out of the AppShell —
@@ -182,11 +190,24 @@ function onPointerMove(ev: PointerEvent) {
   cpu.sendPointer(resolved.anchor, resolved.offsetX, resolved.offsetY, route.path);
 }
 
+// Click capture: while broadcasting, every click the owner makes also emits
+// a ripple so viewers see what the owner is signaling. We use the capture
+// phase so the listener fires before any local handler can preventDefault,
+// and we never preventDefault ourselves — the click still does its normal
+// thing locally.
+function onPointerClick(ev: MouseEvent) {
+  const resolved = resolveAnchor(ev.clientX, ev.clientY);
+  if (!resolved) return;
+  cpu.sendClick(resolved.anchor, resolved.offsetX, resolved.offsetY, route.path);
+}
+
 function attachPointer() {
   window.addEventListener('pointermove', onPointerMove, { passive: true });
+  window.addEventListener('click', onPointerClick, true);
 }
 function detachPointer() {
   window.removeEventListener('pointermove', onPointerMove);
+  window.removeEventListener('click', onPointerClick, true);
 }
 
 watch(
@@ -215,6 +236,7 @@ onBeforeUnmount(detachPointer);
   <ViewerShell v-if="cpu.isViewer()" />
   <div v-else :class="['shell', `shell--mode-${prefs.mode}`, { 'shell--disconnected': !cpu.connected }]">
     <ConnectionBanner />
+    <MobileMenuButton />
     <Sidebar :items="items" />
     <div class="shell__main">
       <SimBar v-if="isSimRoute" />
@@ -237,6 +259,7 @@ onBeforeUnmount(detachPointer);
     <!-- Whiteboard overlay: paints the owner's pointer for viewers. Cheap
          to keep mounted (renders nothing until an owner_pointer arrives). -->
     <WhiteboardCursor />
+    <WhiteboardClickRipple />
   </div>
 </template>
 
@@ -254,6 +277,10 @@ onBeforeUnmount(detachPointer);
    whole shell so it does not occlude the sidebar header or the SimBar. */
 .shell--disconnected {
   padding-top: 36px;
+}
+
+@media (max-width: 768px) {
+  .shell--disconnected { padding-top: 28px; }
 }
 
 .shell__main {
