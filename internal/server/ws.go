@@ -99,6 +99,13 @@ type Command struct {
 	PointerOffsetX float64 `json:"offset_x,omitempty"`
 	PointerOffsetY float64 `json:"offset_y,omitempty"`
 	PointerRoute   string  `json:"route,omitempty"`
+
+	// Glossary cross-shell hover (cmd="glossary_hover" / "glossary_hover_off").
+	// Term is the canonical term string (e.g. "EIP", "Page fault"). Every
+	// <Term> instance on the viewer side that matches this string opens its
+	// tooltip; multiple matches all light up, which doubles as a "this concept
+	// appears here, here and here" pedagogical hint.
+	Term string `json:"term,omitempty"`
 }
 
 // FocusInput mirrors the wire shape the owner sends inside a presence
@@ -278,10 +285,12 @@ var viewerSafeCommands = map[string]bool{
 // host's broadcast. The whiteboard cursor (pointer / pointer_off) is also
 // owner-only — viewers receive but never emit.
 var ownerOnlyCommands = map[string]bool{
-	"presence":    true,
-	"pointer":     true,
-	"pointer_off": true,
-	"click":       true,
+	"presence":            true,
+	"pointer":             true,
+	"pointer_off":         true,
+	"click":               true,
+	"glossary_hover":      true,
+	"glossary_hover_off":  true,
 }
 
 // dispatch routes a Command to the session's Simulator. When role is Viewer,
@@ -353,6 +362,10 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 		s.handleOwnerPointerOff(sess)
 	case "click":
 		s.handleOwnerClick(cmd, sess)
+	case "glossary_hover":
+		s.handleOwnerGlossaryHover(cmd, sess)
+	case "glossary_hover_off":
+		s.handleOwnerGlossaryHoverOff(sess)
 	default:
 		c.Send <- map[string]any{"type": "error", "message": "comando desconocido: " + cmd.Cmd}
 	}
@@ -529,6 +542,40 @@ func (s *Server) handleOwnerPointer(cmd Command, sess *sessions.Session) {
 func (s *Server) handleOwnerPointerOff(sess *sessions.Session) {
 	sess.Sim.BroadcastTo(map[string]any{
 		"type": "owner_pointer",
+		"off":  true,
+		"ts":   time.Now().UnixMilli(),
+	}, sim.RoleViewer)
+}
+
+// whiteboardTermPattern restricts the canonical term string forwarded to
+// every viewer. The glossary lookup is case-insensitive on the client so a
+// generous Latin-1 + punctuation alphabet is fine; the hard cap protects
+// the wire from being abused as a long-string broadcaster.
+var whiteboardTermPattern = regexp.MustCompile(`^[\p{L}\p{N}0-9 _:.\-/#&()\[\]<>]{1,64}$`)
+
+// handleOwnerGlossaryHover relays a hover-into-tooltip event so every viewer
+// can open the same glossary popover on the matching <Term> in their own
+// DOM. Term is the canonical key (not an instance id) so multiple Term
+// instances on the page all light up — pedagogically useful since the
+// concept may appear in several places at once.
+func (s *Server) handleOwnerGlossaryHover(cmd Command, sess *sessions.Session) {
+	term := strings.TrimSpace(cmd.Term)
+	if !whiteboardTermPattern.MatchString(term) {
+		return
+	}
+	sess.Sim.BroadcastTo(map[string]any{
+		"type": "owner_glossary_hover",
+		"term": term,
+		"ts":   time.Now().UnixMilli(),
+	}, sim.RoleViewer)
+}
+
+// handleOwnerGlossaryHoverOff signals the matching viewer tooltips to
+// close. Sent when the owner moves the mouse away or the tooltip's own
+// staleness timer fires.
+func (s *Server) handleOwnerGlossaryHoverOff(sess *sessions.Session) {
+	sess.Sim.BroadcastTo(map[string]any{
+		"type": "owner_glossary_hover",
 		"off":  true,
 		"ts":   time.Now().UnixMilli(),
 	}, sim.RoleViewer)

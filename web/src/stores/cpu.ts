@@ -37,6 +37,7 @@ export type CpuEvent =
   | { type: 'hand_raise'; label: string; at?: number }
   | { type: 'owner_pointer'; anchor?: string; offset_x?: number; offset_y?: number; route?: string; ts?: number; off?: boolean }
   | { type: 'owner_click'; anchor?: string; offset_x?: number; offset_y?: number; route?: string; ts?: number }
+  | { type: 'owner_glossary_hover'; term?: string; off?: boolean; ts?: number }
   | { type: 'error'; message: string };
 
 export interface CoreInfo {
@@ -394,6 +395,28 @@ export const useCpuStore = defineStore('cpu', () => {
   // without subscribing to the raw event channel.
   const handRaiseSignal = ref(0);
   const lastHandRaiseLabel = ref('');
+
+  // Viewer-side mirror of the owner's currently-hovered glossary term. When
+  // non-null, every <Term> instance whose term matches lights up its tooltip
+  // alongside the owner's. Cleared by an owner_glossary_hover with off=true
+  // or by the staleness timer below (5s) so a disconnected owner does not
+  // leave a zombie tooltip open.
+  const ownerGlossaryHover = ref<string | null>(null);
+  const GLOSSARY_STALE_MS = 5000;
+  let glossaryStaleTimer: number | null = null;
+  function clearGlossaryStaleTimer() {
+    if (glossaryStaleTimer !== null) {
+      window.clearTimeout(glossaryStaleTimer);
+      glossaryStaleTimer = null;
+    }
+  }
+  function armGlossaryStaleTimer() {
+    clearGlossaryStaleTimer();
+    glossaryStaleTimer = window.setTimeout(() => {
+      ownerGlossaryHover.value = null;
+      glossaryStaleTimer = null;
+    }, GLOSSARY_STALE_MS);
+  }
 
   // ─── Animaciones globales ──────────────────────────────────────────────
   // shakeUntil es un timestamp; mientras Date.now() < shakeUntil, la UI shakea.
@@ -794,6 +817,15 @@ export const useCpuStore = defineStore('cpu', () => {
         lastHandRaiseLabel.value = ev.label;
         handRaiseSignal.value++;
         break;
+      case 'owner_glossary_hover':
+        if (ev.off) {
+          ownerGlossaryHover.value = null;
+          clearGlossaryStaleTimer();
+        } else if (typeof ev.term === 'string' && ev.term.length > 0) {
+          ownerGlossaryHover.value = ev.term;
+          armGlossaryStaleTimer();
+        }
+        break;
       case 'error':
         lastError.value = ev.message;
         pushLog(`⚠ ${ev.message}`, 'red');
@@ -1017,6 +1049,19 @@ export const useCpuStore = defineStore('cpu', () => {
     if (sessionInfo.value.role !== 'owner') return;
     send({ cmd: 'click', anchor, offset_x: offsetX, offset_y: offsetY, route: routePath });
   }
+  // Owner-only: tell every viewer that the host just opened the glossary
+  // tooltip for a given term. The viewer side opens its own tooltip on any
+  // <Term> with the same canonical term string. Only one term is hovered at
+  // a time so we ignore re-entries.
+  function sendGlossaryHover(term: string) {
+    if (sessionInfo.value.role !== 'owner') return;
+    if (!term) return;
+    send({ cmd: 'glossary_hover', term });
+  }
+  function sendGlossaryHoverOff() {
+    if (sessionInfo.value.role !== 'owner') return;
+    send({ cmd: 'glossary_hover_off' });
+  }
 
   // viewerLink arma la URL completa que el owner puede copiar para compartir.
   function viewerLink(): string {
@@ -1039,9 +1084,9 @@ export const useCpuStore = defineStore('cpu', () => {
     consoleChunks, faultShake,
     glossarySearch, glossaryOpenSignal,
     sessionInfo, isViewer, viewerLink,
-    lastPresence, handRaiseSignal, lastHandRaiseLabel,
+    lastPresence, handRaiseSignal, lastHandRaiseLabel, ownerGlossaryHover,
     connect, load, step, run, pause, reset, clearLog, setQuantum, setSpeed, pushKey, openGlossary,
-    share, unshare, setAlias, setNumCores, sendPresence, sendFocus, raiseHand, sendPointer, sendPointerOff, sendClick,
+    share, unshare, setAlias, setNumCores, sendPresence, sendFocus, raiseHand, sendPointer, sendPointerOff, sendClick, sendGlossaryHover, sendGlossaryHoverOff,
     // Test seam: vitest fakes the WebSocket by dispatching events directly
     // through this entry point. Production code uses the real ws.onmessage.
     __applyEvent: applyEvent,

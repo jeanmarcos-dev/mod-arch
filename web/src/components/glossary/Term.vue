@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onBeforeUnmount } from 'vue';
+import { computed, ref, onBeforeUnmount, watch } from 'vue';
 import { useCpuStore } from '../../stores/cpu';
 import { findEntry } from '../../data/glossary';
 import GlossaryTooltip from './GlossaryTooltip.vue';
@@ -24,9 +24,17 @@ if (import.meta.env.DEV && entry.value === null) {
 }
 
 const triggerRef = ref<HTMLElement | null>(null);
-const hovered = ref(false);
+const localHovered = ref(false);
 let hoverTimer = 0;
 const HOVER_DELAY_MS = 180;
+
+// Cross-shell tooltip: when a viewer is connected and the owner hovers a
+// <Term> with this exact term, light it up here too. Reading from the cpu
+// store keeps the subscription centralized — every Term shares the same
+// upstream listener instead of N parallel cpu.subscribe() calls.
+const isViewer = computed(() => cpu.sessionInfo.role === 'viewer');
+const remoteHovered = computed(() => isViewer.value && cpu.ownerGlossaryHover === props.term);
+const hovered = computed(() => localHovered.value || remoteHovered.value);
 
 const tipId = computed(() => {
   const slug = props.term.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -37,18 +45,30 @@ function openTip(immediate = false): void {
   if (!interactive.value) return;
   window.clearTimeout(hoverTimer);
   if (immediate) {
-    hovered.value = true;
+    localHovered.value = true;
+    cpu.sendGlossaryHover(props.term);
     return;
   }
   hoverTimer = window.setTimeout(() => {
-    hovered.value = true;
+    localHovered.value = true;
+    cpu.sendGlossaryHover(props.term);
   }, HOVER_DELAY_MS);
 }
 
 function closeTip(): void {
   window.clearTimeout(hoverTimer);
-  hovered.value = false;
+  if (localHovered.value) {
+    cpu.sendGlossaryHoverOff();
+  }
+  localHovered.value = false;
 }
+
+// If the owner opens a tooltip on the same term locally (mouseenter), the
+// remote-driven render goes back to mirroring the local state. No special
+// handling needed — the computed already covers it.
+// Watcher keeps the subscription tidy: when the cross-shell hover ends,
+// we do not need to clean local hover state.
+watch(remoteHovered, () => { /* reactive consumer */ });
 
 function onClick(): void {
   if (!interactive.value) return;
