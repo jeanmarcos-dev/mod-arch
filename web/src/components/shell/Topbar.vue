@@ -29,7 +29,7 @@ async function doLogout() { await auth.logout(); }
 </script>
 
 <template>
-  <header class="mini-bar" role="banner">
+  <header class="mini-bar" role="banner" data-pizarra-anchor="topbar">
     <span class="mini-bar__brand">MODOS-CPU</span>
 
     <div class="mini-bar__spacer"></div>

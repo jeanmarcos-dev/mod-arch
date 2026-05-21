@@ -2,11 +2,17 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 
 // PointerState mirrors the broadcast payload the server forwards from the
-// owner to every viewer. ts is the millisecond timestamp the server stamped
-// at emit; we use it as the staleness watchdog.
+// owner to every viewer. Coordinates are DOM-anchored: anchor is the id of
+// a [data-pizarra-anchor] element under the owner's mouse and offsetX/Y are
+// normalized to [0, 1] within that element's bounding rect. The viewer looks
+// up the same anchor in its own DOM, so the cursor lands on the same panel
+// even when the two shells have different sizes or sidebar/topbar heights.
+// ts is the millisecond timestamp the server stamped at emit; we use it as
+// the staleness watchdog.
 export interface PointerState {
-  x: number;
-  y: number;
+  anchor: string;
+  offsetX: number;
+  offsetY: number;
   route: string;
   ts: number;
 }
@@ -69,7 +75,14 @@ export const useWhiteboardStore = defineStore('whiteboard', () => {
     persistEnabled(v);
   }
 
-  function setOwnerPointer(ev: { x?: number; y?: number; route?: string; ts?: number; off?: boolean }) {
+  function setOwnerPointer(ev: {
+    anchor?: string;
+    offset_x?: number;
+    offset_y?: number;
+    route?: string;
+    ts?: number;
+    off?: boolean;
+  }) {
     if (ev.off) {
       ownerPointer.value = null;
       if (staleTimer !== undefined) {
@@ -78,12 +91,18 @@ export const useWhiteboardStore = defineStore('whiteboard', () => {
       }
       return;
     }
-    if (typeof ev.x !== 'number' || typeof ev.y !== 'number' || typeof ev.route !== 'string') {
+    if (
+      typeof ev.anchor !== 'string' ||
+      typeof ev.offset_x !== 'number' ||
+      typeof ev.offset_y !== 'number' ||
+      typeof ev.route !== 'string'
+    ) {
       return;
     }
     ownerPointer.value = {
-      x: ev.x,
-      y: ev.y,
+      anchor: ev.anchor,
+      offsetX: ev.offset_x,
+      offsetY: ev.offset_y,
       route: ev.route,
       ts: typeof ev.ts === 'number' ? ev.ts : Date.now(),
     };

@@ -19,7 +19,9 @@ var schemaSQL string
 // Bump only when an incompatible migration is added.
 //
 // v3: users.role column ('student' | 'moderator' | 'admin').
-const SchemaVersion = 3
+// v4: users.deleted_at column + email/student_id uniqueness via partial
+//     indexes (so a soft-deleted row releases its identifiers).
+const SchemaVersion = 4
 
 // Store is the database handle. Methods on Store are safe for concurrent use:
 // SQLite serializes writes internally and the connection pool handles reads.
@@ -102,10 +104,56 @@ func (s *Store) migrate(ctx context.Context) error {
 			return fmt.Errorf("store: add users.role: %w", err)
 		}
 	}
-	// Index creation comes AFTER the column-add so old databases bumping from
-	// v2 to v3 do not try to index a column that does not exist yet.
+
+	// v3 → v4: rebuild the users table to drop the inline UNIQUE constraints on
+	// email/student_id (so soft-deleted rows can release their identifiers via
+	// partial indexes) and add the deleted_at column. Detection key is the
+	// deleted_at column: present means v4 already applied.
+	if has, err := columnExists(ctx, tx, "users", "deleted_at"); err != nil {
+		return fmt.Errorf("store: probe users.deleted_at: %w", err)
+	} else if !has {
+		// defer_foreign_keys postpones FK validation to COMMIT so we can DROP
+		// the users table while sessions.user_id still references it; the
+		// rename below restores the reference before the transaction ends.
+		if _, err := tx.ExecContext(ctx, `PRAGMA defer_foreign_keys = ON`); err != nil {
+			return fmt.Errorf("store: defer foreign keys: %w", err)
+		}
+		rebuild := `
+			CREATE TABLE users_v4 (
+				id            TEXT PRIMARY KEY,
+				name          TEXT NOT NULL,
+				email         TEXT,
+				student_id    TEXT,
+				role          TEXT NOT NULL DEFAULT 'student',
+				created_at    INTEGER NOT NULL,
+				last_login_at INTEGER NOT NULL,
+				deleted_at    INTEGER
+			);
+			INSERT INTO users_v4(id, name, email, student_id, role, created_at, last_login_at)
+				SELECT id, name, email, student_id, COALESCE(NULLIF(role, ''), 'student'),
+				       created_at, last_login_at FROM users;
+			DROP TABLE users;
+			ALTER TABLE users_v4 RENAME TO users;
+		`
+		if _, err := tx.ExecContext(ctx, rebuild); err != nil {
+			return fmt.Errorf("store: rebuild users v3→v4: %w", err)
+		}
+	}
+
+	// Indexes come AFTER the column-add / table rebuild so old databases
+	// bumping from v2 or v3 do not try to index columns that do not exist yet.
 	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)`); err != nil {
 		return fmt.Errorf("store: create idx_users_role: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_active
+			ON users(email) WHERE email IS NOT NULL AND deleted_at IS NULL`); err != nil {
+		return fmt.Errorf("store: create idx_users_email_active: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_student_id_active
+			ON users(student_id) WHERE student_id IS NOT NULL AND deleted_at IS NULL`); err != nil {
+		return fmt.Errorf("store: create idx_users_student_id_active: %w", err)
 	}
 
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {

@@ -121,7 +121,7 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
 </script>
 
 <template>
-  <div class="procs-page">
+  <div class="procs-page" data-pizarra-anchor="view-procesos">
     <PCBCopyNarrator />
 
     <div class="procs-page__content">

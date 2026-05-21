@@ -110,6 +110,7 @@ function onCoreAllClick() {
       'sim-status-row--multi': !flat,
     }"
     aria-label="Estado del CPU"
+    data-pizarra-anchor="sim-status-row"
   >
     <!-- Flat layout — true single core OR multicore with exactly one
          visible core. The per-core grid only kicks in when ≥2 cores are

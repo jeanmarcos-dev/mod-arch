@@ -45,7 +45,7 @@ function pidShort(pid: number) {
 </script>
 
 <template>
-  <section class="conc">
+  <section class="conc" data-pizarra-anchor="view-concurrencia">
     <header class="conc__head">
       <h1><Term term="Critical section" mode="title">Concurrencia</Term></h1>
       <div class="conc__hint" v-if="singleCoreHint">

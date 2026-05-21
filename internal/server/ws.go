@@ -84,13 +84,20 @@ type Command struct {
 	Mode        string `json:"mode,omitempty"`
 	Narrators   *bool  `json:"narrators,omitempty"`
 
-	// Whiteboard pointer payload (cmd="pointer"). PointerX/Y are normalized
-	// to [0, 1] relative to the owner's viewport so viewers can re-project on
-	// any window size. Route is the owner's current path; viewers only render
-	// the cursor when their route matches.
-	PointerX     float64 `json:"x,omitempty"`
-	PointerY     float64 `json:"y,omitempty"`
-	PointerRoute string  `json:"route,omitempty"`
+	// Whiteboard pointer payload (cmd="pointer"). Coordinates are DOM-anchored:
+	// PointerAnchor is the id of a [data-pizarra-anchor] element under the
+	// owner's mouse (e.g. "cpu-panel"), and OffsetX/OffsetY are normalized to
+	// [0, 1] relative to that anchor's bounding rect. The viewer locates the
+	// same anchor in its own DOM and projects the offset there, so the cursor
+	// lands on the same panel even when the two shells have different sizes,
+	// sidebars, or topbar heights. The "shell-content" anchor is used as a
+	// fallback when no specific panel is under the cursor (e.g. over the
+	// sidebar). Route is the owner's current path; viewers only render the
+	// cursor when their route matches.
+	PointerAnchor  string  `json:"anchor,omitempty"`
+	PointerOffsetX float64 `json:"offset_x,omitempty"`
+	PointerOffsetY float64 `json:"offset_y,omitempty"`
+	PointerRoute   string  `json:"route,omitempty"`
 }
 
 // handleWS resolves the session from cookies and services the WebSocket
@@ -371,12 +378,21 @@ func (s *Server) handlePresence(cmd Command, sess *sessions.Session) {
 // malformed client cannot flood viewers with arbitrary strings.
 var whiteboardRoutePattern = regexp.MustCompile(`^/[A-Za-z0-9/_:\-]{0,63}$`)
 
+// whiteboardAnchorPattern restricts anchor ids to a small ASCII subset so a
+// buggy or hostile client cannot inject arbitrary attribute selectors that
+// the viewer would later use in document.querySelector.
+var whiteboardAnchorPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+
 // handleOwnerPointer broadcasts a pointer position from the owner to every
-// viewer. The payload is intentionally lossy: only the most recent position
-// matters, so we do not buffer or audit. Validation rejects malformed
-// coordinates so a buggy client cannot move cursors off-screen.
+// viewer. Coordinates are DOM-anchored ({anchor, offset_x, offset_y}); the
+// viewer locates the same anchor in its own DOM and positions the cursor
+// relative to that element so it stays aligned across screen sizes.
 func (s *Server) handleOwnerPointer(cmd Command, sess *sessions.Session) {
-	if cmd.PointerX < 0 || cmd.PointerX > 1 || cmd.PointerY < 0 || cmd.PointerY > 1 {
+	if cmd.PointerOffsetX < 0 || cmd.PointerOffsetX > 1 || cmd.PointerOffsetY < 0 || cmd.PointerOffsetY > 1 {
+		return
+	}
+	anchor := strings.TrimSpace(cmd.PointerAnchor)
+	if !whiteboardAnchorPattern.MatchString(anchor) {
 		return
 	}
 	route := strings.TrimSpace(cmd.PointerRoute)
@@ -384,11 +400,12 @@ func (s *Server) handleOwnerPointer(cmd Command, sess *sessions.Session) {
 		return
 	}
 	sess.Sim.BroadcastTo(map[string]any{
-		"type":  "owner_pointer",
-		"x":     cmd.PointerX,
-		"y":     cmd.PointerY,
-		"route": route,
-		"ts":    time.Now().UnixMilli(),
+		"type":     "owner_pointer",
+		"anchor":   anchor,
+		"offset_x": cmd.PointerOffsetX,
+		"offset_y": cmd.PointerOffsetY,
+		"route":    route,
+		"ts":       time.Now().UnixMilli(),
 	}, sim.RoleViewer)
 }
 

@@ -40,7 +40,7 @@ function focusInput() {
 </script>
 
 <template>
-  <div class="panel console">
+  <div class="panel console" data-pizarra-anchor="console-panel">
     <div class="panel-title">
       CONSOLE · sys_write fd=1
       <span class="kbd-hint" @click="focusInput">⌨ clic para escribir</span>

@@ -76,7 +76,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div :class="{ shake: cpu.faultShake }" class="root">
+  <div :class="{ shake: cpu.faultShake }" class="root" data-pizarra-anchor="view-overview">
     <!-- Tab bar mobile-only — controla todo el layout. Sólo visible <= 768px (CSS) -->
     <nav class="mobile-tabs" :aria-hidden="!isMobile">
       <button :class="{ active: mobileTab === 'cpu' }" @click="mobileTab = 'cpu'" title="Registros del CPU"><Cpu :size="14" :stroke-width="2" /><span>CPU</span></button>

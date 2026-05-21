@@ -151,7 +151,7 @@ watch(() => cpu.glossaryOpenSignal, (n, prev) => {
     <div class="shell__main">
       <ViewerTopBar />
       <SimStatusRow v-if="isSimRoute" class="shell__status-row" :readonly="true" />
-      <main class="shell__content">
+      <main class="shell__content" data-pizarra-anchor="shell-content">
         <RouterView v-slot="{ Component }">
           <Transition name="route" mode="out-in">
             <component :is="Component" />

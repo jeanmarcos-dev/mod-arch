@@ -28,7 +28,7 @@ const visibleLog = computed(() => cpu.log.filter(
 </script>
 
 <template>
-  <div class="panel log" ref="scroller">
+  <div class="panel log" ref="scroller" data-pizarra-anchor="events-panel">
     <div class="panel-title">EVENT_LOG</div>
     <div v-for="(e, i) in visibleLog" :key="i" class="line" :style="{ color: colorOf(e.color) }">
       {{ e.text }}

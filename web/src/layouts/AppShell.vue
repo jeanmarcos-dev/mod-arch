@@ -131,26 +131,55 @@ watch(
 );
 
 // Whiteboard: while the owner has the toggle on, sample the pointer at 20fps
-// and broadcast normalized viewport coords. The watcher binds/unbinds the
+// and broadcast DOM-anchored coords. The handler resolves the element under
+// the mouse and walks up to the nearest [data-pizarra-anchor] so the viewer
+// can reproject the cursor onto the same panel even when its own viewport
+// is smaller or its sidebar is collapsed. The watcher binds/unbinds the
 // listener based on role + toggle so non-owners never carry the cost.
 const POINTER_HZ = 20;
 const POINTER_INTERVAL_MS = Math.round(1000 / POINTER_HZ);
+const SHELL_CONTENT_FALLBACK = 'shell-content';
 let pointerLastSent = 0;
-let pointerLastX = -1;
-let pointerLastY = -1;
+let pointerLastAnchor = '';
+let pointerLastOX = -1;
+let pointerLastOY = -1;
+
+function resolveAnchor(clientX: number, clientY: number): { anchor: string; offsetX: number; offsetY: number } | null {
+  const target = document.elementFromPoint(clientX, clientY);
+  let host: Element | null = target ? target.closest('[data-pizarra-anchor]') : null;
+  if (!host) {
+    // Fallback to the shared content area present in both shells. Tagged via
+    // the same data attribute on .shell__content below.
+    host = document.querySelector(`[data-pizarra-anchor="${SHELL_CONTENT_FALLBACK}"]`);
+  }
+  if (!host) return null;
+  const anchor = host.getAttribute('data-pizarra-anchor') || SHELL_CONTENT_FALLBACK;
+  const rect = host.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  const offsetX = (clientX - rect.left) / rect.width;
+  const offsetY = (clientY - rect.top) / rect.height;
+  if (offsetX < 0 || offsetX > 1 || offsetY < 0 || offsetY > 1) return null;
+  return { anchor, offsetX, offsetY };
+}
 
 function onPointerMove(ev: PointerEvent) {
   const now = performance.now();
   if (now - pointerLastSent < POINTER_INTERVAL_MS) return;
-  pointerLastSent = now;
-  const x = ev.clientX / window.innerWidth;
-  const y = ev.clientY / window.innerHeight;
-  if (x < 0 || x > 1 || y < 0 || y > 1) return;
+  const resolved = resolveAnchor(ev.clientX, ev.clientY);
+  if (!resolved) return;
   // Skip identical-coord echoes (cursor parked) to spare the wire.
-  if (x === pointerLastX && y === pointerLastY) return;
-  pointerLastX = x;
-  pointerLastY = y;
-  cpu.sendPointer(x, y, route.path);
+  if (
+    resolved.anchor === pointerLastAnchor &&
+    resolved.offsetX === pointerLastOX &&
+    resolved.offsetY === pointerLastOY
+  ) {
+    return;
+  }
+  pointerLastSent = now;
+  pointerLastAnchor = resolved.anchor;
+  pointerLastOX = resolved.offsetX;
+  pointerLastOY = resolved.offsetY;
+  cpu.sendPointer(resolved.anchor, resolved.offsetX, resolved.offsetY, route.path);
 }
 
 function attachPointer() {
@@ -190,7 +219,7 @@ onBeforeUnmount(detachPointer);
     <div class="shell__main">
       <SimBar v-if="isSimRoute" />
       <Topbar v-else />
-      <main class="shell__content">
+      <main class="shell__content" data-pizarra-anchor="shell-content">
         <RouterView v-slot="{ Component }">
           <Transition name="route" mode="out-in">
             <component :is="Component" />

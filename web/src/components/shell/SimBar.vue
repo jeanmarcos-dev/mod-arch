@@ -157,6 +157,7 @@ function dockHeaderDblClick() {
       :style="bar.mode === 'floating' ? { left: drag.position.value.x + 'px', top: drag.position.value.y + 'px' } : undefined"
       role="region"
       aria-label="Controles de simulación"
+      data-pizarra-anchor="sim-bar"
     >
       <header
         v-if="bar.mode === 'floating'"

@@ -129,7 +129,7 @@ const narratorHint = computed(() =>
 </script>
 
 <template>
-  <div class="ints-page">
+  <div class="ints-page" data-pizarra-anchor="view-interrupciones">
     <ModeFlipNarrator />
     <InterruptNarrator />
 

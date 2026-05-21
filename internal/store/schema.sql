@@ -7,17 +7,19 @@
 CREATE TABLE IF NOT EXISTS users (
     id            TEXT PRIMARY KEY,
     name          TEXT NOT NULL,
-    email         TEXT UNIQUE,
-    student_id    TEXT UNIQUE,
+    email         TEXT,
+    student_id    TEXT,
     role          TEXT NOT NULL DEFAULT 'student',
     created_at    INTEGER NOT NULL,
-    last_login_at INTEGER NOT NULL
+    last_login_at INTEGER NOT NULL,
+    deleted_at    INTEGER
 );
 
--- The role index is created programmatically in store.go:migrate after the
--- column-add migration runs, so that databases created at v2 (where the
--- column did not exist yet) can be upgraded in-place without CREATE INDEX
--- racing against the missing column.
+-- email and student_id uniqueness is enforced via partial indexes scoped to
+-- active rows (deleted_at IS NULL). This lets a soft-deleted user release its
+-- identifiers for reuse. Indexes are created programmatically in
+-- store.go:migrate so the v2→v3→v4 upgrade path stays additive without
+-- racing against columns that an older database may not yet have.
 
 CREATE TABLE IF NOT EXISTS sessions (
     id             TEXT PRIMARY KEY,

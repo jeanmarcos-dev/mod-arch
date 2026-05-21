@@ -111,7 +111,7 @@ function fmtHex(n: number): string {
 </script>
 
 <template>
-  <div class="panel code-asm">
+  <div class="panel code-asm" data-pizarra-anchor="code-panel">
     <div class="panel-title">
       <span class="title-text">CÓDIGO · C ↔ ASSEMBLER</span>
       <span class="title-hint" v-if="cpu.procs.length > 1">

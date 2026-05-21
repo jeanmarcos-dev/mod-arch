@@ -59,7 +59,7 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
 </script>
 
 <template>
-  <div class="panel procs">
+  <div class="panel procs" data-pizarra-anchor="procs-panel">
     <div class="panel-title clickable-title" title="Tabla de procesos del sistema con su Process Control Block.&#10;&#10;— click para más info —" @click="cpu.openGlossary('PCB')">PROCESOS · PCB</div>
 
     <div v-if="sortedProcs.length === 0" class="empty">

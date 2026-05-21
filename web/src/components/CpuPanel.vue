@@ -67,7 +67,7 @@ function shouldFlash(core: CoreInfo, reg: string): boolean {
 </script>
 
 <template>
-  <div class="panel cpu">
+  <div class="panel cpu" data-pizarra-anchor="cpu-panel">
     <div class="panel-title">CPU · REGISTROS</div>
     <section
       v-for="core in visibleCores"

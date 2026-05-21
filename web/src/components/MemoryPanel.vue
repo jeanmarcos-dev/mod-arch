@@ -94,7 +94,7 @@ const currentESP = computed(() => cpu.regs.ESP >>> 0);
 </script>
 
 <template>
-  <div class="panel mem">
+  <div class="panel mem" data-pizarra-anchor="memory-panel">
     <div class="panel-title">MEMORIA · HEX DUMP</div>
 
     <div class="controls">

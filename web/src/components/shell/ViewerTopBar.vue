@@ -52,7 +52,7 @@ async function onLeave() {
 </script>
 
 <template>
-  <header class="viewer-bar" role="banner">
+  <header class="viewer-bar" role="banner" data-pizarra-anchor="viewer-topbar">
     <span class="viewer-bar__brand">MODOS-CPU</span>
 
     <button

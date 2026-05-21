@@ -8,21 +8,20 @@ import { useCpuStore, type CpuEvent } from '../../stores/cpu';
 // WhiteboardCursor renders the owner's pointer as an overlay on viewer
 // clients. Both AppShell (host view, no-op render) and ViewerShell mount it
 // so the underlying cpu WS subscription is active wherever the user lands.
-// The render only paints when both conditions hold: the latest pointer
-// payload exists AND its route matches the viewer's current path. Otherwise
-// rendering is a no-op so the overlay is cheap to keep on screen.
+// The render only paints when the pointer payload exists, its route matches
+// the viewer's current path, and the named anchor exists in the local DOM.
 
 const cpu = useCpuStore();
 const whiteboard = useWhiteboardStore();
 const route = useRoute();
 
-const viewport = ref({ w: 0, h: 0 });
-
-function refreshViewport() {
-  viewport.value = {
-    w: window.innerWidth,
-    h: window.innerHeight,
-  };
+// anchorTick increments whenever the anchor host might have moved or
+// resized (window resize, scroll, route change). It forces the position
+// computed below to re-read getBoundingClientRect — Vue cannot observe
+// layout mutations directly so we drive the re-read with a reactive nonce.
+const anchorTick = ref(0);
+function bumpAnchorTick() {
+  anchorTick.value = (anchorTick.value + 1) & 0xffff;
 }
 
 // Owner identity for the label. Falls back to a generic "Owner" tag when the
@@ -32,24 +31,36 @@ const ownerLabel = computed(() => {
   return name && name.length > 0 ? name : 'Owner';
 });
 
-const visible = computed<boolean>(() => {
+interface Positioned {
+  x: number;
+  y: number;
+}
+
+const positioned = computed<Positioned | null>(() => {
+  // anchorTick.value is read here purely as a reactive dependency so the
+  // computed re-runs after resize/scroll/route changes (see bumpAnchorTick).
+  void anchorTick.value;
   const p = whiteboard.ownerPointer;
-  if (!p) return false;
-  // Only show the cursor when the viewer is currently looking at the same
-  // route the owner is broadcasting from. Cross-route visualization would be
-  // confusing (a cursor floating over the wrong section).
-  if (p.route !== route.path) return false;
-  // If the viewer is the owner themselves, do not echo back. The role check
-  // is enough — only owners send pointer commands in the first place.
-  if (cpu.sessionInfo.role === 'owner') return false;
-  return true;
+  if (!p) return null;
+  if (p.route !== route.path) return null;
+  if (cpu.sessionInfo.role === 'owner') return null;
+  const host = document.querySelector<HTMLElement>(`[data-pizarra-anchor="${p.anchor}"]`);
+  if (!host) return null;
+  const rect = host.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  return {
+    x: rect.left + p.offsetX * rect.width,
+    y: rect.top + p.offsetY * rect.height,
+  };
 });
 
+const visible = computed<boolean>(() => positioned.value !== null);
+
 const style = computed(() => {
-  const p = whiteboard.ownerPointer;
-  if (!p) return undefined;
+  const pos = positioned.value;
+  if (!pos) return undefined;
   return {
-    transform: `translate(${p.x * viewport.value.w}px, ${p.y * viewport.value.h}px)`,
+    transform: `translate(${pos.x}px, ${pos.y}px)`,
   } as Record<string, string>;
 });
 
@@ -60,8 +71,11 @@ const style = computed(() => {
 let unsubscribe: () => void = () => { /* placeholder */ };
 
 onMounted(() => {
-  refreshViewport();
-  window.addEventListener('resize', refreshViewport);
+  window.addEventListener('resize', bumpAnchorTick);
+  // Scroll inside any internal panel can move an anchor; capturing is needed
+  // because individual panels scroll, not the window. The listener is cheap
+  // (only bumps a counter) so the overhead is negligible.
+  window.addEventListener('scroll', bumpAnchorTick, true);
   unsubscribe = cpu.subscribe((ev: CpuEvent) => {
     if (ev.type === 'owner_pointer') {
       whiteboard.setOwnerPointer(ev);
@@ -70,7 +84,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', refreshViewport);
+  window.removeEventListener('resize', bumpAnchorTick);
+  window.removeEventListener('scroll', bumpAnchorTick, true);
   unsubscribe();
   whiteboard.reset();
 });

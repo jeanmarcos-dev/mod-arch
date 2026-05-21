@@ -31,7 +31,7 @@ function isActive(to: string): boolean {
 </script>
 
 <template>
-  <aside class="sidebar" :class="{ 'sidebar--collapsed': collapsed }">
+  <aside class="sidebar" :class="{ 'sidebar--collapsed': collapsed }" data-pizarra-anchor="sidebar">
     <nav class="sidebar__nav" aria-label="Navegación principal">
       <template v-for="(item, idx) in items" :key="item.to">
         <div

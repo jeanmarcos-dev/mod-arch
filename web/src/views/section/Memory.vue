@@ -248,7 +248,7 @@ cpu.subscribe((ev) => {
 </script>
 
 <template>
-  <div class="memory-page">
+  <div class="memory-page" data-pizarra-anchor="view-memoria">
     <ByteFlightNarrator class="memory-page__overlay" />
 
     <header class="memory-page__head">

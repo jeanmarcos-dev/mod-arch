@@ -35,7 +35,7 @@ export type CpuEvent =
   | { type: 'session_info'; id: string; mode: string; role: string; label: string; view_token: string; user_id?: string; user_name?: string; user_email?: string; presence?: { section: string; cores: number[]; mode?: string; narrators?: boolean } }
   | { type: 'presence'; section: string; cores: number[]; mode?: string; narrators?: boolean; at?: number }
   | { type: 'hand_raise'; label: string; at?: number }
-  | { type: 'owner_pointer'; x?: number; y?: number; route?: string; ts?: number; off?: boolean }
+  | { type: 'owner_pointer'; anchor?: string; offset_x?: number; offset_y?: number; route?: string; ts?: number; off?: boolean }
   | { type: 'error'; message: string };
 
 export interface CoreInfo {
@@ -955,12 +955,13 @@ export const useCpuStore = defineStore('cpu', () => {
     send({ cmd: 'hand_raise' });
   }
 
-  // Owner-only: broadcast the local pointer to every viewer. x, y are
-  // already normalized to [0, 1] by the caller; the server rejects anything
-  // outside that range so a buggy throttle cannot move cursors off-screen.
-  function sendPointer(x: number, y: number, routePath: string) {
+  // Owner-only: broadcast the local pointer to every viewer. Coordinates are
+  // DOM-anchored — the caller resolves the [data-pizarra-anchor] element
+  // under the mouse and emits {anchor, offsetX, offsetY} normalized to that
+  // element. The server validates anchor shape and offset range.
+  function sendPointer(anchor: string, offsetX: number, offsetY: number, routePath: string) {
     if (sessionInfo.value.role !== 'owner') return;
-    send({ cmd: 'pointer', x, y, route: routePath });
+    send({ cmd: 'pointer', anchor, offset_x: offsetX, offset_y: offsetY, route: routePath });
   }
   function sendPointerOff() {
     if (sessionInfo.value.role !== 'owner') return;
