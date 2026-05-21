@@ -18,6 +18,7 @@ import ViewerTopBar from '../components/shell/ViewerTopBar.vue';
 import SimStatusRow from '../components/shell/SimStatusRow.vue';
 import ConnectionBanner from '../components/shell/ConnectionBanner.vue';
 import GlossaryModal from '../components/GlossaryModal.vue';
+import WhiteboardCursor from '../components/whiteboard/WhiteboardCursor.vue';
 
 const cpu = useCpuStore();
 const viewer = useViewerStore();
@@ -164,6 +165,8 @@ watch(() => cpu.glossaryOpenSignal, (n, prev) => {
       :initial-search="cpu.glossarySearch"
       @close="glossaryOpen = false"
     />
+
+    <WhiteboardCursor />
   </div>
 </template>
 

@@ -6,10 +6,11 @@ import { useWhiteboardStore } from '../../stores/whiteboard';
 import { useCpuStore, type CpuEvent } from '../../stores/cpu';
 
 // WhiteboardCursor renders the owner's pointer as an overlay on viewer
-// clients. The component is permanently mounted by AppShell but only paints
-// when both conditions hold: the latest pointer payload exists AND its route
-// matches the viewer's current path. Otherwise rendering is a no-op so the
-// overlay is cheap to keep on screen.
+// clients. Both AppShell (host view, no-op render) and ViewerShell mount it
+// so the underlying cpu WS subscription is active wherever the user lands.
+// The render only paints when both conditions hold: the latest pointer
+// payload exists AND its route matches the viewer's current path. Otherwise
+// rendering is a no-op so the overlay is cheap to keep on screen.
 
 const cpu = useCpuStore();
 const whiteboard = useWhiteboardStore();
