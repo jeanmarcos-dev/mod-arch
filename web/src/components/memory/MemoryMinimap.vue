@@ -188,10 +188,14 @@ function tipAge(t0: number): string {
 
 .minimap__head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-3);
   font-size: 10px;
   letter-spacing: 1px;
+  /* Pin the header to the height of the largest variant (the hover tip
+     with its border + padding) so the layout never jumps when the user
+     mouses over the track. */
+  min-height: 22px;
   color: var(--text-muted);
   text-transform: uppercase;
 }
@@ -213,8 +217,15 @@ function tipAge(t0: number): string {
   font-size: 10px;
   letter-spacing: 0.5px;
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
+  /* Equal box on every state so the head row never resizes when one
+     variant swaps with another. */
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  box-sizing: border-box;
 }
 .minimap__hover-addr code,
 .minimap__hover-tip code {
@@ -224,9 +235,7 @@ function tipAge(t0: number): string {
 }
 .minimap__hover-tip {
   color: var(--core-color, var(--amber));
-  border: 1px solid color-mix(in oklab, var(--core-color) 60%, transparent);
-  padding: 1px 6px;
-  border-radius: var(--radius-sm);
+  border-color: color-mix(in oklab, var(--core-color) 60%, transparent);
   background: color-mix(in oklab, var(--core-color) 10%, transparent);
 }
 .minimap__hover-tip code { color: var(--core-color); }

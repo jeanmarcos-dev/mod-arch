@@ -252,6 +252,34 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     short: 'El kernel le saca el CPU al proceso aunque no haya querido cederlo.',
     detail: 'En preemptive multitasking, el timer fuerza el switch. Lo opuesto es "cooperative" donde el proceso debe ceder voluntariamente (yield) — riesgoso, un loop infinito cuelga el sistema.',
   },
+  {
+    term: 'Turnaround',
+    category: 'Scheduler',
+    short: 'Tiempo total desde que el proceso entra hasta que termina (ZOMBIE).',
+    detail: 'TAT = endedAtTick − createdAtTick. Mide la latencia total que percibe el usuario para que su trabajo se complete. Un buen scheduler tiende a minimizar el TAT promedio sin sacrificar la equidad entre procesos. En el panel se ve "—" mientras el proceso siga vivo.',
+    aliases: ['TAT', 'turnaround time', 'tiempo de retorno'],
+  },
+  {
+    term: 'Waiting time',
+    category: 'Scheduler',
+    short: 'Suma de ticks que el proceso pasó en la cola READY sin ejecutar.',
+    detail: 'WT = totalReadyTicks. No incluye el tiempo en BLOCKED (eso es espera por recurso, no por CPU). Con Round-Robin, WT crece proporcional a la cantidad de procesos que compiten por el CPU. Es la métrica más usada para juzgar fairness entre procesos.',
+    aliases: ['WT', 'tiempo de espera'],
+  },
+  {
+    term: 'Response time',
+    category: 'Scheduler',
+    short: 'Ticks entre la creación del proceso y la primera vez que recibe CPU.',
+    detail: 'RT = firstRunAtTick − createdAtTick. Importante en sistemas interactivos: si un comando tarda 200 ms en empezar a ejecutarse, el usuario lo percibe lento aunque el TAT sea bueno. En Round-Robin el RT está acotado por (N−1)·quantum donde N es la cantidad de procesos READY.',
+    aliases: ['RT', 'tiempo de respuesta'],
+  },
+  {
+    term: 'Throughput',
+    category: 'Scheduler',
+    short: 'Procesos terminados por unidad de tiempo.',
+    detail: 'Throughput = procesos_ZOMBIE / tiempo_transcurrido. Acá lo expresamos como "procs por cada 1000 ticks" para que la escala sea legible. Sube cuando el scheduler logra que los procesos cortos terminen rápido; cae si hay mucho overhead de context switches (quantum demasiado chico) o muchos bloqueos.',
+    aliases: ['rendimiento'],
+  },
 
   // ─── Concurrencia y sincronización ──────────────────────────────────────
   {

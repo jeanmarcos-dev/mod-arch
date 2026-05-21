@@ -20,6 +20,10 @@ const props = defineProps<{
   visibleCoreIds: Set<number>;
 }>();
 
+const emit = defineEmits<{
+  (e: 'jump', addr: number): void;
+}>();
+
 // Feed shows only events from cores currently visible per the SimBar
 // filter. Hiding a core in the SimBar makes its events disappear here too,
 // matching the rest of the UI.
@@ -59,6 +63,9 @@ function styleFor(coreId: number) {
         :key="e.id"
         :class="['feed-row', `feed-row--${e.kind}`]"
         :style="{ ...styleFor(e.coreId), opacity: Math.max(0.45, 1 - ageOf(e.ts) / 5000) }"
+        role="button"
+        :title="`Saltar a ${fmtAddr(e.addr)}`"
+        @click="emit('jump', e.addr)"
       >
         <span class="feed-row__tag">[C{{ e.coreId }}/P{{ e.pid || '—' }}]</span>
         <span class="feed-row__kind">{{ e.kind === 'write' ? '◣ W' : '◤ R' }}</span>
@@ -113,7 +120,12 @@ function styleFor(coreId: number) {
   border-left: 2px solid var(--core-color, var(--amber));
   background: var(--surface-2);
   color: var(--core-color, var(--amber));
-  transition: opacity var(--transition-base);
+  cursor: pointer;
+  transition: opacity var(--transition-base), background var(--transition-fast);
+}
+
+.feed-row:hover {
+  background: color-mix(in oklab, var(--core-color, var(--amber)) 14%, var(--surface-2));
 }
 
 .feed-row__tag {

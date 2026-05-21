@@ -23,6 +23,11 @@ const props = defineProps<{
   lastReadByAddr: Map<number, HeatEntry>;
   lastWriteByAddr: Map<number, HeatEntry>;
   errorMessage?: string;
+  /** Absolute address whose row should pulse to confirm a jump. */
+  highlightedAddr?: number | null;
+  /** Monotonic counter — bumps on every new highlight so the CSS animation
+   *  restarts even when the user jumps to the same row twice in a row. */
+  highlightSeq?: number;
 }>();
 
 const emit = defineEmits<{
@@ -147,6 +152,11 @@ function cellHeatStyle(addr: number): Record<string, string> {
   return { '--core-color': coreColorVar(h.coreId) };
 }
 
+function isRowHighlighted(rowAddr: number): boolean {
+  if (props.highlightedAddr === null || props.highlightedAddr === undefined) return false;
+  return props.highlightedAddr >= rowAddr && props.highlightedAddr < rowAddr + 16;
+}
+
 function ageLabel(t0: number | undefined): string {
   if (t0 === undefined) return '—';
   const ms = performance.now() - t0;
@@ -200,7 +210,11 @@ function ensureTicker() {
         <span class="hexgrid__addr-h">addr</span>
         <span v-for="c in 16" :key="c" class="hexgrid__col-h">{{ (c - 1).toString(16).toUpperCase() }}</span>
       </div>
-      <div v-for="row in rows" :key="row.addr" class="hexgrid__row">
+      <div
+        v-for="row in rows"
+        :key="`${row.addr}-${isRowHighlighted(row.addr) ? props.highlightSeq : 0}`"
+        :class="['hexgrid__row', { 'hexgrid__row--pulse': isRowHighlighted(row.addr) }]"
+      >
         <span class="hexgrid__addr">{{ fmtAddr(row.addr).slice(2) }}</span>
         <span
           v-for="(byte, idx) in row.cells"
@@ -325,6 +339,42 @@ function ensureTicker() {
   grid-template-columns: 80px repeat(16, 1fr);
   gap: 6px;
   padding: 3px 0;
+  position: relative;
+}
+
+/* Row pulse: fires when the user jumps here via an explicit address click
+   (chip EIP/ESP, feed entry, minimap pin, hex input). Three quick beats
+   plus a fading underline so the eye lands on the right row immediately. */
+.hexgrid__row--pulse {
+  animation: row-pulse 1.6s ease-out;
+}
+
+.hexgrid__row--pulse::after {
+  content: '';
+  position: absolute;
+  inset: -1px -4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--amber);
+  pointer-events: none;
+  animation: row-pulse-border 1.6s ease-out;
+}
+
+@keyframes row-pulse {
+  0%   { background: rgba(255, 181, 71, 0.35); }
+  25%  { background: rgba(255, 181, 71, 0.18); }
+  50%  { background: rgba(255, 181, 71, 0.28); }
+  100% { background: transparent; }
+}
+
+@keyframes row-pulse-border {
+  0%   { opacity: 1; box-shadow: 0 0 12px rgba(255, 181, 71, 0.6); }
+  100% { opacity: 0; box-shadow: 0 0 0 rgba(255, 181, 71, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hexgrid__row--pulse,
+  .hexgrid__row--pulse::after { animation: none; }
+  .hexgrid__row--pulse::after { display: none; }
 }
 
 .hexgrid__addr {

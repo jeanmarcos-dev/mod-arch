@@ -140,13 +140,20 @@ function deactivate() {
   color: var(--text-dim);
   width: 28px;
   height: 28px;
+  /* Reset global button defaults that crowd out the SVG: padding eats the
+     16px icon inside a 28px box, and min-height bloats the height. */
+  padding: 0;
+  min-height: 0;
   cursor: pointer;
   font-size: 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-sm);
+  flex-shrink: 0;
 }
+
+.close-btn svg { display: block; }
 
 .close-btn:hover {
   color: var(--red-soft);

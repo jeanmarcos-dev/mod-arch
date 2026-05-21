@@ -225,6 +225,7 @@ const filtered = computed<T[]>(() => {
   font-weight: 500;
   border-bottom: 1px solid var(--border);
   user-select: none;
+  white-space: nowrap;
 }
 
 .dtable__th--right { text-align: right; }

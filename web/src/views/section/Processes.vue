@@ -5,9 +5,19 @@ import { useCpuStore, type CpuEvent, type PCBInfo } from '../../stores/cpu';
 import { usePreferencesStore } from '../../stores/preferences';
 import PCBCopyNarrator from '../../components/narrators/PCBCopyNarrator.vue';
 import Term from '../../components/glossary/Term.vue';
+// Scheduler-metrics widgets used in the template. vue-tsc's unused-locals
+// pass does not detect template references, so we void-reference the
+// component imports here to keep them registered without the warning.
+import QuantumBarGraph from '../../components/processes/QuantumBarGraph.vue';
+import SchedMetricsTable from '../../components/processes/SchedMetricsTable.vue';
+import QuantumTimeline from '../../components/processes/QuantumTimeline.vue';
+import { useSchedulerMetrics } from '../../composables/useSchedulerMetrics';
+void QuantumBarGraph; void SchedMetricsTable; void QuantumTimeline;
 
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
+
+const sched = useSchedulerMetrics();
 
 // Sorted PCBs so the layout never jumps when state changes.
 const sortedProcs = computed<PCBInfo[]>(() => [...cpu.procs].sort((a, b) => a.pid - b.pid));
@@ -54,6 +64,7 @@ interface SwitchRow {
   id: number;
   fromPid: number;
   toPid: number;
+  reason: string;
   ts: number;
   ready: number[];
 }
@@ -68,6 +79,7 @@ const unsubscribe = cpu.subscribe((ev: CpuEvent) => {
       id: nextId++,
       fromPid: ev.from_pid,
       toPid: ev.to_pid,
+      reason: ev.reason ?? '',
       ts: Date.now(),
       // ready_queue serializes as null when the queue is empty; guard so the
       // spread does not crash with TypeError.
@@ -236,6 +248,7 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
               <span class="ctx-feed__pid">P{{ s.fromPid }}</span>
               <span class="ctx-feed__arrow">→</span>
               <span class="ctx-feed__pid ctx-feed__pid--to">P{{ s.toPid }}</span>
+              <span v-if="s.reason" class="ctx-feed__reason">· por {{ s.reason }}</span>
               <span class="ctx-feed__ready">ready=[{{ s.ready.join(',') || '∅' }}]</span>
               <span class="ctx-feed__time">{{ timeAgo(s.ts) }}</span>
             </li>
@@ -243,13 +256,38 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
         </section>
       </div>
 
-      <section class="procs-page__upcoming">
-        <h4>Próximamente en esta sección</h4>
-        <ul>
-          <li>Grafo del scheduler con los quantums consumidos por proceso</li>
-          <li>Métricas: turnaround, waiting time, throughput por demo</li>
-          <li>Timeline horizontal de los últimos quantums con barras por PID</li>
-        </ul>
+      <section class="procs-page__panel">
+        <header class="procs-page__panel-head">
+          <h3><Term term="Round-Robin (RR)" mode="title">Métricas del scheduler</Term></h3>
+          <span class="procs-page__panel-hint">demo actual · ticks simulados</span>
+        </header>
+        <SchedMetricsTable
+          :metrics="sched.metrics"
+          :throughput-per-k-tick="sched.throughputPerKTick.value"
+          :quantum-ms-hint="sched.quantumMsHint.value"
+          :hz-sim="sched.hzSim"
+        />
+      </section>
+
+      <section class="procs-page__panel">
+        <header class="procs-page__panel-head">
+          <h3><Term term="Quantum" mode="title">Quantums por proceso</Term></h3>
+          <span class="procs-page__panel-hint">color: completos · rayado: parciales</span>
+        </header>
+        <QuantumBarGraph :metrics="sched.metrics" />
+      </section>
+
+      <section class="procs-page__panel">
+        <header class="procs-page__panel-head">
+          <h3><Term term="Context switch" mode="title">Timeline de quantums</Term></h3>
+          <span class="procs-page__panel-hint">últimos 200 ticks · una banda por core visible</span>
+        </header>
+        <QuantumTimeline
+          :metrics="sched.metrics"
+          :current-tick-rel="sched.currentTickRel.value"
+          :visible-core-ids="visibleCores.map(c => c.id)"
+          :timer-quantum="cpu.timerQuantum"
+        />
       </section>
     </div>
   </div>
@@ -619,7 +657,7 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
 
 .ctx-feed__row {
   display: grid;
-  grid-template-columns: auto auto auto 1fr auto;
+  grid-template-columns: auto auto auto auto 1fr auto;
   align-items: center;
   gap: var(--space-2);
   font-family: 'JetBrains Mono', monospace;
@@ -637,6 +675,12 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
 
 .ctx-feed__arrow { color: var(--text-dim); }
 
+.ctx-feed__reason {
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 10px;
+}
+
 .ctx-feed__ready {
   color: var(--text-dim);
   font-size: 10px;
@@ -646,42 +690,5 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
   color: var(--text-dim);
   font-size: 10px;
   text-align: right;
-}
-
-.procs-page__upcoming {
-  border-top: 1px dashed var(--border);
-  padding-top: var(--space-4);
-  font-size: 12px;
-  color: var(--text-dim);
-}
-
-.procs-page__upcoming h4 {
-  font-family: 'Major Mono Display', monospace;
-  font-size: 11px;
-  letter-spacing: 2px;
-  color: var(--amber);
-  text-transform: uppercase;
-  font-weight: normal;
-  margin-bottom: var(--space-2);
-}
-
-.procs-page__upcoming ul {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding-left: var(--space-4);
-}
-
-.procs-page__upcoming li {
-  position: relative;
-  line-height: 1.5;
-}
-
-.procs-page__upcoming li::before {
-  content: '›';
-  position: absolute;
-  left: -14px;
-  color: var(--amber);
 }
 </style>

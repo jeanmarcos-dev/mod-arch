@@ -101,6 +101,11 @@ defineEmits<{ (e: 'click', ev: MouseEvent): void }>();
   box-shadow: none;
 }
 
+.btn__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
 .btn--loading .btn__label { opacity: 0.6; }
 .btn__spinner {
   animation: btn-blink 0.9s steps(2, jump-none) infinite;

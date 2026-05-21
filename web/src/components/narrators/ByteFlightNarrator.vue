@@ -18,6 +18,7 @@ interface Flight {
   toY: number;
   label: string;
   kind: 'write' | 'read';
+  coreId: number;
   born: number;
 }
 
@@ -75,9 +76,15 @@ function launch(kind: 'write' | 'read', addr: number, value: number, seq: number
   // Drop bytes from cores the user is filtering out — keeps the animation
   // surface aligned with the rest of the UI.
   if (!cpu.isCoreVisible(coreId)) return;
-  const from = rectCenter(sourceFor(coreId));
-  const to = rectCenter(props.target ? props.target(addr) : defaultTarget(addr));
-  if (!from || !to) return;
+  const chipCenter = rectCenter(sourceFor(coreId));
+  const cellCenter = rectCenter(props.target ? props.target(addr) : defaultTarget(addr));
+  if (!chipCenter || !cellCenter) return;
+
+  // Direction is semantic: write moves data CPU → memory, read moves data
+  // memory → CPU. Swapping endpoints for reads makes the demo match the
+  // mental model students learn (arrows follow the data).
+  const from = kind === 'write' ? chipCenter : cellCenter;
+  const to   = kind === 'write' ? cellCenter : chipCenter;
 
   // Slow the flight down in pedagogic and projector modes so the audience
   // can actually trace it.
@@ -95,8 +102,9 @@ function launch(kind: 'write' | 'read', addr: number, value: number, seq: number
     fromY: from.y,
     toX: to.x,
     toY: to.y,
-    label: '0x' + (value & 0xff).toString(16).toUpperCase().padStart(2, '0'),
+    label: (kind === 'write' ? 'W ' : 'R ') + '0x' + (value & 0xff).toString(16).toUpperCase().padStart(2, '0'),
     kind,
+    coreId,
     born: performance.now(),
   });
 
@@ -147,7 +155,7 @@ onUnmounted(() => {
           :x2="f.toX"
           :y2="f.toY"
           marker-end="url(#bf-head)"
-          :style="{ '--ttl': `${props.ttlMs / prefs.animationSpeed}ms` }"
+          :style="{ '--ttl': `${props.ttlMs / prefs.animationSpeed}ms`, '--core-color': `var(--core-${f.coreId % 4})` }"
         />
       </template>
     </svg>
@@ -162,6 +170,7 @@ onUnmounted(() => {
         '--to-x': `${f.toX}px`,
         '--to-y': `${f.toY}px`,
         '--ttl': `${props.ttlMs / prefs.animationSpeed}ms`,
+        '--core-color': `var(--core-${f.coreId % 4})`,
       }"
     >
       {{ f.label }}
@@ -188,20 +197,21 @@ onUnmounted(() => {
 .byte-flight__trail {
   stroke-width: 1.5;
   fill: none;
-  stroke-dasharray: 4 3;
   animation: bf-trail var(--ttl) linear forwards;
+  stroke: var(--core-color, var(--amber));
+  color: var(--core-color, var(--amber));
+  filter: drop-shadow(0 0 4px color-mix(in oklab, var(--core-color, var(--amber)) 70%, transparent));
 }
 
+/* Writes look solid (data is being placed). Reads look dashed (the byte is
+   being grabbed and pulled back to the chip). Same color: the core that
+   issued the access. */
 .byte-flight__trail--write {
-  stroke: var(--amber);
-  color: var(--amber);
-  filter: drop-shadow(0 0 4px rgba(255, 179, 71, 0.7));
+  stroke-dasharray: none;
 }
 
 .byte-flight__trail--read {
-  stroke: var(--cyan);
-  color: var(--cyan);
-  filter: drop-shadow(0 0 4px rgba(106, 212, 255, 0.6));
+  stroke-dasharray: 4 3;
 }
 
 @keyframes bf-trail {
@@ -223,16 +233,16 @@ onUnmounted(() => {
   background: var(--surface-2);
   white-space: nowrap;
   animation: bf-fly var(--ttl) cubic-bezier(0.25, 0.5, 0.25, 1) forwards;
+  color: var(--core-color, var(--amber));
+  box-shadow: 0 0 12px color-mix(in oklab, var(--core-color, var(--amber)) 50%, transparent);
 }
 
-.byte-flight__byte--write {
-  color: var(--amber);
-  box-shadow: var(--shadow-glow-amber);
-}
-
+/* Reads carry a dashed border to mirror the dashed line that connects them
+   to the CPU, so the W/R distinction is visible at a glance without
+   needing the W/R prefix in the label (kept anyway as redundancy). */
 .byte-flight__byte--read {
-  color: var(--cyan);
-  box-shadow: 0 0 12px rgba(106, 212, 255, 0.5);
+  border-style: dashed;
+  background: color-mix(in oklab, var(--surface-2) 80%, transparent);
 }
 
 @keyframes bf-fly {

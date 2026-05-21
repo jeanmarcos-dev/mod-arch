@@ -5,6 +5,7 @@ import { usePreferencesStore } from '../../stores/preferences';
 import { useNarrators, type MemWrite, type MemRead } from '../../lib/narratorBus';
 import ByteFlightNarrator from '../../components/narrators/ByteFlightNarrator.vue';
 import Term from '../../components/glossary/Term.vue';
+import { Target, Pin as PinIcon } from '@lucide/vue';
 import MemoryMinimap, { type Pin } from '../../components/memory/MemoryMinimap.vue';
 import MemoryCoreChip from '../../components/memory/MemoryCoreChip.vue';
 import MemoryHexGrid, { type HeatEntry } from '../../components/memory/MemoryHexGrid.vue';
@@ -192,6 +193,22 @@ function scrollBy(delta: number) {
   jumpTo(baseAddr.value + delta);
 }
 
+// Highlight pulse on the row holding the jumped-to byte. Used for explicit
+// user actions on a *specific* address (chip EIP/ESP, feed entry, minimap
+// pin, hex input). Bulk jumps (presets, autofocus, region buttons) skip
+// the pulse to avoid visual noise.
+const highlightedAddr = ref<number | null>(null);
+const highlightSeq = ref(0);
+let highlightTimer = 0;
+
+function jumpToAndHighlight(addr: number) {
+  jumpTo(addr);
+  highlightedAddr.value = clampAddr(addr);
+  highlightSeq.value++;
+  if (highlightTimer) window.clearTimeout(highlightTimer);
+  highlightTimer = window.setTimeout(() => { highlightedAddr.value = null; }, 1700);
+}
+
 // Quick shortcuts left over from the previous design — kept as a small row
 // below the address input. "Stack" is dynamic so a stack-heavy demo keeps
 // ESP visible without manual scrolling.
@@ -217,7 +234,7 @@ function commitInput() {
     return;
   }
   inputError.value = false;
-  jumpTo(n);
+  jumpToAndHighlight(n);
 }
 
 watch(inputAddr, () => { inputError.value = false; });
@@ -250,7 +267,7 @@ cpu.subscribe((ev) => {
         :base-addr="baseAddr"
         :wnd-size="WND_SIZE"
         :pins="pins"
-        @jump="jumpTo"
+        @jump="jumpToAndHighlight"
       />
 
       <div class="memory-page__nav">
@@ -279,10 +296,13 @@ cpu.subscribe((ev) => {
             type="button"
             :class="['memory-page__follow', { 'memory-page__follow--on': autoFollow }]"
             :title="autoFollow
-              ? 'La ventana sigue la actividad reciente. Click para fijarla.'
-              : 'Activar: la ventana se centra automáticamente sobre cada write/read fuera de pantalla.'"
+              ? 'Autofoco activo — la ventana de memoria salta sola al lugar donde el simulador escribe o lee. Toque para fijarla.'
+              : 'Autofoco — toque para que la ventana de memoria salte sola al lugar donde el simulador escribe o lee.'"
             @click="autoFollow = !autoFollow"
-          >{{ autoFollow ? '◉ seguir' : '○ seguir' }}</button>
+          >
+            <component :is="autoFollow ? Target : PinIcon" :size="13" :stroke-width="2" />
+            <span>Autofoco</span>
+          </button>
         </div>
       </div>
     </header>
@@ -304,7 +324,7 @@ cpu.subscribe((ev) => {
           :selected="c.id === cpu.selectedCoreId"
           :hidden-by-filter="!cpu.isCoreVisible(c.id)"
           @select="cpu.setSelectedCore"
-          @jump="jumpTo"
+          @jump="jumpToAndHighlight"
         />
       </aside>
 
@@ -317,6 +337,8 @@ cpu.subscribe((ev) => {
         :last-read-by-addr="lastReadByAddr"
         :last-write-by-addr="lastWriteByAddr"
         :error-message="fetchError"
+        :highlighted-addr="highlightedAddr"
+        :highlight-seq="highlightSeq"
         @scroll-by="scrollBy"
       />
 
@@ -325,6 +347,7 @@ cpu.subscribe((ev) => {
         :entries="feed"
         :num-cores="cpu.numCores"
         :visible-core-ids="cpu.selectedCoreIds"
+        @jump="jumpToAndHighlight"
       />
     </div>
   </div>
@@ -467,12 +490,36 @@ cpu.subscribe((ev) => {
 .memory-page__presets button:hover { background: rgba(255, 179, 71, 0.10); color: var(--amber); }
 
 .memory-page__follow {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 4px;
   border-left: 1px dashed var(--border-strong) !important;
 }
+.memory-page__follow svg { display: block; }
 .memory-page__follow--on {
-  background: color-mix(in oklab, var(--amber) 18%, transparent);
+  background: color-mix(in oklab, var(--amber) 22%, transparent);
   color: var(--amber);
   text-shadow: var(--shadow-glow-amber);
+}
+.memory-page__follow--on svg {
+  filter: drop-shadow(0 0 4px var(--amber));
+  animation: autofocus-pulse 1.4s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes autofocus-pulse {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 3px var(--amber));
+  }
+  50% {
+    transform: scale(1.18);
+    filter: drop-shadow(0 0 9px var(--amber));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .memory-page__follow--on svg { animation: none; }
 }
 
 .memory-page__hint {

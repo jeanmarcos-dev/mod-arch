@@ -97,6 +97,28 @@ function timeAgo(ts: number): string {
   return `${Math.floor(diff / 60_000)}m`;
 }
 
+function hex(n: number, width = 8): string {
+  return '0x' + (n >>> 0).toString(16).toUpperCase().padStart(width, '0');
+}
+
+// Last handler entry for an IDT row, respecting the SimBar core filter: when
+// the core that fired the vector is hidden the cell stays empty so the table
+// stops reflecting invisible activity.
+function handlerHitForRow(r: IDTRow) {
+  const hit = cpu.lastFiredHandlerByVector[r.vec];
+  if (!hit) return null;
+  if (!cpu.isCoreVisible(hit.coreId)) return null;
+  return hit;
+}
+
+// Cores currently shown in the SimBar filter. The stack-frame grid uses this
+// to mount one card per visible core in a stable order.
+const visibleCores = computed(() => cpu.cores.filter(c => cpu.isCoreVisible(c.id)));
+
+function activeFrame(coreId: number) {
+  return cpu.activeFrameByCore[coreId] ?? null;
+}
+
 const narratorHint = computed(() =>
   prefs.narratorsEnabled
     ? null
@@ -115,29 +137,12 @@ const narratorHint = computed(() =>
           :class="['ints-page__mode-chip', `ints-page__mode-chip--${modeKey}`]"
           data-narrator-anchor="cpu"
         >
-          <span class="ints-page__mode-caption">
-            {{ cpu.numCores > 1 ? `CORE C${cpu.selectedCoreId} en` : 'CPU en' }}
-          </span>
+          <span class="ints-page__mode-caption">CPU en</span>
           <Term
             :term="cpu.mode === 3 ? 'USER MODE (PL3)' : 'KERNEL MODE (PL0)'"
             mode="label"
             class="ints-page__mode-value"
           >{{ modeLabel }}</Term>
-          <div v-if="cpu.numCores > 1" class="ints-page__core-strip" role="group" aria-label="Filtro de núcleos visibles">
-            <button
-              v-for="c in cpu.cores"
-              :key="`core-${c.id}`"
-              type="button"
-              :aria-pressed="cpu.isCoreVisible(c.id)"
-              :class="['ints-page__core-pill', `ints-page__core-pill--${c.mode === 3 ? 'user' : 'kernel'}`, {
-                'ints-page__core-pill--active': cpu.isCoreVisible(c.id),
-                'ints-page__core-pill--focus': c.id === cpu.selectedCoreId && cpu.isCoreVisible(c.id),
-              }]"
-              :title="`C${c.id} · ${c.mode === 3 ? 'USER' : 'KERNEL'}${c.current_pid ? ' · P' + c.current_pid : ' · ocioso'} — click para mostrar/ocultar, doble click para enfocar`"
-              @click="cpu.toggleCoreSelection(c.id)"
-              @dblclick="cpu.selectOnlyCore(c.id)"
-            >C{{ c.id }} · {{ c.mode === 3 ? 'U' : 'K' }}</button>
-          </div>
         </div>
         <div class="ints-page__hero-text">
           <h2 class="ints-page__title">
@@ -163,12 +168,14 @@ const narratorHint = computed(() =>
             <h3><Term term="IDT" mode="title">IDT</Term></h3>
             <span class="ints-page__panel-hint">Tabla de descriptores de interrupción</span>
           </header>
+          <div class="ints-page__panel-body">
           <table class="ints-table">
             <thead>
               <tr>
                 <th><Term term="INT N" mode="label">Vec</Term></th>
                 <th>Nombre</th>
                 <th><Term term="IRQ" mode="label">Origen</Term></th>
+                <th>Handler @</th>
                 <th>Último disparo</th>
               </tr>
             </thead>
@@ -188,12 +195,23 @@ const narratorHint = computed(() =>
                     {{ r.source }}
                   </span>
                 </td>
+                <td class="ints-table__handler">
+                  <template v-if="handlerHitForRow(r)">
+                    <code
+                      class="ints-table__handler-addr"
+                      :title="`Salto del CPU a la dirección del handler. Disparado por C${handlerHitForRow(r)!.coreId} hace ${timeAgo(handlerHitForRow(r)!.ts)}.`"
+                    >{{ hex(handlerHitForRow(r)!.handler) }}</code>
+                    <span v-if="cpu.numCores > 1" class="ints-table__handler-core">C{{ handlerHitForRow(r)!.coreId }}</span>
+                  </template>
+                  <span v-else class="ints-table__time">—</span>
+                </td>
                 <td class="ints-table__time">
                   {{ r.lastFired ? timeAgo(r.lastFired) : '—' }}
                 </td>
               </tr>
             </tbody>
           </table>
+          </div>
         </section>
 
         <section class="ints-page__panel">
@@ -204,6 +222,7 @@ const narratorHint = computed(() =>
               <Term term="KERNEL MODE (PL0)">KERNEL</Term> en vivo
             </span>
           </header>
+          <div class="ints-page__panel-body">
           <div v-if="visibleSwitches.length === 0" class="ints-feed__empty">
             {{ switches.length === 0
               ? 'Sin transiciones aún. Avance la simulación con un programa que invoque syscalls.'
@@ -227,16 +246,58 @@ const narratorHint = computed(() =>
               <span class="ints-feed__time">{{ timeAgo(s.ts) }}</span>
             </li>
           </ol>
+          </div>
         </section>
       </div>
 
-      <section class="ints-page__upcoming">
-        <h4>Próximamente en esta sección</h4>
-        <ul>
-          <li>Entradas IDT resaltadas con la dirección del handler al dispararse</li>
-          <li>Stack de retorno mostrando <code>EIP / CS / EFLAGS</code> guardados antes del IRET</li>
-          <li>Animación del IRET reconstruyendo el contexto y volviendo a USER</li>
-        </ul>
+      <section class="ints-page__panel ints-page__stacks">
+        <header class="ints-page__panel-head">
+          <h3><Term term="Interrupt frame" mode="title">Stack de retorno por core</Term></h3>
+          <span class="ints-page__panel-hint">
+            Frame que la CPU pushea al kernel stack al entrar desde
+            <Term term="USER MODE (PL3)">user</Term>.
+            <Term term="IRET" as="code">iret</Term> lo restaura y vuelve a USER.
+          </span>
+        </header>
+        <div class="ints-stacks__grid">
+          <article
+            v-for="c in visibleCores"
+            :key="`stack-${c.id}`"
+            :class="['ints-stack', { 'ints-stack--active': activeFrame(c.id), 'ints-stack--idle': !activeFrame(c.id) }]"
+            :data-irq-stack="`C${c.id}`"
+          >
+            <header class="ints-stack__head">
+              <span class="ints-stack__core">C{{ c.id }}</span>
+              <template v-if="activeFrame(c.id)">
+                <span class="ints-stack__vec">Vector {{ hex(activeFrame(c.id)!.vector, 2) }}</span>
+                <span class="ints-stack__handler" :title="'Dirección del handler al que saltó el CPU.'">handler {{ hex(activeFrame(c.id)!.handler) }}</span>
+              </template>
+              <span v-else class="ints-stack__idle-tag">— sin handler activo —</span>
+            </header>
+            <ol v-if="activeFrame(c.id)" class="ints-stack__rows">
+              <li class="ints-stack__row" data-stack-slot="eip">
+                <span class="ints-stack__esp">ESP+0</span>
+                <Term term="EIP" mode="label" class="ints-stack__name">EIP</Term>
+                <code class="ints-stack__val">{{ hex(activeFrame(c.id)!.savedEIP, 8) }}</code>
+              </li>
+              <li class="ints-stack__row" data-stack-slot="cs">
+                <span class="ints-stack__esp">ESP+4</span>
+                <Term term="CS" mode="label" class="ints-stack__name">CS</Term>
+                <code class="ints-stack__val">{{ hex(activeFrame(c.id)!.savedCS, 4) }}</code>
+              </li>
+              <li class="ints-stack__row" data-stack-slot="eflags">
+                <span class="ints-stack__esp">ESP+8</span>
+                <Term term="EFLAGS" mode="label" class="ints-stack__name">EFLAGS</Term>
+                <code class="ints-stack__val">{{ hex(activeFrame(c.id)!.savedEFLAGS, 8) }}</code>
+              </li>
+            </ol>
+            <div v-else class="ints-stack__empty">
+              El núcleo está en
+              <Term :term="c.mode === 3 ? 'USER MODE (PL3)' : 'KERNEL MODE (PL0)'">{{ c.mode === 3 ? 'USER' : 'KERNEL' }}</Term>;
+              ningún handler corre ahora mismo.
+            </div>
+          </article>
+        </div>
       </section>
     </div>
   </div>
@@ -255,17 +316,22 @@ const narratorHint = computed(() =>
   position: relative;
   z-index: 1;
   flex: 1;
-  overflow-y: auto;
-  padding: var(--space-5);
+  /* Page-level scroll disabled on purpose: the IDT/feed/stack panels each
+     own their internal scroll so the layout never grows past the viewport
+     and the user does not have to chase a frame that just appeared. */
+  overflow: hidden;
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-3);
+  min-height: 0;
 }
 
 .ints-page__hero {
   display: flex;
   align-items: center;
   gap: var(--space-5);
+  flex-shrink: 0;
 }
 
 .ints-page__mode-chip {
@@ -273,8 +339,8 @@ const narratorHint = computed(() =>
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-width: 180px;
-  padding: var(--space-4) var(--space-5);
+  min-width: 160px;
+  padding: var(--space-3) var(--space-4);
   border: 2px solid currentColor;
   border-radius: var(--radius-md);
   background: var(--surface-2);
@@ -300,40 +366,9 @@ const narratorHint = computed(() =>
 }
 
 .ints-page__mode-value {
-  font-size: 28px;
+  font-size: 22px;
   margin-top: var(--space-1);
-  text-shadow: 0 0 12px currentColor;
-}
-
-.ints-page__core-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: var(--space-3);
-  justify-content: center;
-}
-.ints-page__core-pill {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  letter-spacing: 1px;
-  padding: 2px 6px;
-  background: transparent;
-  border: 1px solid currentColor;
-  color: var(--text-muted);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-.ints-page__core-pill--user { color: var(--cyan); }
-.ints-page__core-pill--kernel { color: var(--amber); }
-.ints-page__core-pill--active {
-  background: rgba(255, 179, 71, 0.18);
-  box-shadow: var(--shadow-glow-amber);
-  color: var(--amber);
-}
-.ints-page__core-pill--focus {
-  text-decoration: underline dotted var(--amber);
-  text-underline-offset: 2px;
+  text-shadow: 0 0 10px currentColor;
 }
 
 .ints-page__hero-text {
@@ -379,6 +414,10 @@ const narratorHint = computed(() =>
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-4);
+  /* Grid claims the leftover height so the stack panel sits at the true
+     bottom edge without dancing as the feed grows. */
+  flex: 1;
+  min-height: 0;
 }
 
 @media (max-width: 960px) {
@@ -394,6 +433,8 @@ const narratorHint = computed(() =>
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .ints-page__panel-head {
@@ -402,6 +443,7 @@ const narratorHint = computed(() =>
   justify-content: space-between;
   border-bottom: 1px solid var(--border);
   padding-bottom: var(--space-2);
+  flex-shrink: 0;
 }
 
 .ints-page__panel-head h3 {
@@ -417,6 +459,16 @@ const narratorHint = computed(() =>
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 1px;
+}
+
+/* Each panel's scrollable body. Without this the table and feed simply got
+   clipped by .ints-page__panel's overflow:hidden, so longer-than-the-pane
+   content (256-vector IDT, growing transitions feed) became unreachable. */
+.ints-page__panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .ints-table {
@@ -489,6 +541,11 @@ const narratorHint = computed(() =>
   gap: var(--space-2);
   padding: 0;
   margin: 0;
+  /* The feed scrolls inside its panel: as new transitions land, the page
+     itself never grows past the viewport. */
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .ints-feed__empty {
@@ -496,6 +553,8 @@ const narratorHint = computed(() =>
   color: var(--text-dim);
   font-style: italic;
   padding: var(--space-3);
+  flex: 1;
+  min-height: 0;
 }
 
 .ints-feed__row {
@@ -548,49 +607,152 @@ const narratorHint = computed(() =>
   text-align: right;
 }
 
-.ints-page__upcoming {
-  border-top: 1px dashed var(--border);
-  padding-top: var(--space-4);
-  font-size: 12px;
-  color: var(--text-dim);
-}
-
-.ints-page__upcoming h4 {
-  font-family: 'Major Mono Display', monospace;
+.ints-table__handler {
+  font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
-  letter-spacing: 2px;
-  color: var(--amber);
-  text-transform: uppercase;
-  font-weight: normal;
-  margin-bottom: var(--space-2);
-}
-
-.ints-page__upcoming ul {
-  list-style: none;
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding-left: var(--space-4);
+  align-items: center;
+  gap: var(--space-2);
 }
 
-.ints-page__upcoming li {
-  position: relative;
-  line-height: 1.5;
+.ints-table__handler-addr {
+  color: var(--cyan);
+  background: rgba(106, 212, 255, 0.06);
+  border: 1px solid rgba(106, 212, 255, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
 }
 
-.ints-page__upcoming li::before {
-  content: '›';
-  position: absolute;
-  left: -14px;
+.ints-table__row--active .ints-table__handler-addr {
   color: var(--amber);
+  background: rgba(255, 179, 71, 0.12);
+  border-color: var(--amber);
 }
 
-.ints-page__upcoming code {
-  background: var(--surface-2);
+.ints-table__handler-core {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  padding: 0 5px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 0 4px;
-  font-size: 11px;
-  color: var(--amber);
 }
+
+/* Stack-frame grid: one card per visible core. Cards reserve a fixed
+   height so the layout never jitters between "idle" and "active" — the
+   ESP+0/4/8 slots show up in place instead of stretching the page. */
+.ints-page__stacks {
+  flex-shrink: 0;
+  margin-top: 0;
+}
+
+.ints-stacks__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-3);
+}
+
+.ints-stack {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  /* Calibrated for: head row (~20px) + 3 frame rows (~24px each) + padding.
+     Keeps active/idle cards visually identical so the page never reflows. */
+  min-height: 124px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.ints-stack--active {
+  border-color: var(--amber);
+  box-shadow: var(--shadow-glow-amber);
+  background: rgba(255, 179, 71, 0.04);
+}
+
+.ints-stack--idle {
+  opacity: 0.6;
+}
+
+.ints-stack__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+
+.ints-stack__core {
+  font-weight: 700;
+  color: var(--amber);
+  letter-spacing: 1px;
+}
+
+.ints-stack__vec {
+  color: var(--text);
+}
+
+.ints-stack__handler {
+  color: var(--cyan);
+  font-size: 10px;
+  margin-left: auto;
+}
+
+.ints-stack__idle-tag {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 11px;
+}
+
+.ints-stack__rows {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.ints-stack__row {
+  display: grid;
+  grid-template-columns: 56px 64px 1fr;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.ints-stack__empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+.ints-stack__esp {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+}
+
+.ints-stack__name {
+  color: var(--cyan);
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.ints-stack__val {
+  color: var(--amber);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 </style>

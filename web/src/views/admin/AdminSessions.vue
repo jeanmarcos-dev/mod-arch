@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import { RotateCw, Monitor } from '@lucide/vue';
 import { useAdminStore, type SessionRow } from '../../stores/admin';
 import { useToastStore } from '../../stores/toast';
@@ -9,6 +10,20 @@ import { formatAgo } from './util';
 
 const admin = useAdminStore();
 const toast = useToastStore();
+
+const refreshing = ref(false);
+
+async function doRefresh() {
+  if (refreshing.value) return;
+  refreshing.value = true;
+  try {
+    await admin.refresh();
+  } catch (e) {
+    toast.err(e instanceof Error ? e.message : 'Error al refrescar');
+  } finally {
+    setTimeout(() => { refreshing.value = false; }, 350);
+  }
+}
 
 const columns: Column<SessionRow>[] = [
   { id: 'id', label: 'ID' },
@@ -46,8 +61,8 @@ async function togglePublic(id: string, makePublic: boolean) {
 <template>
   <Card title="Sesiones activas">
     <template #header>
-      <Btn variant="ghost" size="sm" @click="admin.refresh()">
-        <RotateCw :size="13" :stroke-width="2" />
+      <Btn variant="ghost" size="sm" :loading="refreshing" @click="doRefresh">
+        <RotateCw :size="13" :stroke-width="2" :class="{ 'icon--spin': refreshing }" />
         <span>Refrescar</span>
       </Btn>
     </template>
@@ -123,5 +138,12 @@ async function togglePublic(id: string, makePublic: boolean) {
 .pill--private {
   color: var(--text-dim);
   border-color: var(--border);
+}
+
+.icon--spin {
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>

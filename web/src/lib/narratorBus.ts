@@ -47,6 +47,11 @@ export interface IrqFire {
   vector: number;
   source: string;
   coreId: number;
+  // Privilege level the CPU was running at right before the trap. Nested
+  // kernel→kernel IRQs never return through an IRET that flips the mode,
+  // so narrators that pair enter/exit (e.g. InterruptNarrator's enterStacks)
+  // must skip the push for those to stay balanced.
+  fromMode: 'user' | 'kernel';
   seq: number;
 }
 
@@ -165,6 +170,7 @@ export function useNarrators(opts: NarratorOptions = {}) {
           vector: ev.vector,
           source: ev.source,
           coreId: ev.core_id,
+          fromMode: ev.from_mode === 3 ? 'user' : 'kernel',
           seq,
         } satisfies IrqFire);
         break;
