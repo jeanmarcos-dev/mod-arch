@@ -21,6 +21,7 @@ import MobileMenuButton from '../components/shell/MobileMenuButton.vue';
 import GlossaryModal from '../components/GlossaryModal.vue';
 import WhiteboardCursor from '../components/whiteboard/WhiteboardCursor.vue';
 import WhiteboardClickRipple from '../components/whiteboard/WhiteboardClickRipple.vue';
+import WhiteboardFocusPill from '../components/whiteboard/WhiteboardFocusPill.vue';
 
 const cpu = useCpuStore();
 const viewer = useViewerStore();
@@ -175,6 +176,7 @@ watch(() => cpu.glossaryOpenSignal, (n, prev) => {
 
     <WhiteboardCursor />
     <WhiteboardClickRipple />
+    <WhiteboardFocusPill />
   </div>
 </template>
 

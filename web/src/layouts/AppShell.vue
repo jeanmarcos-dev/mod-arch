@@ -24,6 +24,7 @@ import MobileMenuButton from '../components/shell/MobileMenuButton.vue';
 import GlossaryModal from '../components/GlossaryModal.vue';
 import WhiteboardCursor from '../components/whiteboard/WhiteboardCursor.vue';
 import WhiteboardClickRipple from '../components/whiteboard/WhiteboardClickRipple.vue';
+import WhiteboardFocusPill from '../components/whiteboard/WhiteboardFocusPill.vue';
 import ViewerShell from './ViewerShell.vue';
 import { useWhiteboardStore } from '../stores/whiteboard';
 
@@ -260,6 +261,7 @@ onBeforeUnmount(detachPointer);
          to keep mounted (renders nothing until an owner_pointer arrives). -->
     <WhiteboardCursor />
     <WhiteboardClickRipple />
+    <WhiteboardFocusPill />
   </div>
 </template>
 

@@ -173,6 +173,14 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	s.wsWriteLoop(ctx, conn, c)
 
 	sess.Sim.RemoveClient(c)
+	// When the owner walks away without disarming the whiteboard toggle, push
+	// a pointer_off and glossary_hover_off so every viewer drops the overlay
+	// immediately instead of waiting for the 2s/5s staleness timers. Cheap to
+	// emit even when the toggles were never on — viewers ignore the no-op.
+	if role == sessions.RoleOwner {
+		s.handleOwnerPointerOff(sess)
+		s.handleOwnerGlossaryHoverOff(sess)
+	}
 	_ = conn.Close(websocket.StatusNormalClosure, "")
 	s.logger.Info("ws client disconnected", "session", sess.ID, "role", role)
 }
