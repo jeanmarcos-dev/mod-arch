@@ -51,6 +51,19 @@ const (
 	pingEvery    = 30 * time.Second
 )
 
+// simClientRole maps a session role into the sim-layer enum used to tag
+// clients for selective broadcasts (presence to viewers, hand_raise to owner).
+func simClientRole(r sessions.Role) sim.ClientRole {
+	switch r {
+	case sessions.RoleOwner:
+		return sim.RoleOwner
+	case sessions.RoleViewer:
+		return sim.RoleViewer
+	default:
+		return sim.RoleAny
+	}
+}
+
 // Command is the WS message the client sends to the server.
 type Command struct {
 	Cmd     string `json:"cmd"`
@@ -60,6 +73,15 @@ type Command struct {
 	Key     string `json:"key,omitempty"`
 	Alias   string `json:"alias,omitempty"`
 	Cores   int    `json:"cores,omitempty"`
+
+	// Owner-broadcasted presence payload: the section the host is currently
+	// presenting, the visible cores filter, the presentation mode preset and
+	// the narrators toggle. Viewers with autofollow on mirror these to keep
+	// their UI in sync.
+	Section     string `json:"section,omitempty"`
+	VisibleCore []int  `json:"visible_cores,omitempty"`
+	Mode        string `json:"mode,omitempty"`
+	Narrators   *bool  `json:"narrators,omitempty"`
 }
 
 // handleWS resolves the session from cookies and services the WebSocket
@@ -86,7 +108,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c := sim.NewClient()
+	c := sim.NewClient(simClientRole(role))
 	sess.Sim.AddClient(c)
 	s.logger.Info("ws client connected", "session", sess.ID, "role", role)
 
@@ -97,6 +119,15 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
+
+	// Register viewer cancels with the session so a later DeactivateShare
+	// can boot them in bulk. Owners are skipped — they do not get evicted
+	// by share toggles.
+	var viewerID int
+	if role == sessions.RoleViewer {
+		viewerID = sess.AddViewer(cancel)
+		defer sess.RemoveViewer(viewerID)
+	}
 
 	go s.wsReadLoop(ctx, conn, sess, role, c, cancel)
 	s.wsWriteLoop(ctx, conn, c)
@@ -110,7 +141,21 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 // session it belongs to and with which role. Sent on connect and whenever
 // something relevant changes (share toggled, label updated, user logged
 // in/out, etc.).
+//
+// For viewers we also embed the latest presence snapshot so a late-joiner can
+// jump straight to the section the host is presenting without waiting for the
+// next presence broadcast.
 func (s *Server) sessionInfoMessage(sess *sessions.Session, role sessions.Role) map[string]any {
+	pres := sess.Presence()
+	presPayload := map[string]any{
+		"section":   pres.Section,
+		"cores":     pres.Cores,
+		"mode":      pres.Mode,
+		"narrators": pres.Narrators,
+	}
+	if pres.Cores == nil {
+		presPayload["cores"] = []int{}
+	}
 	msg := map[string]any{
 		"type":       "session_info",
 		"id":         sess.ID,
@@ -121,6 +166,7 @@ func (s *Server) sessionInfoMessage(sess *sessions.Session, role sessions.Role) 
 		"user_id":    "",
 		"user_name":  "",
 		"user_email": "",
+		"presence":   presPayload,
 	}
 	uid := sess.UserID()
 	if uid == "" {
@@ -186,9 +232,18 @@ func (s *Server) wsWriteLoop(ctx context.Context, conn *websocket.Conn, c *sim.C
 }
 
 // viewerSafeCommands lists the read-only commands a viewer can issue. Anything
-// else triggers an error and is not executed.
+// else triggers an error and is not executed. hand_raise is viewer-only by
+// design: the owner has no need to "raise the hand" to themselves.
 var viewerSafeCommands = map[string]bool{
-	"snapshot": true,
+	"snapshot":   true,
+	"hand_raise": true,
+}
+
+// ownerOnlyCommands lists commands that only the owner may issue. presence is
+// listed here so a viewer that crafts a fake presence does not overwrite the
+// host's broadcast.
+var ownerOnlyCommands = map[string]bool{
+	"presence": true,
 }
 
 // dispatch routes a Command to the session's Simulator. When role is Viewer,
@@ -204,6 +259,13 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 		}
 		return
 	}
+	if role != sessions.RoleOwner && ownerOnlyCommands[cmd.Cmd] {
+		c.Send <- map[string]any{
+			"type":    "error",
+			"message": "comando reservado al anfitrión de la sesión",
+		}
+		return
+	}
 	switch cmd.Cmd {
 	case "load":
 		if err := sess.Sim.LoadProgram(cmd.Program); err != nil {
@@ -213,6 +275,8 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 		_ = sess.Sim.StepOnce()
 	case "run":
 		sess.Sim.StartRun(cmd.Speed)
+	case "set_speed":
+		sess.Sim.SetSpeed(cmd.Speed)
 	case "pause":
 		sess.Sim.StopRun()
 	case "reset":
@@ -241,7 +305,74 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 		}
 		sess.SetLabel(alias)
 		sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
+	case "presence":
+		s.handlePresence(cmd, sess)
+	case "hand_raise":
+		s.handleHandRaise(sess, role)
 	default:
 		c.Send <- map[string]any{"type": "error", "message": "comando desconocido: " + cmd.Cmd}
 	}
+}
+
+// handlePresence stores the owner's current section + filters + view
+// settings and broadcasts it to every viewer of the session so
+// autofollowing students see the same thing the host is presenting.
+func (s *Server) handlePresence(cmd Command, sess *sessions.Session) {
+	section := strings.TrimSpace(cmd.Section)
+	if section == "" {
+		return
+	}
+	// Normalize the visible cores slice so the payload is deterministic.
+	cores := append([]int(nil), cmd.VisibleCore...)
+	mode := normalizePresentationMode(cmd.Mode)
+	narrators := false
+	if cmd.Narrators != nil {
+		narrators = *cmd.Narrators
+	}
+	now := time.Now()
+	sess.SetPresence(sessions.Presence{
+		Section:   section,
+		Cores:     cores,
+		Mode:      mode,
+		Narrators: narrators,
+		UpdatedAt: now,
+	})
+	if cores == nil {
+		cores = []int{}
+	}
+	sess.Sim.BroadcastTo(map[string]any{
+		"type":      "presence",
+		"section":   section,
+		"cores":     cores,
+		"mode":      mode,
+		"narrators": narrators,
+		"at":        now.Unix(),
+	}, sim.RoleViewer)
+}
+
+// normalizePresentationMode rejects unknown values from the client so a
+// malformed payload cannot drop viewers into an undefined preset. Empty
+// string passes through to mean "keep whatever the viewer had".
+func normalizePresentationMode(m string) string {
+	switch strings.TrimSpace(m) {
+	case "compact", "pedagogic", "projector":
+		return m
+	default:
+		return ""
+	}
+}
+
+// handleHandRaise forwards the viewer's request for attention to the owner
+// only. No-op if the sender is the owner — the gesture only makes sense from
+// a viewer towards their host.
+func (s *Server) handleHandRaise(sess *sessions.Session, role sessions.Role) {
+	if role != sessions.RoleViewer {
+		return
+	}
+	now := time.Now()
+	sess.Sim.BroadcastTo(map[string]any{
+		"type":  "hand_raise",
+		"label": sess.Label(),
+		"at":    now.Unix(),
+	}, sim.RoleOwner)
 }

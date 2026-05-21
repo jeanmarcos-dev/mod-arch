@@ -90,6 +90,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /full", s.handleFull)
 	mux.HandleFunc("GET /v/{token}", s.handleViewer)
 	mux.HandleFunc("POST /v/{token}/auth", s.handleViewerAuth)
+	mux.HandleFunc("POST /v/leave", s.handleViewerLeave)
 	mux.HandleFunc("GET /_assets/{name}", s.handleAsset)
 	s.registerAdminRoutes(mux)
 	s.registerAuthRoutes(mux)
@@ -311,6 +312,14 @@ func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
 		"addr":  addr,
 		"bytes": out,
 	})
+}
+
+// handleViewerLeave clears the viewer cookie so the spectator returns to the
+// landing as a fresh client. The HttpOnly cookie cannot be cleared from JS,
+// hence this endpoint. Idempotent: works even when no cookie is set.
+func (s *Server) handleViewerLeave(w http.ResponseWriter, _ *http.Request) {
+	clearCookie(w, ViewCookie)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleViewer handles /v/{token}: sets the viewer cookie, drops the owner

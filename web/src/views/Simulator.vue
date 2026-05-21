@@ -1,24 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
 import { Cpu, Code2, ListTree, MemoryStick, Boxes, Terminal } from '@lucide/vue';
 import { useCpuStore } from '../stores/cpu';
 import CpuPanel from '../components/CpuPanel.vue';
 import EventsLog from '../components/EventsLog.vue';
 import ProcessesPanel from '../components/ProcessesPanel.vue';
 import ConsolePanel from '../components/ConsolePanel.vue';
-import GlossaryModal from '../components/GlossaryModal.vue';
 import MemoryPanel from '../components/MemoryPanel.vue';
 import CodeAsmSplit from '../components/CodeAsmSplit.vue';
 
 const cpu = useCpuStore();
-const route = useRoute();
-const glossaryOpen = ref(false);
-
-// Only mount the local modal when Simulator is the standalone view (the
-// viewer route /v/:token). Inside AppShell the shell owns the modal and
-// mounting another instance here would open two modals on glossaryOpenSignal.
-const standalone = computed(() => route.path.startsWith('/v/'));
 
 // En desktop hay 3 paneles siempre visibles (CPU izq, middle, Procs der) y el
 // middleTab controla qué panel del centro se ve.
@@ -73,10 +64,6 @@ const visible = computed(() => {
   };
 });
 
-watch(() => cpu.glossaryOpenSignal, () => {
-  glossaryOpen.value = true;
-});
-
 onMounted(() => {
   cpu.connect();
   checkMobile();
@@ -90,12 +77,6 @@ onUnmounted(() => {
 
 <template>
   <div :class="{ shake: cpu.faultShake }" class="root">
-    <!-- Banner que sólo aparece para viewers (read-only). Reafirma a quién está mirando. -->
-    <div v-if="cpu.isViewer()" class="viewer-banner" :title="`Sesión: ${cpu.sessionInfo.id}`">
-      👁 Está viendo la sesión de <strong>{{ cpu.sessionInfo.label || ('Sesión ' + cpu.sessionInfo.id.slice(0, 6)) }}</strong>
-      en modo <strong>solo lectura</strong> — los controles los maneja el propietario
-    </div>
-
     <!-- Tab bar mobile-only — controla todo el layout. Sólo visible <= 768px (CSS) -->
     <nav class="mobile-tabs" :aria-hidden="!isMobile">
       <button :class="{ active: mobileTab === 'cpu' }" @click="mobileTab = 'cpu'" title="Registros del CPU"><Cpu :size="14" :stroke-width="2" /><span>CPU</span></button>
@@ -136,13 +117,6 @@ onUnmounted(() => {
       </div>
       <ProcessesPanel v-show="visible.procs" class="col-right" />
     </main>
-
-    <GlossaryModal
-      v-if="standalone"
-      :open="glossaryOpen"
-      :initial-search="cpu.glossarySearch"
-      @close="glossaryOpen = false"
-    />
 
     <div class="credit" title="Demo de Sistemas Operativos">
       <span class="credit-tag">DEMO_SO · UCV</span>
@@ -246,23 +220,6 @@ onUnmounted(() => {
 
 .shake {
   animation: shake-anim 500ms cubic-bezier(.36,.07,.19,.97) both;
-}
-
-/* Banner viewer — fija pero suave, no compite con la SimBar. */
-.viewer-banner {
-  background: rgba(255, 213, 79, 0.12);
-  border-bottom: 1px solid var(--yellow);
-  color: var(--yellow);
-  padding: 8px 14px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  text-align: center;
-  letter-spacing: 0.5px;
-}
-
-.viewer-banner strong {
-  color: var(--amber);
-  letter-spacing: 1px;
 }
 
 /* Mobile tab bar — oculta en desktop, visible vía media query mobile */

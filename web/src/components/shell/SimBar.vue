@@ -25,6 +25,8 @@ import { useDraggable } from '../../composables/useDraggable';
 import ProgramPicker from '../ProgramPicker.vue';
 import ShareModal from '../ShareModal.vue';
 import Term from '../glossary/Term.vue';
+import SimStatusRow from './SimStatusRow.vue';
+import HandRaiseBadge from './HandRaiseBadge.vue';
 
 const cpu = useCpuStore();
 const auth = useAuthStore();
@@ -43,44 +45,10 @@ function commitAlias() {
   if (v !== cpu.sessionInfo.label) cpu.setAlias(v);
 }
 
-const modeLabel = computed(() => (cpu.mode === 3 ? 'USER' : 'KERNEL'));
-const modeClass = computed(() => (cpu.mode === 3 ? 'sim-pill--user' : 'sim-pill--kernel'));
-
-// How many extra cores (beyond the focus) are visible in the filter. Drives
-// the "+N" badge on the PID pill so the user notices they are looking at a
-// subset of multicore activity.
-const extraVisibleCount = computed(() => Math.max(0, cpu.selectedCoreIds.size - 1));
-
-// One canonical "execution state" chip replaces the two separate HALTED and
-// RUNNING pills that used to pop in and out of the row. The chip is always
-// rendered with a fixed width so the row never reflows.
-const stateLabel = computed(() => {
-  if (cpu.halted) return 'HALT';
-  if (cpu.running) return 'RUN';
-  return 'IDLE';
-});
-const stateClass = computed(() => {
-  if (cpu.halted) return 'sim-pill--halt';
-  if (cpu.running) return 'sim-pill--running';
-  return 'sim-pill--idle';
-});
-// Glossary term that matches the current STATE. Maps the three states to
-// entries that actually exist in the glossary so the tooltip carries real
-// pedagogic content instead of plain native text.
-const stateTerm = computed(() => {
-  if (cpu.halted) return 'HLT';
-  if (cpu.running) return 'RUN';
-  return 'Round-Robin';
-});
 const loggedIn = computed(() => Boolean(cpu.sessionInfo.user_name));
 const viewer = computed(() => cpu.isViewer());
 const canShare = computed(() => (cpu.sessionInfo?.role ?? 'none') === 'owner');
 const isShared = computed(() => Boolean(cpu.sessionInfo?.view_token));
-
-function hex(v: number | undefined): string {
-  if (typeof v !== 'number') return '—';
-  return '0x' + (v >>> 0).toString(16).toUpperCase().padStart(8, '0');
-}
 
 function onLoad() {
   if (!cpu.selectedProgram) return;
@@ -91,9 +59,34 @@ function onClear() {
   cpu.clearLog();
 }
 
+// Both HZ and QUANTUM apply on every keystroke through a small debounce so the
+// backend gets one command per "settled" value instead of one per digit. The
+// 200ms window also feels instant during a class while protecting the WS from
+// a flurry of writes when the student scrubs the spinner.
+const SETTING_DEBOUNCE_MS = 200;
+let hzTimer: number | null = null;
+let qTimer: number | null = null;
+
+function onHz(e: Event) {
+  const v = Number((e.target as HTMLInputElement).value);
+  if (!Number.isFinite(v)) return;
+  const clamped = Math.max(1, Math.min(60, Math.round(v)));
+  if (hzTimer !== null) window.clearTimeout(hzTimer);
+  hzTimer = window.setTimeout(() => {
+    hzTimer = null;
+    cpu.setSpeed(clamped);
+  }, SETTING_DEBOUNCE_MS);
+}
+
 function onQuantum(e: Event) {
   const v = Number((e.target as HTMLInputElement).value);
-  if (Number.isFinite(v)) cpu.setQuantum(v);
+  if (!Number.isFinite(v)) return;
+  const clamped = Math.max(0, Math.min(200, Math.round(v)));
+  if (qTimer !== null) window.clearTimeout(qTimer);
+  qTimer = window.setTimeout(() => {
+    qTimer = null;
+    cpu.setQuantum(clamped);
+  }, SETTING_DEBOUNCE_MS);
 }
 
 function toggleSettings() {
@@ -242,11 +235,12 @@ function dockHeaderDblClick() {
                   type="number"
                   min="1"
                   max="60"
-                  v-model.number="cpu.stepHz"
+                  :value="cpu.stepHz"
                   :disabled="viewer"
                   aria-label="Pasos por segundo en modo RUN"
+                  @input="onHz"
                 />
-                <span class="sim-bar__field-help">Pasos por segundo en RUN</span>
+                <span class="sim-bar__field-help">Pasos por segundo en RUN (se aplica en caliente)</span>
               </label>
               <label class="sim-bar__field">
                 <Term term="Quantum" mode="label" class="sim-bar__field-label">QUANTUM</Term>
@@ -257,7 +251,7 @@ function dockHeaderDblClick() {
                   :value="cpu.timerQuantum"
                   :disabled="viewer"
                   aria-label="Quantum del timer (ticks por proceso)"
-                  @change="onQuantum"
+                  @input="onQuantum"
                 />
                 <span class="sim-bar__field-help">Ticks antes de IRQ 0x20 (0 = apagado)</span>
               </label>
@@ -313,6 +307,8 @@ function dockHeaderDblClick() {
             </button>
           </label>
 
+          <HandRaiseBadge v-if="canShare && isShared" />
+
           <button
             v-if="canShare"
             type="button"
@@ -336,76 +332,7 @@ function dockHeaderDblClick() {
         </div>
       </div>
 
-      <div class="sim-bar__row sim-bar__row--status" aria-label="Estado del CPU">
-        <span
-          v-if="cpu.numCores > 1"
-          class="sim-bar__core-tabs"
-          role="group"
-          aria-label="Filtro de núcleos visibles"
-          title="Marque qué núcleos quiere ver. Doble click sobre un núcleo para enfocarlo en exclusiva."
-        >
-          <button
-            v-for="c in cpu.cores"
-            :key="c.id"
-            type="button"
-            :aria-pressed="cpu.isCoreVisible(c.id)"
-            :class="['sim-bar__core-tab', {
-              'sim-bar__core-tab--active': cpu.isCoreVisible(c.id),
-              'sim-bar__core-tab--focus': c.id === cpu.selectedCoreId && cpu.isCoreVisible(c.id),
-              'sim-bar__core-tab--idle': c.current_pid === 0,
-              'sim-bar__core-tab--halted': c.halted,
-            }]"
-            :title="`Núcleo C${c.id}${c.current_pid ? ' · ejecutando P' + c.current_pid : ' · ocioso'}${c.halted ? ' · HALT' : ''} — click para mostrar/ocultar, doble click para enfocar`"
-            @click="cpu.toggleCoreSelection(c.id)"
-            @dblclick="cpu.selectOnlyCore(c.id)"
-          >C{{ c.id }}</button>
-          <button
-            type="button"
-            class="sim-bar__core-all"
-            :title="cpu.selectedCoreIds.size === cpu.numCores
-              ? `Dejar visible sólo el núcleo enfocado (C${cpu.selectedCoreId})`
-              : 'Mostrar todos los núcleos'"
-            @click="cpu.selectedCoreIds.size === cpu.numCores
-              ? cpu.selectOnlyCore(cpu.selectedCoreId)
-              : cpu.selectAllCores()"
-          >{{ cpu.selectedCoreIds.size === cpu.numCores ? `ONLY C${cpu.selectedCoreId}` : 'ALL' }}</button>
-        </span>
-        <span class="sim-pill sim-pill--pid" :title="extraVisibleCount > 0
-          ? `Foco en C${cpu.selectedCoreId}. Hay ${extraVisibleCount} núcleo${extraVisibleCount === 1 ? '' : 's'} más en el filtro.`
-          : `Proceso actual en C${cpu.selectedCoreId}`">
-          <Term term="PID" mode="label" class="sim-pill__k">PID</Term>
-          <span class="sim-pill__v">{{ cpu.currentPID }}</span>
-          <span v-if="extraVisibleCount > 0" class="sim-pill__extra">+{{ extraVisibleCount }}</span>
-        </span>
-        <span :class="['sim-pill', 'sim-pill--mode', modeClass]">
-          <Term :term="cpu.mode === 3 ? 'USER MODE (PL3)' : 'KERNEL MODE (PL0)'" mode="label" class="sim-pill__k">MODE</Term>
-          <span class="sim-pill__v">{{ modeLabel }}</span>
-        </span>
-        <span class="sim-pill sim-pill--mono sim-pill--reg">
-          <Term term="EIP" mode="label" class="sim-pill__k">EIP</Term>
-          <span class="sim-pill__v">{{ hex(cpu.regs.EIP) }}</span>
-        </span>
-        <span class="sim-pill sim-pill--mono sim-pill--reg">
-          <Term term="EAX" mode="label" class="sim-pill__k">EAX</Term>
-          <span class="sim-pill__v">{{ hex(cpu.regs.EAX) }}</span>
-        </span>
-        <span class="sim-pill sim-pill--mono sim-pill--reg">
-          <Term term="ESP" mode="label" class="sim-pill__k">ESP</Term>
-          <span class="sim-pill__v">{{ hex(cpu.regs.ESP) }}</span>
-        </span>
-        <span class="sim-pill sim-pill--tick">
-          <Term term="IRQ 0x20" mode="label" class="sim-pill__k">TICK</Term>
-          <span class="sim-pill__v">{{ cpu.tick }}</span>
-        </span>
-        <span :class="['sim-pill', 'sim-pill--state', stateClass]">
-          <Term :term="stateTerm" mode="label" class="sim-pill__k">STATE</Term>
-          <span class="sim-pill__v">{{ stateLabel }}</span>
-        </span>
-        <span :class="['sim-pill', 'sim-pill--ws', cpu.connected ? 'sim-pill--ws-on' : 'sim-pill--ws-off']" :title="`WebSocket ${cpu.connected ? 'conectado' : 'desconectado'}`">
-          <span class="sim-pill__k">WS</span>
-          <span class="sim-pill__v">{{ cpu.connected ? 'ON' : 'OFF' }}</span>
-        </span>
-      </div>
+      <SimStatusRow class="sim-bar__row sim-bar__row--status" />
     </section>
   </Teleport>
 </template>
@@ -512,13 +439,7 @@ function dockHeaderDblClick() {
 }
 
 .sim-bar__row--status {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-  min-height: 32px;
   border-top: 1px dashed var(--border);
-  justify-content: flex-end;
 }
 
 .sim-bar__brand {
@@ -669,8 +590,14 @@ function dockHeaderDblClick() {
   color: var(--text);
   width: 28px;
   height: 28px;
+  padding: 0;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   border-radius: var(--radius-sm);
+  box-sizing: border-box;
   transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 .sim-bar__core-pick:hover:not(:disabled) {
@@ -685,164 +612,6 @@ function dockHeaderDblClick() {
   box-shadow: var(--shadow-glow-amber);
 }
 .sim-bar__core-pick:disabled { opacity: 0.4; cursor: not-allowed; }
-
-.sim-bar__core-tabs {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: rgba(255, 179, 71, 0.03);
-  height: 24px;
-  box-sizing: border-box;
-}
-.sim-bar__core-tab {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  line-height: 1;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-muted);
-  padding: 0 6px;
-  height: 18px;
-  box-sizing: border-box;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  display: inline-flex;
-  align-items: center;
-  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
-}
-.sim-bar__core-tab:hover {
-  color: var(--amber);
-  background: rgba(255, 179, 71, 0.08);
-}
-/* Browsers paint a 2-3px outline on the most-recently-clicked button, which
-   pokes outside the .sim-bar__core-tabs wrapper and made the active pill
-   look taller than the others. Drop the default outline; keyboard users
-   still get focus feedback via :focus-visible. */
-.sim-bar__core-tab:focus { outline: none; }
-.sim-bar__core-tab:focus-visible {
-  outline: 1px solid var(--amber);
-  outline-offset: -1px;
-}
-.sim-bar__core-tab--active {
-  background: rgba(255, 179, 71, 0.18);
-  color: var(--amber);
-  border-color: var(--amber);
-}
-.sim-bar__core-tab--idle:not(.sim-bar__core-tab--active) {
-  color: var(--text-dim);
-  opacity: 0.7;
-}
-.sim-bar__core-tab--halted:not(.sim-bar__core-tab--active) {
-  color: var(--red-soft, #ff7a7a);
-  opacity: 0.75;
-}
-/* Focused core marker: a single-pixel inset ring on top of the active fill.
-   Avoids box-shadow / underlines that would change the visual footprint and
-   make this pill look "bigger" than its siblings inside the same strip. */
-.sim-bar__core-tab--focus {
-  box-shadow: inset 0 -2px 0 0 var(--amber);
-}
-.sim-bar__core-all {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
-  line-height: 1;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-dim);
-  padding: 0 6px;
-  height: 18px;
-  box-sizing: border-box;
-  margin-left: 2px;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  display: inline-flex;
-  align-items: center;
-  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
-}
-.sim-bar__core-all:hover {
-  color: var(--amber);
-  background: rgba(255, 179, 71, 0.08);
-  border-color: var(--amber);
-}
-.sim-bar__core-all:focus { outline: none; }
-.sim-bar__core-all:focus-visible {
-  outline: 1px solid var(--amber);
-  outline-offset: -1px;
-}
-.sim-pill__extra {
-  font-size: 9px;
-  letter-spacing: 0.5px;
-  color: var(--amber);
-  margin-left: 4px;
-  padding: 0 4px;
-  border: 1px solid var(--amber);
-  border-radius: var(--radius-sm);
-  opacity: 0.85;
-}
-
-/* Every status chip shares the same footprint (height, padding, gap, type
-   scale) so the row reads as one continuous strip. Per-variant min-widths
-   lock the chip's width to the longest label it can show (KERNEL > USER,
-   HALT/RUN/IDLE, ON/OFF, 0xFFFFFFFF), so the row never reflows when a
-   value changes between ticks. */
-.sim-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0 8px;
-  height: 24px;
-  box-sizing: border-box;
-  font-size: 10px;
-  letter-spacing: 0.5px;
-  background: rgba(255, 255, 255, 0.015);
-  white-space: nowrap;
-}
-.sim-pill__k {
-  color: var(--text-muted);
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  font-size: 9px;
-  font-weight: 500;
-}
-.sim-pill__v {
-  color: var(--text);
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-.sim-pill--mono .sim-pill__v { font-family: 'JetBrains Mono', monospace; font-size: 10px; }
-
-.sim-pill--pid   { min-width: 66px; }
-.sim-pill--mode  { min-width: 96px; }
-.sim-pill--reg   { min-width: 132px; }
-.sim-pill--tick  { min-width: 80px; }
-.sim-pill--state { min-width: 78px; }
-.sim-pill--ws    { min-width: 62px; }
-
-.sim-pill--user { border-color: var(--green); }
-.sim-pill--user .sim-pill__v { color: var(--green); }
-.sim-pill--kernel { border-color: var(--red-soft, #ff7a7a); }
-.sim-pill--kernel .sim-pill__v { color: var(--red-soft, #ff7a7a); }
-
-.sim-pill--halt { border-color: var(--red); background: rgba(255, 58, 58, 0.06); }
-.sim-pill--halt .sim-pill__v { color: var(--red); font-weight: 700; }
-.sim-pill--running { border-color: var(--green); background: rgba(127, 255, 170, 0.05); }
-.sim-pill--running .sim-pill__v { color: var(--green); font-weight: 700; }
-.sim-pill--idle .sim-pill__v { color: var(--text-muted); }
-
-.sim-pill--ws-on { border-color: var(--green); }
-.sim-pill--ws-on .sim-pill__v { color: var(--green); }
-.sim-pill--ws-off { border-color: var(--red); }
-.sim-pill--ws-off .sim-pill__v { color: var(--red); }
 
 .sim-bar__right {
   justify-self: end;

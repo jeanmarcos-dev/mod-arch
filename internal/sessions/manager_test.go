@@ -109,6 +109,26 @@ func TestManager_DeactivateShareInvalidates(t *testing.T) {
 	}
 }
 
+func TestManager_DeactivateShareDisconnectsViewers(t *testing.T) {
+	m := NewManager(Config{MaxPublic: 5})
+	sess, _ := m.Create(ModeFull)
+	m.ActivateShare(sess)
+
+	var fired int
+	idA := sess.AddViewer(func() { fired++ })
+	idB := sess.AddViewer(func() { fired++ })
+
+	m.DeactivateShare(sess)
+	if fired != 2 {
+		t.Errorf("cancel fired %d times, want 2", fired)
+	}
+
+	// Late RemoveViewer must not panic even when the registry was already
+	// cleared by disconnectAllViewers.
+	sess.RemoveViewer(idA)
+	sess.RemoveViewer(idB)
+}
+
 func TestInvite_CreateConsume(t *testing.T) {
 	m := NewManager(Config{MaxPublic: 1, MaxPrivileged: 5})
 
@@ -316,5 +336,53 @@ func TestManager_PublicSharedFilters(t *testing.T) {
 	got := m.PublicShared()
 	if len(got) != 1 || got[0].ID != c.ID {
 		t.Errorf("PublicShared = %v, want [c]", got)
+	}
+}
+
+func TestSession_PresenceRoundTrip(t *testing.T) {
+	m := NewManager(Config{MaxPublic: 1})
+	sess, err := m.Create(ModeFull)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if got := sess.Presence(); got.Section != "" || len(got.Cores) != 0 {
+		t.Errorf("initial Presence should be zero, got %+v", got)
+	}
+
+	want := Presence{Section: "/memoria", Cores: []int{0, 2}, Mode: "pedagogic", Narrators: true}
+	sess.SetPresence(want)
+	got := sess.Presence()
+	if got.Section != "/memoria" {
+		t.Errorf("Section = %q, want /memoria", got.Section)
+	}
+	if len(got.Cores) != 2 || got.Cores[0] != 0 || got.Cores[1] != 2 {
+		t.Errorf("Cores = %v, want [0 2]", got.Cores)
+	}
+	if got.Mode != "pedagogic" {
+		t.Errorf("Mode = %q, want pedagogic", got.Mode)
+	}
+	if !got.Narrators {
+		t.Error("Narrators should be true")
+	}
+	if got.UpdatedAt.IsZero() {
+		t.Error("SetPresence should stamp UpdatedAt when caller omits it")
+	}
+
+	// Mutating the returned slice must not affect future reads.
+	got.Cores[0] = 99
+	again := sess.Presence()
+	if again.Cores[0] != 0 {
+		t.Errorf("Presence leaked internal slice; Cores[0] = %d, want 0", again.Cores[0])
+	}
+}
+
+func TestSession_PresenceKeepsExplicitTimestamp(t *testing.T) {
+	m := NewManager(Config{MaxPublic: 1})
+	sess, _ := m.Create(ModeFull)
+	stamp := time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)
+	sess.SetPresence(Presence{Section: "/procesos", UpdatedAt: stamp})
+	if got := sess.Presence().UpdatedAt; !got.Equal(stamp) {
+		t.Errorf("UpdatedAt = %v, want %v", got, stamp)
 	}
 }

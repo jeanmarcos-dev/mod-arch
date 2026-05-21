@@ -12,7 +12,7 @@ const MySessions = () => import('../views/secondary/MySessions.vue');
 const GlossaryPage = () => import('../views/secondary/Glossary.vue');
 const Preferences = () => import('../views/secondary/Preferences.vue');
 const Profile = () => import('../views/secondary/Profile.vue');
-const Simulator = () => import('../views/Simulator.vue');
+const ViewerEntry = () => import('../views/ViewerEntry.vue');
 const StudentLogin = () => import('../views/Login.vue');
 const NotFound = () => import('../views/NotFound.vue');
 const AdminLogin = () => import('../views/admin/Login.vue');
@@ -43,9 +43,12 @@ export const router = createRouter({
         { path: 'perfil', name: 'profile', component: Profile, meta: { title: 'Perfil', section: false } },
       ],
     },
-    // Viewer mode keeps the bare Simulator without the shell so projected
-    // viewers see only the simulation, not the navigation.
-    { path: '/v/:token', name: 'viewer', component: Simulator },
+    // The backend sets the mc_view cookie when serving /v/<token>, so by the
+    // time this route mounts the SPA is already identified as a viewer.
+    // ViewerEntry just waits for the initial session_info and redirects to
+    // the section the host is presenting; the actual shell is mounted at /
+    // and AppShell delegates to ViewerShell based on role.
+    { path: '/v/:token', name: 'viewer', component: ViewerEntry },
     { path: '/login', name: 'login', component: StudentLogin },
     {
       path: '/admin/login',

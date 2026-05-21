@@ -93,6 +93,23 @@ func (r Role) String() string {
 	}
 }
 
+// Presence captures the section + filter + view settings the owner is
+// currently presenting. Viewers with autofollow on use it to mirror what
+// the host shows. The snapshot is volatile (not persisted to SQLite) — it
+// lives only while the session is in memory.
+//
+// Mode is the presentation mode preset (compact/pedagogic/projector) the
+// host has selected; Narrators is whether the host has the animated
+// narrators turned on. Both let the viewer reproduce the host's pacing and
+// visual style, not just the section they are looking at.
+type Presence struct {
+	Section   string    `json:"section"`
+	Cores     []int     `json:"cores"`
+	Mode      string    `json:"mode"`
+	Narrators bool      `json:"narrators"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // Session is an isolated instance for an owner plus its viewers.
 type Session struct {
 	ID        string
@@ -108,6 +125,78 @@ type Session struct {
 	public       bool
 	userID       string // empty when no user is attached
 	lastActiveAt time.Time
+	presence     Presence
+
+	// viewers tracks the cancel func of every live viewer WS so the owner
+	// can drop them all in one shot when share is deactivated. Keyed by an
+	// incrementing seq so the handler can self-remove on disconnect.
+	viewerSeq int
+	viewers   map[int]func()
+}
+
+// Presence returns the latest presence snapshot from the owner. Zero value
+// when none has been reported yet (e.g. owner has not navigated since boot).
+func (s *Session) Presence() Presence {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	// Defensive copy of Cores so callers cannot mutate our slice.
+	out := s.presence
+	if len(s.presence.Cores) > 0 {
+		out.Cores = append([]int(nil), s.presence.Cores...)
+	}
+	return out
+}
+
+// SetPresence records the owner's current section and visible cores. Volatile
+// — kept in memory only.
+func (s *Session) SetPresence(p Presence) {
+	s.mu.Lock()
+	if p.UpdatedAt.IsZero() {
+		p.UpdatedAt = time.Now()
+	}
+	if len(p.Cores) > 0 {
+		p.Cores = append([]int(nil), p.Cores...)
+	}
+	s.presence = p
+	s.mu.Unlock()
+}
+
+// AddViewer registers a viewer's cancel func and returns an id used to
+// remove it when the connection ends naturally.
+func (s *Session) AddViewer(cancel func()) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.viewers == nil {
+		s.viewers = make(map[int]func())
+	}
+	s.viewerSeq++
+	id := s.viewerSeq
+	s.viewers[id] = cancel
+	return id
+}
+
+// RemoveViewer drops a viewer's cancel entry. Safe to call after the
+// cancel has already fired.
+func (s *Session) RemoveViewer(id int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.viewers, id)
+}
+
+// disconnectAllViewers fires every viewer's cancel func so their WS read
+// loops exit. Returns the number of viewers booted, for logging.
+func (s *Session) disconnectAllViewers() int {
+	s.mu.Lock()
+	cancels := make([]func(), 0, len(s.viewers))
+	for _, c := range s.viewers {
+		cancels = append(cancels, c)
+	}
+	s.viewers = nil
+	s.mu.Unlock()
+	for _, c := range cancels {
+		c()
+	}
+	return len(cancels)
 }
 
 // ViewToken returns the current share token ("" when not shared).
@@ -432,8 +521,9 @@ func (m *Manager) ActivateShare(sess *Session) string {
 	return token
 }
 
-// DeactivateShare invalidates the ViewToken; already-connected viewers stay
-// connected but cannot reconnect after they close.
+// DeactivateShare invalidates the ViewToken and kicks every viewer that
+// was watching. Reconnects via the old token also fail because the
+// mapping was just cleared.
 func (m *Manager) DeactivateShare(sess *Session) {
 	sess.mu.Lock()
 	token := sess.viewToken
@@ -449,7 +539,8 @@ func (m *Manager) DeactivateShare(sess *Session) {
 				m.logger.Warn("store: clear view_token failed", "id", sess.ID, "err", err)
 			}
 		}
-		m.logger.Info("share deactivated", "session", sess.ID, "token", token)
+		kicked := sess.disconnectAllViewers()
+		m.logger.Info("share deactivated", "session", sess.ID, "token", token, "viewers_kicked", kicked)
 	}
 }
 

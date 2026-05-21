@@ -18,9 +18,14 @@ interface PrefsState {
 
 const STORAGE_KEY = 'modos-cpu:prefs:v1';
 
+// Pedagogic is the default preset so a fresh visitor sees the animated
+// transitions out of the box (animationsEnabled is derived from mode in
+// the computed below). Narrators stay off until the user opts in or until
+// a host broadcasts them via presence — they pull attention and are
+// genuinely a teaching aid, not a default-on chrome.
 const DEFAULTS: PrefsState = {
   sidebarCollapsed: false,
-  mode: 'compact',
+  mode: 'pedagogic',
   density: 'comfortable',
   narratorsEnabled: false,
 };

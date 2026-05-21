@@ -305,3 +305,245 @@ func drainN(t *testing.T, ctx context.Context, conn *websocket.Conn, n int) {
 		}
 	}
 }
+
+// dialAsViewer activates share on the owner session, hits /v/<token> to set
+// the viewer cookie on the returned client, then dials the WS as that viewer.
+// Returns the viewer WS conn.
+func dialAsViewer(t *testing.T, ctx context.Context, ts *httptest.Server, wsURL string, ownerSess *sessions.Session, mgr *sessions.Manager) *websocket.Conn {
+	t.Helper()
+	token := mgr.ActivateShare(ownerSess)
+	jar, _ := cookiejar.New(nil)
+	httpClient := &http.Client{Jar: jar}
+	resp, err := httpClient.Get(ts.URL + "/v/" + token)
+	if err != nil {
+		t.Fatalf("GET /v/%s: %v", token, err)
+	}
+	_ = resp.Body.Close()
+	conn, dialResp, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPClient: httpClient})
+	if err != nil {
+		t.Fatalf("viewer dial: %v", err)
+	}
+	if dialResp != nil && dialResp.Body != nil {
+		_ = dialResp.Body.Close()
+	}
+	return conn
+}
+
+// readUntil reads messages until one matches typeWanted or the deadline
+// elapses. Returns the matching message or nil on timeout.
+func readUntil(t *testing.T, ctx context.Context, conn *websocket.Conn, typeWanted string, within time.Duration) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		readCtx, cancel := context.WithTimeout(ctx, time.Until(deadline))
+		_, data, err := conn.Read(readCtx)
+		cancel()
+		if err != nil {
+			return nil
+		}
+		var msg map[string]any
+		_ = json.Unmarshal(data, &msg)
+		if msg["type"] == typeWanted {
+			return msg
+		}
+	}
+	return nil
+}
+
+func TestWS_PresenceBroadcastsToViewersAndPersists(t *testing.T) {
+	s, ts, wsURL := startTestServer(t)
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	owner, _ := dialWithSession(t, ctx, ts, wsURL)
+	defer owner.Close(websocket.StatusNormalClosure, "")
+	drainN(t, ctx, owner, initialMessages)
+
+	all := s.manager.All()
+	if len(all) != 1 {
+		t.Fatalf("want 1 session, got %d", len(all))
+	}
+	ownerSess := all[0]
+
+	viewer := dialAsViewer(t, ctx, ts, wsURL, ownerSess, s.manager)
+	defer viewer.Close(websocket.StatusNormalClosure, "")
+	drainN(t, ctx, viewer, initialMessages)
+
+	narratorsOn := true
+	send(t, ctx, owner, Command{
+		Cmd:         "presence",
+		Section:     "/memoria",
+		VisibleCore: []int{0, 2},
+		Mode:        "pedagogic",
+		Narrators:   &narratorsOn,
+	})
+
+	msg := readUntil(t, ctx, viewer, "presence", 2*time.Second)
+	if msg == nil {
+		t.Fatal("viewer never received presence broadcast")
+	}
+	if msg["section"] != "/memoria" {
+		t.Errorf("section = %v, want /memoria", msg["section"])
+	}
+	cores, _ := msg["cores"].([]any)
+	if len(cores) != 2 {
+		t.Errorf("cores = %v, want [0 2]", msg["cores"])
+	}
+	if msg["mode"] != "pedagogic" {
+		t.Errorf("mode = %v, want pedagogic", msg["mode"])
+	}
+	if msg["narrators"] != true {
+		t.Errorf("narrators = %v, want true", msg["narrators"])
+	}
+
+	if got := ownerSess.Presence(); got.Section != "/memoria" || got.Mode != "pedagogic" || !got.Narrators {
+		t.Errorf("server-side presence not persisted: %+v", got)
+	}
+}
+
+func TestWS_PresenceNormalizesUnknownMode(t *testing.T) {
+	s, ts, wsURL := startTestServer(t)
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	owner, _ := dialWithSession(t, ctx, ts, wsURL)
+	defer owner.Close(websocket.StatusNormalClosure, "")
+	drainN(t, ctx, owner, initialMessages)
+
+	ownerSess := s.manager.All()[0]
+	viewer := dialAsViewer(t, ctx, ts, wsURL, ownerSess, s.manager)
+	defer viewer.Close(websocket.StatusNormalClosure, "")
+	drainN(t, ctx, viewer, initialMessages)
+
+	send(t, ctx, owner, Command{
+		Cmd:     "presence",
+		Section: "/procesos",
+		Mode:    "evil-preset",
+	})
+	msg := readUntil(t, ctx, viewer, "presence", 2*time.Second)
+	if msg == nil {
+		t.Fatal("viewer never received presence broadcast")
+	}
+	if msg["mode"] != "" {
+		t.Errorf("unknown mode should be normalized to empty string, got %v", msg["mode"])
+	}
+}
+
+func TestWS_ViewerCannotSendPresence(t *testing.T) {
+	s, ts, wsURL := startTestServer(t)
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	owner, _ := dialWithSession(t, ctx, ts, wsURL)
+	defer owner.Close(websocket.StatusNormalClosure, "")
+	drainN(t, ctx, owner, initialMessages)
+
+	ownerSess := s.manager.All()[0]
+	viewer := dialAsViewer(t, ctx, ts, wsURL, ownerSess, s.manager)
+	defer viewer.Close(websocket.StatusNormalClosure, "")
+	drainN(t, ctx, viewer, initialMessages)
+
+	send(t, ctx, viewer, Command{Cmd: "presence", Section: "/procesos"})
+	msg := readUntil(t, ctx, viewer, "error", 2*time.Second)
+	if msg == nil {
+		t.Fatal("viewer presence should be rejected with an error event")
+	}
+	if got := ownerSess.Presence(); got.Section != "" {
+		t.Errorf("server should not persist viewer presence, got %+v", got)
+	}
+}
+
+func TestWS_HandRaiseReachesOwnerOnly(t *testing.T) {
+	s, ts, wsURL := startTestServer(t)
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	owner, _ := dialWithSession(t, ctx, ts, wsURL)
+	defer owner.Close(websocket.StatusNormalClosure, "")
+	drainN(t, ctx, owner, initialMessages)
+
+	ownerSess := s.manager.All()[0]
+	ownerSess.SetLabel("Estudiante demo")
+
+	viewer := dialAsViewer(t, ctx, ts, wsURL, ownerSess, s.manager)
+	defer viewer.Close(websocket.StatusNormalClosure, "")
+	drainN(t, ctx, viewer, initialMessages)
+
+	send(t, ctx, viewer, Command{Cmd: "hand_raise"})
+
+	msg := readUntil(t, ctx, owner, "hand_raise", 2*time.Second)
+	if msg == nil {
+		t.Fatal("owner never received hand_raise")
+	}
+	if msg["label"] != "Estudiante demo" {
+		t.Errorf("label = %v, want 'Estudiante demo'", msg["label"])
+	}
+
+	// Viewer must not receive their own hand_raise echo.
+	if echo := readUntil(t, ctx, viewer, "hand_raise", 500*time.Millisecond); echo != nil {
+		t.Fatal("viewer should not receive a hand_raise echo")
+	}
+}
+
+func TestWS_OwnerHandRaiseIsNoOp(t *testing.T) {
+	_, ts, wsURL := startTestServer(t)
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	owner, _ := dialWithSession(t, ctx, ts, wsURL)
+	defer owner.Close(websocket.StatusNormalClosure, "")
+	drainN(t, ctx, owner, initialMessages)
+
+	send(t, ctx, owner, Command{Cmd: "hand_raise"})
+
+	// Owner should not loop the gesture back to themselves.
+	if echo := readUntil(t, ctx, owner, "hand_raise", 500*time.Millisecond); echo != nil {
+		t.Fatal("owner-sent hand_raise should be a no-op")
+	}
+}
+
+func TestWS_LateViewerGetsPresenceInSessionInfo(t *testing.T) {
+	s, ts, wsURL := startTestServer(t)
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	owner, _ := dialWithSession(t, ctx, ts, wsURL)
+	defer owner.Close(websocket.StatusNormalClosure, "")
+	drainN(t, ctx, owner, initialMessages)
+
+	ownerSess := s.manager.All()[0]
+	send(t, ctx, owner, Command{Cmd: "presence", Section: "/interrupciones", VisibleCore: []int{1}})
+
+	// Give the server a tick to persist presence before the viewer joins.
+	if got := readUntil(t, ctx, owner, "error", 200*time.Millisecond); got != nil {
+		t.Fatalf("owner presence rejected: %v", got)
+	}
+	_ = ownerSess // keep referenced for clarity
+
+	viewer := dialAsViewer(t, ctx, ts, wsURL, ownerSess, s.manager)
+	defer viewer.Close(websocket.StatusNormalClosure, "")
+
+	info := readUntil(t, ctx, viewer, "session_info", 2*time.Second)
+	if info == nil {
+		t.Fatal("viewer never received session_info on connect")
+	}
+	pres, ok := info["presence"].(map[string]any)
+	if !ok {
+		t.Fatalf("session_info.presence missing or not an object: %v", info["presence"])
+	}
+	if pres["section"] != "/interrupciones" {
+		t.Errorf("session_info.presence.section = %v, want /interrupciones", pres["section"])
+	}
+}

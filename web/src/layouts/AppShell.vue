@@ -7,7 +7,6 @@ import {
   MemoryStick,
   Zap,
   Layers,
-  Cpu,
   FolderClock,
   BookOpen,
   Settings,
@@ -18,7 +17,9 @@ import { usePreferencesStore } from '../stores/preferences';
 import Sidebar from '../components/shell/Sidebar.vue';
 import Topbar from '../components/shell/Topbar.vue';
 import SimBar from '../components/shell/SimBar.vue';
+import ConnectionBanner from '../components/shell/ConnectionBanner.vue';
 import GlossaryModal from '../components/GlossaryModal.vue';
+import ViewerShell from './ViewerShell.vue';
 
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
@@ -59,7 +60,6 @@ const items = [
   { to: '/memoria', label: 'Memoria', icon: MemoryStick, group: 'SIMULACIÓN' },
   { to: '/interrupciones', label: 'Interrupciones', icon: Zap, group: 'SIMULACIÓN' },
   { to: '/concurrencia', label: 'Concurrencia', icon: Layers, group: 'SIMULACIÓN' },
-  { to: '/x86', label: 'x86 real', icon: Cpu, group: 'SIMULACIÓN', soon: true },
   { to: '/sesiones', label: 'Mis sesiones', icon: FolderClock, group: 'HERRAMIENTAS' },
   { to: '/glosario', label: 'Glosario', icon: BookOpen, group: 'HERRAMIENTAS' },
   { to: '/preferencias', label: 'Preferencias', icon: Settings, group: 'HERRAMIENTAS' },
@@ -75,13 +75,48 @@ const isSimRoute = computed(() => {
     || p === '/procesos'
     || p === '/memoria'
     || p === '/interrupciones'
-    || p === '/concurrencia'
-    || p === '/x86';
+    || p === '/concurrencia';
 });
+
+// Host-side presence: every time the owner navigates inside a sim route,
+// changes the visible-cores filter, switches the presentation mode preset
+// or toggles narrators, we publish so autofollowing viewers mirror the
+// same view. Tool routes are skipped — the host's "Preferences" page is
+// irrelevant to a spectator and broadcasting it would yank the viewer out
+// of whatever section they were actually following.
+//
+// The role is part of the key so that the first session_info that flips us
+// to "owner" also triggers an initial broadcast.
+watch(
+  [
+    () => cpu.sessionInfo.role,
+    () => route.path,
+    () => Array.from(cpu.selectedCoreIds).sort((a, b) => a - b).join(','),
+    () => prefs.mode,
+    () => prefs.narratorsEnabled,
+  ],
+  () => {
+    if (cpu.sessionInfo.role !== 'owner') return;
+    if (!isSimRoute.value) return;
+    const cores = Array.from(cpu.selectedCoreIds).sort((a, b) => a - b);
+    cpu.sendPresence({
+      section: route.path,
+      cores,
+      mode: prefs.mode,
+      narrators: prefs.narratorsEnabled,
+    });
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
-  <div :class="['shell', `shell--mode-${prefs.mode}`]">
+  <!-- Viewer role gets its own shell (read-only topbar, sidebar with only
+       sim-relevant items, presence-driven autofollow). Owners keep the host
+       shell below. The role flips on session_info events from the WS. -->
+  <ViewerShell v-if="cpu.isViewer()" />
+  <div v-else :class="['shell', `shell--mode-${prefs.mode}`, { 'shell--disconnected': !cpu.connected }]">
+    <ConnectionBanner />
     <Sidebar :items="items" />
     <div class="shell__main">
       <SimBar v-if="isSimRoute" />
@@ -109,6 +144,14 @@ const isSimRoute = computed(() => {
   height: 100vh;
   width: 100vw;
   overflow: hidden;
+  box-sizing: border-box;
+  transition: padding-top var(--transition-base);
+}
+
+/* When the ConnectionBanner is visible we reserve 36px at the top of the
+   whole shell so it does not occlude the sidebar header or the SimBar. */
+.shell--disconnected {
+  padding-top: 36px;
 }
 
 .shell__main {

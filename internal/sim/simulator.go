@@ -51,16 +51,35 @@ type SourceLine struct {
 // (slow consumer) new messages are dropped instead of blocking the simulator.
 const SendBufferSize = 256
 
+// ClientRole tags a Client with its role so the sim can fanout selectively
+// (e.g. broadcast presence updates only to viewers, hand_raise pings only to
+// the owner). The sim does not know about the sessions package, so it uses
+// its own enum that the WS handler maps from sessions.Role.
+type ClientRole int
+
+const (
+	// RoleAny is the default tag for clients whose role is irrelevant.
+	RoleAny ClientRole = iota
+	// RoleOwner tags the session owner.
+	RoleOwner
+	// RoleViewer tags a read-only viewer connected via /v/<token>.
+	RoleViewer
+)
+
 // Client is a consumer of simulator events. The sim knows nothing about the
 // transport: it just enqueues messages on Send. Whoever creates the Client
 // (typically the WS handler) is responsible for draining it.
 type Client struct {
 	Send chan map[string]any
+	Role ClientRole
 }
 
-// NewClient builds a Client with the standard buffer size.
-func NewClient() *Client {
-	return &Client{Send: make(chan map[string]any, SendBufferSize)}
+// NewClient builds a Client with the standard buffer size and role.
+func NewClient(role ClientRole) *Client {
+	return &Client{
+		Send: make(chan map[string]any, SendBufferSize),
+		Role: role,
+	}
 }
 
 // Simulator is an isolated simulator instance.
@@ -543,6 +562,33 @@ func (s *Simulator) Broadcast(msg map[string]any) {
 	s.clientMu.RLock()
 	defer s.clientMu.RUnlock()
 	for c := range s.clients {
+		select {
+		case c.Send <- msg:
+		default:
+		}
+	}
+}
+
+// BroadcastTo sends a message only to clients tagged with one of the given
+// roles. Used for presence (viewers) and hand_raise (owner) so each side gets
+// only the events it cares about.
+func (s *Simulator) BroadcastTo(msg map[string]any, roles ...ClientRole) {
+	if len(roles) == 0 {
+		return
+	}
+	s.clientMu.RLock()
+	defer s.clientMu.RUnlock()
+	for c := range s.clients {
+		match := false
+		for _, r := range roles {
+			if c.Role == r {
+				match = true
+				break
+			}
+		}
+		if !match {
+			continue
+		}
 		select {
 		case c.Send <- msg:
 		default:

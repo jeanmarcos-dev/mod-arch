@@ -12,19 +12,19 @@ export type CpuEvent =
   | { type: 'mem_read'; core_id: number; addr: number; value: number; size: number }
   | { type: 'mem_write'; core_id: number; addr: number; old: number; new: number; size: number }
   | { type: 'mode_switch'; core_id: number; from: number; to: number; cause: string }
-  | { type: 'irq_fire'; core_id: number; vector: number; source: string }
+  | { type: 'irq_fire'; core_id: number; vector: number; source: string; handler: number; from_mode: number; saved_eip?: number; saved_cs?: number; saved_eflags?: number }
   | { type: 'page_fault'; core_id: number; addr: number; mode: number; perm_needed: string }
   | { type: 'halt'; core_id: number; pid?: number }
   | { type: 'tick'; value: number }
   | { type: 'state'; halted?: boolean; running?: boolean; hz?: number }
-  | { type: 'snapshot'; regs: Record<string, number>; segments: Record<string, number>; mode: number; halted: boolean; tick: number; timer_quantum?: number; current_pid?: number; ready_queue?: number[]; wait_queue?: WaitInfo[]; procs?: PCBInfo[]; sources?: Record<string, string>; source_maps?: Record<string, SourceLine[]>; cores?: CoreInfo[]; num_cores?: number }
+  | { type: 'snapshot'; regs: Record<string, number>; segments: Record<string, number>; mode: number; halted: boolean; tick: number; timer_quantum?: number; current_pid?: number; ready_queue?: number[]; wait_queue?: WaitInfo[]; procs?: PCBInfo[]; sources?: Record<string, string>; source_maps?: Record<string, SourceLine[]>; cores?: CoreInfo[]; num_cores?: number; running?: boolean; hz?: number }
   | { type: 'programs'; list: ProgramInfo[] }
   | { type: 'loaded'; name: string; pids: number[]; procs: PCBInfo[]; sources: Record<string, string>; source_maps?: Record<string, SourceLine[]> }
   | { type: 'reset' }
   | { type: 'procs'; procs: PCBInfo[] }
   | { type: 'pcb_save'; core_id: number; pid: number; regs: Record<string, number> }
   | { type: 'pcb_restore'; core_id: number; pid: number; regs: Record<string, number> }
-  | { type: 'sched_decision'; from_pid: number; to_pid: number; ready_queue: number[] }
+  | { type: 'sched_decision'; from_pid: number; to_pid: number; reason?: string; ready_queue: number[] }
   | { type: 'process_state'; pid: number; state: string; reason?: string }
   | { type: 'syscall'; pid: number; num: number; name: string; args: number[]; result: number }
   | { type: 'console_out'; pid: number; bytes: number[]; text: string }
@@ -32,7 +32,9 @@ export type CpuEvent =
   | { type: 'core_release'; core_id: number; pid: number; reason?: string }
   | { type: 'mutex_op'; core_id: number; pid: number; mutex_id: number; op: 'create' | 'acquired' | 'waiting' | 'released' | 'handoff'; next_pid?: number; waiters?: number[] }
   | { type: 'sem_op'; core_id: number; pid: number; sem_id: number; op: 'create' | 'wait_immediate' | 'wait_blocked' | 'signal' | 'handoff'; count: number; next_pid?: number; waiters?: number[] }
-  | { type: 'session_info'; id: string; mode: string; role: string; label: string; view_token: string; user_id?: string; user_name?: string; user_email?: string }
+  | { type: 'session_info'; id: string; mode: string; role: string; label: string; view_token: string; user_id?: string; user_name?: string; user_email?: string; presence?: { section: string; cores: number[]; mode?: string; narrators?: boolean } }
+  | { type: 'presence'; section: string; cores: number[]; mode?: string; narrators?: boolean; at?: number }
+  | { type: 'hand_raise'; label: string; at?: number }
   | { type: 'error'; message: string };
 
 export interface CoreInfo {
@@ -68,6 +70,18 @@ export interface SessionInfo {
   user_email: string;
 }
 
+// Presence is what the host is currently presenting: section, visible
+// cores, presentation mode preset and narrators toggle. Viewers with
+// autofollow on mirror these values. Owner-side, it is set on every
+// navigation or preference change so the server can rebroadcast.
+export type PresentationMode = 'compact' | 'pedagogic' | 'projector';
+export interface Presence {
+  section: string;
+  cores: number[];
+  mode: PresentationMode | '';
+  narrators: boolean;
+}
+
 export interface ProgramInfo {
   name: string;
   description: string;
@@ -94,6 +108,29 @@ export interface SourceLine {
   offset: number;
   mnemonic: string;
   c_line: number;
+}
+
+// IrqFrame is the three-word stack frame the CPU HW pushed to the kernel
+// stack when it took an interrupt from user mode. The Interrupts view renders
+// it while the handler is running and clears it on IRET.
+export interface IrqFrame {
+  vector: number;
+  handler: number;
+  savedEIP: number;
+  savedCS: number;
+  savedEFLAGS: number;
+  fromMode: number;
+  capturedAt: number;
+}
+
+// IdtHandlerHit records the last time a given vector fired: which core took
+// it, what handler addr the CPU jumped to, and when. Drives both the IDT
+// table highlight and the "Handler @" column.
+export interface IdtHandlerHit {
+  coreId: number;
+  handler: number;
+  source: string;
+  ts: number;
 }
 
 export interface WaitInfo {
@@ -182,6 +219,15 @@ export const useCpuStore = defineStore('cpu', () => {
   const mutexes = ref<MutexState[]>([]);
   const semaphores = ref<SemaphoreState[]>([]);
 
+  // Active interrupt frame per core. Populated when an irq_fire arrives from
+  // user mode (the HW pushed EIP/CS/EFLAGS to the kernel stack), cleared on
+  // the matching iret. The /interrupciones view reads this map to render the
+  // "Stack de retorno por core" panel.
+  const activeFrameByCore = ref<Record<number, IrqFrame | null>>({});
+  // Most-recent fire per IDT vector, used to populate the "Handler @" column
+  // and to highlight the row when the same vector fires again.
+  const lastFiredHandlerByVector = ref<Record<number, IdtHandlerHit>>({});
+
   const selectedCoreId = computed<number>(() => {
     const it = selectedCoreIds.value.values().next();
     return it.done ? 0 : (it.value as number);
@@ -221,6 +267,17 @@ export const useCpuStore = defineStore('cpu', () => {
     mode.value = c.mode;
     halted.value = c.halted;
     currentPID.value = c.current_pid;
+  }
+
+  // HALT in x86 is "park until next IRQ", not "permanently dead". The
+  // backend emits `halt` on HLT but no explicit `wake` event when an IRQ
+  // restarts the core — so any subsequent activity event must clear the
+  // stale halted flag. Without this the chip badge sticks at HALT while
+  // the core happily issues writes/reads.
+  function markCoreActive(c: CoreInfo, coreId: number) {
+    if (!c.halted) return;
+    c.halted = false;
+    if (isSelected(coreId)) halted.value = false;
   }
 
   function persistCoresFilter() {
@@ -304,6 +361,17 @@ export const useCpuStore = defineStore('cpu', () => {
   // Computed cómodos para el resto de la app.
   const isViewer = () => sessionInfo.value.role === 'viewer';
 
+  // Last presence snapshot the host has broadcast (section + visible cores
+  // + presentation mode + narrators toggle). Updated by 'presence' events
+  // and the initial session_info payload. The viewer shell watches it to
+  // apply autofollow; the host writes to it implicitly via sendPresence
+  // below.
+  const lastPresence = ref<Presence>({ section: '', cores: [], mode: '', narrators: false });
+  // Bumped every time a hand_raise event arrives so the host UI can react
+  // without subscribing to the raw event channel.
+  const handRaiseSignal = ref(0);
+  const lastHandRaiseLabel = ref('');
+
   // ─── Animaciones globales ──────────────────────────────────────────────
   // shakeUntil es un timestamp; mientras Date.now() < shakeUntil, la UI shakea.
   const faultShake = ref(false);
@@ -322,6 +390,16 @@ export const useCpuStore = defineStore('cpu', () => {
   // ─── WS ─────────────────────────────────────────────────────────────────
   let ws: WebSocket | null = null;
 
+  // Auto-reconnect bookkeeping. The backoff schedule is fixed instead of a
+  // pure exponential so the first retry is fast (a passing network hiccup
+  // recovers in 1s) but the last buckets cap at 30s — well below the user
+  // patience threshold during a class without hammering the server when it
+  // is genuinely down.
+  const BACKOFF_MS = [1000, 2000, 5000, 10000, 30000];
+  const reconnectAttempts = ref(0);
+  const nextRetryAt = ref<number | null>(null);
+  let retryTimer: number | null = null;
+
   // Event subscribers fan out raw CpuEvents to anything that wants to react —
   // narrators, panels, debugging overlays. The store's own applyEvent runs
   // first to keep its state consistent; subscribers fire after, so by the
@@ -331,6 +409,37 @@ export const useCpuStore = defineStore('cpu', () => {
   function subscribe(fn: Subscriber): () => void {
     subscribers.add(fn);
     return () => subscribers.delete(fn);
+  }
+
+  function clearRetryTimer() {
+    if (retryTimer !== null) {
+      window.clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    nextRetryAt.value = null;
+  }
+
+  function scheduleReconnect() {
+    if (retryTimer !== null) return;
+    const idx = Math.min(reconnectAttempts.value, BACKOFF_MS.length - 1);
+    const delay = BACKOFF_MS[idx];
+    nextRetryAt.value = Date.now() + delay;
+    retryTimer = window.setTimeout(() => {
+      retryTimer = null;
+      nextRetryAt.value = null;
+      reconnectAttempts.value += 1;
+      connect();
+    }, delay);
+  }
+
+  // Force an immediate reconnect, cancelling any pending scheduled retry.
+  // Surfaced through the public API for the ConnectionBanner "reconnect now"
+  // button — the user gets to bypass the backoff when they know the server
+  // is back up.
+  function reconnectNow() {
+    clearRetryTimer();
+    reconnectAttempts.value += 1;
+    connect();
   }
 
   // connect is idempotent. Re-mounting components that call connect() — for
@@ -346,15 +455,20 @@ export const useCpuStore = defineStore('cpu', () => {
     ws = new WebSocket(url);
     ws.onopen = () => {
       connected.value = true;
+      reconnectAttempts.value = 0;
+      clearRetryTimer();
       pushLog('▸ conectado al backend', 'amber');
     };
     ws.onclose = () => {
       connected.value = false;
       ws = null;
       pushLog('⚠ desconectado', 'red');
+      scheduleReconnect();
     };
     ws.onerror = () => {
       pushLog('⚠ error de conexión WS', 'red');
+      // onerror precedes onclose in the WebSocket lifecycle; rely on onclose
+      // to trigger the backoff so we do not double-schedule.
     };
     ws.onmessage = (e) => {
       try {
@@ -401,6 +515,8 @@ export const useCpuStore = defineStore('cpu', () => {
         }
         tick.value = ev.tick;
         if (ev.timer_quantum !== undefined) timerQuantum.value = ev.timer_quantum;
+        if (ev.running !== undefined) running.value = ev.running;
+        if (ev.hz !== undefined) stepHz.value = ev.hz;
         if (ev.ready_queue) readyQueue.value = ev.ready_queue;
         if (ev.wait_queue) waitQueue.value = ev.wait_queue;
         if (ev.procs) procs.value = ev.procs;
@@ -425,6 +541,7 @@ export const useCpuStore = defineStore('cpu', () => {
       case 'reg_write': {
         const c = ensureCoreSlot(ev.core_id);
         c.regs[ev.reg] = ev.new;
+        markCoreActive(c, ev.core_id);
         if (isSelected(ev.core_id)) {
           regs[ev.reg] = ev.new;
           flashReg(ev.reg);
@@ -435,6 +552,7 @@ export const useCpuStore = defineStore('cpu', () => {
         const c = ensureCoreSlot(ev.core_id);
         const nextEIP = ev.eip + ev.bytes.length;
         c.regs.EIP = nextEIP;
+        markCoreActive(c, ev.core_id);
         const prefix = numCores.value > 1 ? `[C${ev.core_id}] ` : '';
         pushLog(`${prefix}[${ev.eip.toString(16).padStart(6, '0')}]  ${ev.mnemonic}`, 'amber', ev.core_id);
         if (isSelected(ev.core_id)) regs.EIP = nextEIP;
@@ -449,11 +567,49 @@ export const useCpuStore = defineStore('cpu', () => {
         const prefix = numCores.value > 1 ? `[C${ev.core_id}] ` : '';
         pushLog(`${prefix}▸ mode ${ev.from === 3 ? 'USER' : 'KERNEL'} → ${ev.to === 3 ? 'USER' : 'KERNEL'} (${ev.cause})`, 'red', ev.core_id);
         if (isSelected(ev.core_id)) mode.value = ev.to;
+        // IRET pops the interrupt frame; the panel needs to clear that core
+        // so it goes back to "— sin handler activo —". Defer the mutation
+        // with queueMicrotask so subscribers fired below (in particular the
+        // InterruptNarrator, which reads the stack-frame DOM slots to spawn
+        // the IRET mini-arrows) still see the slots mounted. Vue will flush
+        // the unmount in the next microtask, after the narrator captured its
+        // coordinates.
+        if (ev.cause === 'IRET') {
+          const coreId = ev.core_id;
+          queueMicrotask(() => {
+            activeFrameByCore.value = { ...activeFrameByCore.value, [coreId]: null };
+          });
+        }
         break;
       }
       case 'irq_fire': {
         const prefix = numCores.value > 1 ? `[C${ev.core_id}] ` : '';
         pushLog(`${prefix}◉ IRQ 0x${ev.vector.toString(16).padStart(2, '0')} (${ev.source})`, 'yellow', ev.core_id);
+        lastFiredHandlerByVector.value = {
+          ...lastFiredHandlerByVector.value,
+          [ev.vector]: {
+            coreId: ev.core_id,
+            handler: ev.handler ?? 0,
+            source: ev.source,
+            ts: Date.now(),
+          },
+        };
+        // Only user→kernel traps push a frame. Kernel→kernel IRQs (timer
+        // arriving while already in kernel mode) leave saved_* undefined.
+        if (ev.from_mode === 3 && ev.saved_eip !== undefined) {
+          activeFrameByCore.value = {
+            ...activeFrameByCore.value,
+            [ev.core_id]: {
+              vector: ev.vector,
+              handler: ev.handler ?? 0,
+              savedEIP: ev.saved_eip,
+              savedCS: ev.saved_cs ?? 0,
+              savedEFLAGS: ev.saved_eflags ?? 0,
+              fromMode: ev.from_mode,
+              capturedAt: Date.now(),
+            },
+          };
+        }
         break;
       }
       case 'page_fault': {
@@ -506,6 +662,8 @@ export const useCpuStore = defineStore('cpu', () => {
         procSourceMaps.value = {};
         mutexes.value = [];
         semaphores.value = [];
+        activeFrameByCore.value = {};
+        lastFiredHandlerByVector.value = {};
         // Reset per-core register/state caches so the next snapshot starts
         // from a clean slate. Without this, stale values from the previous
         // demo would survive a reset on cores that the new demo does not
@@ -549,7 +707,8 @@ export const useCpuStore = defineStore('cpu', () => {
         // normalize so consumers see an empty array.
         const rq = ev.ready_queue ?? [];
         readyQueue.value = rq;
-        pushLog(`⇄ schedule: P${ev.from_pid} → P${ev.to_pid}  ready=[${rq.join(',')}]`, 'yellow');
+        const reasonTag = ev.reason ? ` (${ev.reason})` : '';
+        pushLog(`⇄ schedule: P${ev.from_pid} → P${ev.to_pid}${reasonTag}  ready=[${rq.join(',')}]`, 'yellow');
         break;
       }
       case 'process_state': {
@@ -586,23 +745,48 @@ export const useCpuStore = defineStore('cpu', () => {
           user_name: ev.user_name ?? '',
           user_email: ev.user_email ?? '',
         };
+        if (ev.presence && ev.presence.section) {
+          lastPresence.value = {
+            section: ev.presence.section,
+            cores: ev.presence.cores ?? [],
+            mode: (ev.presence.mode as Presence['mode']) ?? '',
+            narrators: Boolean(ev.presence.narrators),
+          };
+        }
         if (ev.role === 'viewer') {
           pushLog(`▸ conectado como ESPECTADOR de "${ev.label || ev.id.slice(0, 6)}"`, 'cyan');
         }
+        break;
+      case 'presence':
+        lastPresence.value = {
+          section: ev.section,
+          cores: ev.cores ?? [],
+          mode: (ev.mode as Presence['mode']) ?? '',
+          narrators: Boolean(ev.narrators),
+        };
+        break;
+      case 'hand_raise':
+        lastHandRaiseLabel.value = ev.label;
+        handRaiseSignal.value++;
         break;
       case 'error':
         lastError.value = ev.message;
         pushLog(`⚠ ${ev.message}`, 'red');
         break;
       case 'mem_read':
-      case 'mem_write':
+      case 'mem_write': {
         // Memory traffic is consumed exclusively by subscribers (narrators,
         // memory panel filters, etc.) — the store carries no aggregated
-        // counter for it because that would grow unbounded across runs.
+        // counter for it. We only use it as a heartbeat to clear a stale
+        // HALT flag when an IRQ has actually woken the core back up.
+        const c = cores.value.find(x => x.id === ev.core_id);
+        if (c) markCoreActive(c, ev.core_id);
         break;
+      }
       case 'core_assign': {
         const c = ensureCoreSlot(ev.core_id);
         c.current_pid = ev.pid;
+        markCoreActive(c, ev.core_id);
         pushLog(`◈ core ${ev.core_id} ← P${ev.pid}`, 'amber');
         if (isSelected(ev.core_id)) currentPID.value = ev.pid;
         break;
@@ -721,11 +905,51 @@ export const useCpuStore = defineStore('cpu', () => {
     timerQuantum.value = q;
     send({ cmd: 'timer_quantum', quantum: q });
   }
+  function setSpeed(hz: number) {
+    stepHz.value = hz;
+    send({ cmd: 'set_speed', speed: hz });
+  }
   function pushKey(key: string) { send({ cmd: 'push_key', key }); }
   function share() { send({ cmd: 'share' }); }
   function unshare() { send({ cmd: 'unshare' }); }
   function setAlias(alias: string) { send({ cmd: 'set_alias', alias }); }
   function setNumCores(n: number) { send({ cmd: 'set_num_cores', cores: n }); }
+
+  // Presence is owner-only: send the current section + visible cores so
+  // autofollowing viewers can mirror them. Debounced so a flurry of route
+  // changes (or a select-all toggle) collapses into a single broadcast.
+  let presenceTimer: number | null = null;
+  const PRESENCE_DEBOUNCE_MS = 300;
+  function sendPresence(p: Presence) {
+    if (sessionInfo.value.role !== 'owner') return;
+    // Track locally too — keeps the owner's own state in lockstep with what
+    // viewers receive, and lets late subscribers read it directly.
+    lastPresence.value = {
+      section: p.section,
+      cores: [...p.cores],
+      mode: p.mode,
+      narrators: p.narrators,
+    };
+    if (presenceTimer !== null) {
+      window.clearTimeout(presenceTimer);
+    }
+    presenceTimer = window.setTimeout(() => {
+      presenceTimer = null;
+      send({
+        cmd: 'presence',
+        section: p.section,
+        visible_cores: p.cores,
+        mode: p.mode,
+        narrators: p.narrators,
+      });
+    }, PRESENCE_DEBOUNCE_MS);
+  }
+  // Viewer-only: tap the host on the shoulder. Backend forwards a hand_raise
+  // event to the owner with our session label so they see who knocked.
+  function raiseHand() {
+    if (sessionInfo.value.role !== 'viewer') return;
+    send({ cmd: 'hand_raise' });
+  }
 
   // viewerLink arma la URL completa que el owner puede copiar para compartir.
   function viewerLink(): string {
@@ -738,15 +962,21 @@ export const useCpuStore = defineStore('cpu', () => {
     regs, segments, mode, halted, running, tick, stepHz, timerQuantum,
     changedRegs,
     programs, selectedProgram, log, connected, lastError,
+    reconnectAttempts, nextRetryAt, reconnectNow,
     procs, currentPID, readyQueue, waitQueue, flashingPIDs, procSources, procSourceMaps,
     cores, numCores, selectedCoreId, selectedCoreIds, isCoreVisible,
     toggleCoreSelection, selectAllCores, selectOnlyCore, setSelectedCore,
     mutexes, semaphores,
+    activeFrameByCore, lastFiredHandlerByVector,
     subscribe,
     consoleChunks, faultShake,
     glossarySearch, glossaryOpenSignal,
     sessionInfo, isViewer, viewerLink,
-    connect, load, step, run, pause, reset, clearLog, setQuantum, pushKey, openGlossary,
-    share, unshare, setAlias, setNumCores,
+    lastPresence, handRaiseSignal, lastHandRaiseLabel,
+    connect, load, step, run, pause, reset, clearLog, setQuantum, setSpeed, pushKey, openGlossary,
+    share, unshare, setAlias, setNumCores, sendPresence, raiseHand,
+    // Test seam: vitest fakes the WebSocket by dispatching events directly
+    // through this entry point. Production code uses the real ws.onmessage.
+    __applyEvent: applyEvent,
   };
 });

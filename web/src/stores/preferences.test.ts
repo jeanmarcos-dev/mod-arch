@@ -6,10 +6,16 @@ describe('preferences store', () => {
     window.localStorage.clear();
   });
 
-  it('starts in compact mode with sidebar expanded', () => {
+  it('starts in pedagogic mode (animations on) with sidebar expanded', () => {
     const prefs = usePreferencesStore();
-    expect(prefs.mode).toBe('compact');
+    expect(prefs.mode).toBe('pedagogic');
     expect(prefs.sidebarCollapsed).toBe(false);
+    expect(prefs.animationsEnabled).toBe(true);
+  });
+
+  it('falls back to compact when explicitly requested', () => {
+    const prefs = usePreferencesStore();
+    prefs.setMode('compact');
     expect(prefs.animationsEnabled).toBe(false);
   });
 
