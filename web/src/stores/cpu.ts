@@ -342,6 +342,16 @@ export const useCpuStore = defineStore('cpu', () => {
     commitFilter(new Set([id]));
   }
 
+  // Replace the entire visible-cores set in one shot. Used by the viewer
+  // when a presence broadcast arrives so the filter never goes through the
+  // transient empty state that clear()+add() would create, and so the
+  // mutation goes through commitFilter exactly like every other path
+  // (consistent reactivity, persistence, and mirrorFocus side effects).
+  function setVisibleCores(ids: number[]) {
+    if (!Array.isArray(ids) || ids.length === 0) return;
+    commitFilter(new Set(ids));
+  }
+
   // Back-compat alias. Old code (and the alias kept on the public store
   // surface) treats "set selected core" as "focus this core exclusively".
   function setSelectedCore(id: number) {
@@ -1077,7 +1087,7 @@ export const useCpuStore = defineStore('cpu', () => {
     reconnectAttempts, nextRetryAt, reconnectNow,
     procs, currentPID, readyQueue, waitQueue, flashingPIDs, procSources, procSourceMaps,
     cores, numCores, selectedCoreId, selectedCoreIds, isCoreVisible,
-    toggleCoreSelection, selectAllCores, selectOnlyCore, setSelectedCore,
+    toggleCoreSelection, selectAllCores, selectOnlyCore, setSelectedCore, setVisibleCores,
     mutexes, semaphores,
     activeFrameByCore, lastFiredHandlerByVector,
     subscribe,

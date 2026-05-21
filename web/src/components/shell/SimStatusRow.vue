@@ -134,7 +134,6 @@ function onCoreAllClick() {
           :aria-pressed="cpu.isCoreVisible(c.id)"
           :class="['sim-bar__core-tab', {
             'sim-bar__core-tab--active': cpu.isCoreVisible(c.id),
-            'sim-bar__core-tab--focus': c.id === cpu.selectedCoreId && cpu.isCoreVisible(c.id),
             'sim-bar__core-tab--idle': c.current_pid === 0,
             'sim-bar__core-tab--halted': c.halted,
           }]"
@@ -209,7 +208,6 @@ function onCoreAllClick() {
             :aria-pressed="cpu.isCoreVisible(c.id)"
             :class="['sim-bar__core-tab', {
               'sim-bar__core-tab--active': cpu.isCoreVisible(c.id),
-              'sim-bar__core-tab--focus': c.id === cpu.selectedCoreId && cpu.isCoreVisible(c.id),
               'sim-bar__core-tab--idle': c.current_pid === 0,
               'sim-bar__core-tab--halted': c.halted,
             }]"
@@ -396,9 +394,6 @@ function onCoreAllClick() {
   color: var(--red-soft, #ff7a7a);
   opacity: 0.75;
 }
-.sim-bar__core-tab--focus {
-  box-shadow: inset 0 -2px 0 0 var(--amber);
-}
 .sim-bar__core-tab:disabled {
   cursor: default;
 }
@@ -515,4 +510,45 @@ function onCoreAllClick() {
 .sim-pill--ws-on .sim-pill__v { color: var(--green); }
 .sim-pill--ws-off { border-color: var(--red); }
 .sim-pill--ws-off .sim-pill__v { color: var(--red); }
+
+@media (max-width: 480px) {
+  /* Switch the row from wrap-friendly to a horizontally-scrollable strip so
+     all pills remain in a single line in priority order. The mask hints
+     that more content sits past the right edge. */
+  .sim-status-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    justify-content: flex-start;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+    mask-image: linear-gradient(to right, black 88%, transparent);
+  }
+  .sim-status-row--multi {
+    flex-direction: column;
+    overflow-x: visible;
+    mask-image: none;
+  }
+  .sim-status-row__header,
+  .sim-core-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    justify-content: flex-start;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+    mask-image: linear-gradient(to right, black 88%, transparent);
+  }
+  .sim-pill {
+    font-size: 9px;
+    padding: 0 6px;
+    flex-shrink: 0;
+  }
+  .sim-pill__k { font-size: 8px; }
+  .sim-pill--mono .sim-pill__v { font-size: 9.5px; }
+  .sim-pill--pid   { min-width: 50px; }
+  .sim-pill--mode  { min-width: 72px; }
+  .sim-pill--reg   { min-width: 100px; }
+  .sim-pill--tick  { min-width: 64px; }
+  .sim-pill--state { min-width: 64px; }
+  .sim-pill--ws    { min-width: 52px; }
+}
 </style>

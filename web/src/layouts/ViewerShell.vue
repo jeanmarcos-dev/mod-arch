@@ -71,10 +71,11 @@ function applyPresence(p: ApplyArgs) {
     router.push(p.section).catch(() => undefined);
   }
   // Mirror visible cores so the host's filter selection drives the viewer's
-  // SimStatusRow. The replace API is symmetric to what selectOnlyCore does.
+  // SimStatusRow. setVisibleCores replaces the set atomically (commitFilter
+  // path) so reactivity, persistence and mirrorFocus run exactly like for
+  // a local toggle.
   if (Array.isArray(p.cores) && p.cores.length > 0) {
-    cpu.selectedCoreIds.clear();
-    for (const id of p.cores) cpu.selectedCoreIds.add(id);
+    cpu.setVisibleCores(p.cores);
   }
   // Assign the mode ref directly instead of calling setMode — setMode has a
   // side effect that flips narrators on for non-compact presets, which would
