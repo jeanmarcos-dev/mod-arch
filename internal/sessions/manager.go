@@ -102,12 +102,33 @@ func (r Role) String() string {
 // host has selected; Narrators is whether the host has the animated
 // narrators turned on. Both let the viewer reproduce the host's pacing and
 // visual style, not just the section they are looking at.
+//
+// Focus mirrors the owner's inner-tab and panel state (which middle tab is
+// active, where memory is centered, which PID is pinned) so a viewer joining
+// late lands on the exact view the owner is presenting. The pointer fields
+// in Focus are zero-value-friendly: a missing pointer means "the owner did
+// not pick a value yet, the viewer keeps its local default".
 type Presence struct {
 	Section   string    `json:"section"`
 	Cores     []int     `json:"cores"`
 	Mode      string    `json:"mode"`
 	Narrators bool      `json:"narrators"`
+	Focus     Focus     `json:"focus"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Focus captures the host's currently visible inner state. Each pointer is
+// optional — nil means "no opinion from the owner, viewer keeps its local
+// value". This way the wire only carries explicit choices.
+type Focus struct {
+	MiddleTab        *string  `json:"middle_tab,omitempty"`
+	MobileTab        *string  `json:"mobile_tab,omitempty"`
+	MemoryBaseAddr   *uint64  `json:"memory_base_addr,omitempty"`
+	MemoryAutoFollow *bool    `json:"memory_auto_follow,omitempty"`
+	PinnedPID        *int     `json:"pinned_pid,omitempty"`
+	SimBarMode       *string  `json:"sim_bar_mode,omitempty"`
+	SidebarCollapsed *bool    `json:"sidebar_collapsed,omitempty"`
+	IsMobile         *bool    `json:"is_mobile,omitempty"`
 }
 
 // Session is an isolated instance for an owner plus its viewers.

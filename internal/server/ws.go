@@ -79,10 +79,11 @@ type Command struct {
 	// presenting, the visible cores filter, the presentation mode preset and
 	// the narrators toggle. Viewers with autofollow on mirror these to keep
 	// their UI in sync.
-	Section     string `json:"section,omitempty"`
-	VisibleCore []int  `json:"visible_cores,omitempty"`
-	Mode        string `json:"mode,omitempty"`
-	Narrators   *bool  `json:"narrators,omitempty"`
+	Section     string      `json:"section,omitempty"`
+	VisibleCore []int       `json:"visible_cores,omitempty"`
+	Mode        string      `json:"mode,omitempty"`
+	Narrators   *bool       `json:"narrators,omitempty"`
+	Focus       *FocusInput `json:"focus,omitempty"`
 
 	// Whiteboard pointer payload (cmd="pointer"). Coordinates are DOM-anchored:
 	// PointerAnchor is the id of a [data-pizarra-anchor] element under the
@@ -98,6 +99,22 @@ type Command struct {
 	PointerOffsetX float64 `json:"offset_x,omitempty"`
 	PointerOffsetY float64 `json:"offset_y,omitempty"`
 	PointerRoute   string  `json:"route,omitempty"`
+}
+
+// FocusInput mirrors the wire shape the owner sends inside a presence
+// command. Every field is a pointer so the client can choose to update only
+// the ones that actually changed — the server merges the deltas into the
+// stored Focus snapshot. The structure mirrors sessions.Focus 1:1 except
+// each field is decoded server-side before propagation.
+type FocusInput struct {
+	MiddleTab        *string `json:"middle_tab,omitempty"`
+	MobileTab        *string `json:"mobile_tab,omitempty"`
+	MemoryBaseAddr   *uint64 `json:"memory_base_addr,omitempty"`
+	MemoryAutoFollow *bool   `json:"memory_auto_follow,omitempty"`
+	PinnedPID        *int    `json:"pinned_pid,omitempty"`
+	SimBarMode       *string `json:"sim_bar_mode,omitempty"`
+	SidebarCollapsed *bool   `json:"sidebar_collapsed,omitempty"`
+	IsMobile         *bool   `json:"is_mobile,omitempty"`
 }
 
 // handleWS resolves the session from cookies and services the WebSocket
@@ -168,6 +185,7 @@ func (s *Server) sessionInfoMessage(sess *sessions.Session, role sessions.Role) 
 		"cores":     pres.Cores,
 		"mode":      pres.Mode,
 		"narrators": pres.Narrators,
+		"focus":     focusPayload(pres.Focus),
 	}
 	if pres.Cores == nil {
 		presPayload["cores"] = []int{}
@@ -340,24 +358,30 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 // handlePresence stores the owner's current section + filters + view
 // settings and broadcasts it to every viewer of the session so
 // autofollowing students see the same thing the host is presenting.
+//
+// Focus is treated as an additive merge against the previous snapshot: every
+// missing pointer is left alone so the client can ship deltas. The merged
+// snapshot is what gets persisted in the session and rebroadcast.
 func (s *Server) handlePresence(cmd Command, sess *sessions.Session) {
 	section := strings.TrimSpace(cmd.Section)
 	if section == "" {
 		return
 	}
-	// Normalize the visible cores slice so the payload is deterministic.
 	cores := append([]int(nil), cmd.VisibleCore...)
 	mode := normalizePresentationMode(cmd.Mode)
 	narrators := false
 	if cmd.Narrators != nil {
 		narrators = *cmd.Narrators
 	}
+	prev := sess.Presence()
+	focus := mergeFocus(prev.Focus, cmd.Focus)
 	now := time.Now()
 	sess.SetPresence(sessions.Presence{
 		Section:   section,
 		Cores:     cores,
 		Mode:      mode,
 		Narrators: narrators,
+		Focus:     focus,
 		UpdatedAt: now,
 	})
 	if cores == nil {
@@ -369,8 +393,96 @@ func (s *Server) handlePresence(cmd Command, sess *sessions.Session) {
 		"cores":     cores,
 		"mode":      mode,
 		"narrators": narrators,
+		"focus":     focusPayload(focus),
 		"at":        now.Unix(),
 	}, sim.RoleViewer)
+}
+
+// focusPayload renders a sessions.Focus as the omit-empty map the wire
+// expects: only fields the owner has actually set show up, so the viewer
+// sees a clean delta vs noisy zero values.
+func focusPayload(f sessions.Focus) map[string]any {
+	out := map[string]any{}
+	if f.MiddleTab != nil {
+		out["middle_tab"] = *f.MiddleTab
+	}
+	if f.MobileTab != nil {
+		out["mobile_tab"] = *f.MobileTab
+	}
+	if f.MemoryBaseAddr != nil {
+		out["memory_base_addr"] = *f.MemoryBaseAddr
+	}
+	if f.MemoryAutoFollow != nil {
+		out["memory_auto_follow"] = *f.MemoryAutoFollow
+	}
+	if f.PinnedPID != nil {
+		out["pinned_pid"] = *f.PinnedPID
+	}
+	if f.SimBarMode != nil {
+		out["sim_bar_mode"] = *f.SimBarMode
+	}
+	if f.SidebarCollapsed != nil {
+		out["sidebar_collapsed"] = *f.SidebarCollapsed
+	}
+	if f.IsMobile != nil {
+		out["is_mobile"] = *f.IsMobile
+	}
+	return out
+}
+
+// mergeFocus applies the deltas in input on top of base. Missing fields in
+// input mean "no change" so a client that only flips one knob does not have
+// to resend the full focus snapshot every time.
+func mergeFocus(base sessions.Focus, input *FocusInput) sessions.Focus {
+	out := base
+	if input == nil {
+		return out
+	}
+	if input.MiddleTab != nil {
+		v := strings.TrimSpace(*input.MiddleTab)
+		if v == "" {
+			out.MiddleTab = nil
+		} else {
+			out.MiddleTab = &v
+		}
+	}
+	if input.MobileTab != nil {
+		v := strings.TrimSpace(*input.MobileTab)
+		if v == "" {
+			out.MobileTab = nil
+		} else {
+			out.MobileTab = &v
+		}
+	}
+	if input.MemoryBaseAddr != nil {
+		v := *input.MemoryBaseAddr
+		out.MemoryBaseAddr = &v
+	}
+	if input.MemoryAutoFollow != nil {
+		v := *input.MemoryAutoFollow
+		out.MemoryAutoFollow = &v
+	}
+	if input.PinnedPID != nil {
+		v := *input.PinnedPID
+		out.PinnedPID = &v
+	}
+	if input.SimBarMode != nil {
+		v := strings.TrimSpace(*input.SimBarMode)
+		if v == "" {
+			out.SimBarMode = nil
+		} else {
+			out.SimBarMode = &v
+		}
+	}
+	if input.SidebarCollapsed != nil {
+		v := *input.SidebarCollapsed
+		out.SidebarCollapsed = &v
+	}
+	if input.IsMobile != nil {
+		v := *input.IsMobile
+		out.IsMobile = &v
+	}
+	return out
 }
 
 // whiteboardRoutePattern accepts the same shape the SPA's router accepts: a

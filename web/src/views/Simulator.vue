@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Cpu, Code2, ListTree, MemoryStick, Boxes, Terminal } from '@lucide/vue';
 import { useCpuStore } from '../stores/cpu';
+import { useViewerMirrorStore } from '../stores/viewerMirror';
 import CpuPanel from '../components/CpuPanel.vue';
 import EventsLog from '../components/EventsLog.vue';
 import ProcessesPanel from '../components/ProcessesPanel.vue';
@@ -10,27 +11,59 @@ import MemoryPanel from '../components/MemoryPanel.vue';
 import CodeAsmSplit from '../components/CodeAsmSplit.vue';
 
 const cpu = useCpuStore();
+const mirror = useViewerMirrorStore();
 
-// En desktop hay 3 paneles siempre visibles (CPU izq, middle, Procs der) y el
-// middleTab controla qué panel del centro se ve.
-const middleTab = ref<'events' | 'memory' | 'code'>('events');
-
-// En mobile (≤ 768px) solo se ve UN panel a la vez. mobileTab controla cuál.
-// Si cambiás a code/events/memory en mobile, también actualizamos middleTab
-// para que al rotar a desktop quede consistente.
+// Tab state lives locally as the source of truth for the user that owns the
+// tab UI. Viewers receive overrides through the focus mirror: when the host
+// publishes a focus.middle_tab, mirroredMiddleTab below points at it and
+// activeMiddleTab returns the mirrored value. Owners ignore the mirror and
+// emit a focus delta on every change.
+type MiddleTab = 'events' | 'memory' | 'code';
 type MobileTab = 'cpu' | 'code' | 'events' | 'memory' | 'procs' | 'console';
-const mobileTab = ref<MobileTab>('events');
+const localMiddleTab = ref<MiddleTab>('events');
+const localMobileTab = ref<MobileTab>('events');
 
-watch(mobileTab, (val) => {
-  if (val === 'code' || val === 'events' || val === 'memory') {
-    middleTab.value = val;
-  }
+const isViewer = computed(() => cpu.sessionInfo.role === 'viewer');
+
+const activeMiddleTab = computed<MiddleTab>(() => {
+  if (isViewer.value && mirror.middleTab) return mirror.middleTab as MiddleTab;
+  return localMiddleTab.value;
+});
+const activeMobileTab = computed<MobileTab>(() => {
+  if (isViewer.value && mirror.mobileTab) return mirror.mobileTab as MobileTab;
+  return localMobileTab.value;
 });
 
-watch(middleTab, (val) => {
-  if (mobileTab.value === 'code' || mobileTab.value === 'events' || mobileTab.value === 'memory') {
-    mobileTab.value = val;
+function setMiddleTab(val: MiddleTab) {
+  localMiddleTab.value = val;
+  if (val === 'code' || val === 'events' || val === 'memory') {
+    localMobileTab.value = val;
   }
+  if (!isViewer.value) {
+    cpu.sendFocus({ middle_tab: val, mobile_tab: val });
+  }
+}
+
+function setMobileTab(val: MobileTab) {
+  localMobileTab.value = val;
+  if (val === 'code' || val === 'events' || val === 'memory') {
+    localMiddleTab.value = val;
+  }
+  if (!isViewer.value) {
+    cpu.sendFocus({
+      mobile_tab: val,
+      middle_tab: (val === 'code' || val === 'events' || val === 'memory') ? val : undefined,
+    });
+  }
+}
+
+// Mirror-driven local copies: when the viewer receives a new focus, sync the
+// local refs so a later autofollow-off does not snap the tab back.
+watch(() => mirror.middleTab, (val) => {
+  if (isViewer.value && val) localMiddleTab.value = val as MiddleTab;
+});
+watch(() => mirror.mobileTab, (val) => {
+  if (isViewer.value && val) localMobileTab.value = val as MobileTab;
 });
 
 const isMobile = ref(false);
@@ -42,7 +75,7 @@ function checkMobile() {
 // siempre visibles + middleTab para code/events/memory. En mobile, mobileTab decide todo.
 const visible = computed(() => {
   if (isMobile.value) {
-    const t = mobileTab.value;
+    const t = activeMobileTab.value;
     return {
       cpu: t === 'cpu',
       code: t === 'code',
@@ -55,9 +88,9 @@ const visible = computed(() => {
   }
   return {
     cpu: true,
-    code: middleTab.value === 'code',
-    events: middleTab.value === 'events',
-    memory: middleTab.value === 'memory',
+    code: activeMiddleTab.value === 'code',
+    events: activeMiddleTab.value === 'events',
+    memory: activeMiddleTab.value === 'memory',
     procs: true,
     console: true,
     middle: true,
@@ -79,12 +112,12 @@ onUnmounted(() => {
   <div :class="{ shake: cpu.faultShake }" class="root" data-pizarra-anchor="view-overview">
     <!-- Tab bar mobile-only — controla todo el layout. Sólo visible <= 768px (CSS) -->
     <nav class="mobile-tabs" :aria-hidden="!isMobile">
-      <button :class="{ active: mobileTab === 'cpu' }" @click="mobileTab = 'cpu'" title="Registros del CPU"><Cpu :size="14" :stroke-width="2" /><span>CPU</span></button>
-      <button :class="{ active: mobileTab === 'code' }" @click="mobileTab = 'code'" title="Código C"><Code2 :size="14" :stroke-width="2" /><span>CÓD</span></button>
-      <button :class="{ active: mobileTab === 'events' }" @click="mobileTab = 'events'" title="Log de eventos"><ListTree :size="14" :stroke-width="2" /><span>LOG</span></button>
-      <button :class="{ active: mobileTab === 'memory' }" @click="mobileTab = 'memory'" title="Memoria"><MemoryStick :size="14" :stroke-width="2" /><span>MEM</span></button>
-      <button :class="{ active: mobileTab === 'procs' }" @click="mobileTab = 'procs'" title="Procesos y PCB"><Boxes :size="14" :stroke-width="2" /><span>PROC</span></button>
-      <button :class="{ active: mobileTab === 'console' }" @click="mobileTab = 'console'" title="Consola + teclado"><Terminal :size="14" :stroke-width="2" /><span>CONS</span></button>
+      <button :class="{ active: activeMobileTab === 'cpu' }" @click="setMobileTab('cpu')" title="Registros del CPU"><Cpu :size="14" :stroke-width="2" /><span>CPU</span></button>
+      <button :class="{ active: activeMobileTab === 'code' }" @click="setMobileTab('code')" title="Código C"><Code2 :size="14" :stroke-width="2" /><span>CÓD</span></button>
+      <button :class="{ active: activeMobileTab === 'events' }" @click="setMobileTab('events')" title="Log de eventos"><ListTree :size="14" :stroke-width="2" /><span>LOG</span></button>
+      <button :class="{ active: activeMobileTab === 'memory' }" @click="setMobileTab('memory')" title="Memoria"><MemoryStick :size="14" :stroke-width="2" /><span>MEM</span></button>
+      <button :class="{ active: activeMobileTab === 'procs' }" @click="setMobileTab('procs')" title="Procesos y PCB"><Boxes :size="14" :stroke-width="2" /><span>PROC</span></button>
+      <button :class="{ active: activeMobileTab === 'console' }" @click="setMobileTab('console')" title="Consola + teclado"><Terminal :size="14" :stroke-width="2" /><span>CONS</span></button>
     </nav>
 
     <main class="layout">
@@ -93,20 +126,20 @@ onUnmounted(() => {
         <div class="middle-tabs desktop-only">
           <button
             class="tab"
-            :class="{ active: middleTab === 'code' }"
-            @click="middleTab = 'code'"
+            :class="{ active: activeMiddleTab === 'code' }"
+            @click="setMiddleTab('code')"
             title="Código fuente C de los procesos cargados. El kernel los compiló (manualmente) a binarios x86 antes de cargarlos."
           ><Code2 :size="14" :stroke-width="2" /><span>CÓDIGO C</span></button>
           <button
             class="tab"
-            :class="{ active: middleTab === 'events' }"
-            @click="middleTab = 'events'"
+            :class="{ active: activeMiddleTab === 'events' }"
+            @click="setMiddleTab('events')"
             title="Stream cronológico de eventos del simulador: instrucciones, mode switches, syscalls, etc."
           ><ListTree :size="14" :stroke-width="2" /><span>EVENT LOG</span></button>
           <button
             class="tab"
-            :class="{ active: middleTab === 'memory' }"
-            @click="middleTab = 'memory'"
+            :class="{ active: activeMiddleTab === 'memory' }"
+            @click="setMiddleTab('memory')"
             title="Vista hex dump de la memoria física. Puede saltar al EIP, al stack, o a cualquier dirección."
           ><MemoryStick :size="14" :stroke-width="2" /><span>MEMORIA</span></button>
         </div>

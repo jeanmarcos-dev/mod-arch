@@ -32,8 +32,8 @@ export type CpuEvent =
   | { type: 'core_release'; core_id: number; pid: number; reason?: string }
   | { type: 'mutex_op'; core_id: number; pid: number; mutex_id: number; op: 'create' | 'acquired' | 'waiting' | 'released' | 'handoff' | 'rejected'; next_pid?: number; waiters?: number[] }
   | { type: 'sem_op'; core_id: number; pid: number; sem_id: number; op: 'create' | 'wait_immediate' | 'wait_blocked' | 'signal' | 'handoff'; count: number; next_pid?: number; waiters?: number[] }
-  | { type: 'session_info'; id: string; mode: string; role: string; label: string; view_token: string; user_id?: string; user_name?: string; user_email?: string; presence?: { section: string; cores: number[]; mode?: string; narrators?: boolean } }
-  | { type: 'presence'; section: string; cores: number[]; mode?: string; narrators?: boolean; at?: number }
+  | { type: 'session_info'; id: string; mode: string; role: string; label: string; view_token: string; user_id?: string; user_name?: string; user_email?: string; presence?: { section: string; cores: number[]; mode?: string; narrators?: boolean; focus?: Focus } }
+  | { type: 'presence'; section: string; cores: number[]; mode?: string; narrators?: boolean; focus?: Focus; at?: number }
   | { type: 'hand_raise'; label: string; at?: number }
   | { type: 'owner_pointer'; anchor?: string; offset_x?: number; offset_y?: number; route?: string; ts?: number; off?: boolean }
   | { type: 'error'; message: string };
@@ -75,12 +75,33 @@ export interface SessionInfo {
 // cores, presentation mode preset and narrators toggle. Viewers with
 // autofollow on mirror these values. Owner-side, it is set on every
 // navigation or preference change so the server can rebroadcast.
+//
+// Focus is the inner-panel state of the host (which middle tab is active,
+// where memory is centered, etc.). Every field is optional — only the ones
+// the owner has actually set are present, and the server merges deltas so
+// the client can send partial updates.
 export type PresentationMode = 'compact' | 'pedagogic' | 'projector';
+export type MiddleTab = 'code' | 'events' | 'memory' | 'console';
+export type MobileTab = 'cpu' | 'code' | 'events' | 'memory' | 'procs' | 'console';
+export type SimBarMode = 'docked' | 'floating';
+
+export interface Focus {
+  middle_tab?: MiddleTab;
+  mobile_tab?: MobileTab;
+  memory_base_addr?: number;
+  memory_auto_follow?: boolean;
+  pinned_pid?: number;
+  sim_bar_mode?: SimBarMode;
+  sidebar_collapsed?: boolean;
+  is_mobile?: boolean;
+}
+
 export interface Presence {
   section: string;
   cores: number[];
   mode: PresentationMode | '';
   narrators: boolean;
+  focus?: Focus;
 }
 
 export interface ProgramInfo {
@@ -752,6 +773,7 @@ export const useCpuStore = defineStore('cpu', () => {
             cores: ev.presence.cores ?? [],
             mode: (ev.presence.mode as Presence['mode']) ?? '',
             narrators: Boolean(ev.presence.narrators),
+            focus: ev.presence.focus ?? {},
           };
         }
         if (ev.role === 'viewer') {
@@ -764,6 +786,7 @@ export const useCpuStore = defineStore('cpu', () => {
           cores: ev.cores ?? [],
           mode: (ev.mode as Presence['mode']) ?? '',
           narrators: Boolean(ev.narrators),
+          focus: ev.focus ?? {},
         };
         break;
       case 'hand_raise':
@@ -924,8 +947,24 @@ export const useCpuStore = defineStore('cpu', () => {
   // changes (or a select-all toggle) collapses into a single broadcast.
   let presenceTimer: number | null = null;
   const PRESENCE_DEBOUNCE_MS = 300;
+  // Owner-only helper: ship a partial focus update without forcing the caller
+  // to re-supply section/cores/mode/narrators. The current snapshot in
+  // lastPresence.value is merged with the delta so a component only worries
+  // about the focus field it actually owns (middleTab, pinnedPID, etc.).
+  function sendFocus(delta: Partial<Focus>) {
+    if (sessionInfo.value.role !== 'owner') return;
+    const current = lastPresence.value;
+    if (!current.section) return; // No section yet — the next presence will carry the focus.
+    const mergedFocus: Focus = { ...(current.focus ?? {}), ...delta };
+    sendPresence({
+      ...current,
+      focus: mergedFocus,
+    });
+  }
+
   function sendPresence(p: Presence) {
     if (sessionInfo.value.role !== 'owner') return;
+    const focus: Focus | undefined = p.focus ? { ...p.focus } : undefined;
     // Track locally too — keeps the owner's own state in lockstep with what
     // viewers receive, and lets late subscribers read it directly.
     lastPresence.value = {
@@ -933,6 +972,7 @@ export const useCpuStore = defineStore('cpu', () => {
       cores: [...p.cores],
       mode: p.mode,
       narrators: p.narrators,
+      focus,
     };
     if (presenceTimer !== null) {
       window.clearTimeout(presenceTimer);
@@ -945,6 +985,7 @@ export const useCpuStore = defineStore('cpu', () => {
         visible_cores: p.cores,
         mode: p.mode,
         narrators: p.narrators,
+        focus,
       });
     }, PRESENCE_DEBOUNCE_MS);
   }
@@ -991,7 +1032,7 @@ export const useCpuStore = defineStore('cpu', () => {
     sessionInfo, isViewer, viewerLink,
     lastPresence, handRaiseSignal, lastHandRaiseLabel,
     connect, load, step, run, pause, reset, clearLog, setQuantum, setSpeed, pushKey, openGlossary,
-    share, unshare, setAlias, setNumCores, sendPresence, raiseHand, sendPointer, sendPointerOff,
+    share, unshare, setAlias, setNumCores, sendPresence, sendFocus, raiseHand, sendPointer, sendPointerOff,
     // Test seam: vitest fakes the WebSocket by dispatching events directly
     // through this entry point. Production code uses the real ws.onmessage.
     __applyEvent: applyEvent,

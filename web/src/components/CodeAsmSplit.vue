@@ -2,13 +2,31 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import { MousePointerClick } from '@lucide/vue';
 import { useCpuStore, type SourceLine } from '../stores/cpu';
+import { useViewerMirrorStore } from '../stores/viewerMirror';
 
 const cpu = useCpuStore();
+const mirror = useViewerMirrorStore();
 
 // PID actually being displayed: follows the focused core's current_pid unless
-// the user pins another tab.
-const pinnedPID = ref<number | null>(null);
+// the user pins another tab. When a viewer is autofollowing, the mirror takes
+// precedence so the audience sees the same pinned tab the host picked.
+const localPinnedPID = ref<number | null>(null);
+const isViewer = computed(() => cpu.sessionInfo.role === 'viewer');
+const pinnedPID = computed<number | null>(() => {
+  if (isViewer.value && mirror.pinnedPID !== undefined) {
+    return mirror.pinnedPID === 0 ? null : mirror.pinnedPID;
+  }
+  return localPinnedPID.value;
+});
 const viewingPID = computed(() => pinnedPID.value ?? cpu.currentPID);
+
+// Mirror-driven sync of the local copy so toggling autofollow off keeps the
+// last pinned PID instead of reverting to the auto follow.
+watch(() => mirror.pinnedPID, (val) => {
+  if (isViewer.value && typeof val === 'number') {
+    localPinnedPID.value = val === 0 ? null : val;
+  }
+});
 
 const source = computed<string>(() => {
   if (!viewingPID.value) return '';
@@ -81,7 +99,13 @@ function isActiveAsm(offset: number): boolean {
 }
 
 function pickProc(pid: number) {
-  pinnedPID.value = pinnedPID.value === pid ? null : pid;
+  const next = localPinnedPID.value === pid ? null : pid;
+  localPinnedPID.value = next;
+  if (!isViewer.value) {
+    // Encode "unpinned" as 0 on the wire because Focus.PinnedPID is a *int
+    // and 0 / no pinned PID are equivalent in practice.
+    cpu.sendFocus({ pinned_pid: next ?? 0 });
+  }
 }
 
 // Auto-scroll: every time the active C line or ASM offset changes, bring the
@@ -464,10 +488,10 @@ function fmtHex(n: number): string {
 .explain strong { color: var(--text); }
 .explain em { color: var(--amber-dim); }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   /* Narrow viewports: stack panes vertically so each one keeps a usable
      reading width. The C panel stays on top because the lesson starts there. */
   .split { grid-template-columns: 1fr; }
-  .split .pane--asm { min-height: 200px; }
+  .split .pane--asm { min-height: 260px; }
 }
 </style>

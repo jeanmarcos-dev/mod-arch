@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useCpuStore } from '../../stores/cpu';
 import { usePreferencesStore } from '../../stores/preferences';
+import { useViewerMirrorStore } from '../../stores/viewerMirror';
 import { useNarrators, type MemWrite, type MemRead } from '../../lib/narratorBus';
 import ByteFlightNarrator from '../../components/narrators/ByteFlightNarrator.vue';
 import Term from '../../components/glossary/Term.vue';
@@ -14,11 +15,17 @@ import { fmtAddr, regionFor, MEM_TOTAL } from '../../lib/memoryLayout';
 
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
+const mirror = useViewerMirrorStore();
 
 const ROW_COUNT = 24;
 const WND_SIZE = ROW_COUNT * 16; // 384 B visible
 
-const baseAddr = ref(0x200000);
+// Local copies are the source of truth for owners and the fallback for
+// viewers. When the host publishes focus.memory_base_addr/memory_auto_follow
+// the writable computed below routes reads to the mirror so the viewer
+// stays in lockstep, and writes through to the local ref so toggling
+// autofollow off snaps back to the last-seen value instead of jumping.
+const localBaseAddr = ref(0x200000);
 const bytes = ref<number[]>([]);
 const fetchError = ref('');
 
@@ -26,7 +33,39 @@ const fetchError = ref('');
 // the audience always sees the action — useful for kernel-heavy demos
 // (race_counter, philos_*, producer_consumer) whose activity lives at
 // 0x001FFFE0 area, outside the user_code default window.
-const autoFollow = ref(false);
+const localAutoFollow = ref(false);
+
+const isViewer = computed(() => cpu.sessionInfo.role === 'viewer');
+
+const baseAddr = computed<number>({
+  get: () => (isViewer.value && mirror.memoryBaseAddr !== undefined ? mirror.memoryBaseAddr : localBaseAddr.value),
+  set: (v: number) => {
+    localBaseAddr.value = v;
+    if (!isViewer.value) {
+      cpu.sendFocus({ memory_base_addr: v });
+    }
+  },
+});
+
+const autoFollow = computed<boolean>({
+  get: () => (isViewer.value && mirror.memoryAutoFollow !== undefined ? mirror.memoryAutoFollow : localAutoFollow.value),
+  set: (v: boolean) => {
+    localAutoFollow.value = v;
+    if (!isViewer.value) {
+      cpu.sendFocus({ memory_auto_follow: v });
+    }
+  },
+});
+
+// Mirror-driven sync of the local copies: when a viewer receives a new
+// memory focus from the host, copy it into the local refs so a later
+// autofollow-off keeps the view exactly where it was.
+watch(() => mirror.memoryBaseAddr, (val) => {
+  if (isViewer.value && typeof val === 'number') localBaseAddr.value = val;
+});
+watch(() => mirror.memoryAutoFollow, (val) => {
+  if (isViewer.value && typeof val === 'boolean') localAutoFollow.value = val;
+});
 const FOLLOW_THROTTLE_MS = 600;
 let lastFollowAt = 0;
 
@@ -557,7 +596,7 @@ cpu.subscribe((ev) => {
   min-height: 0;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 768px) {
   .memory-page__head {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto auto;
