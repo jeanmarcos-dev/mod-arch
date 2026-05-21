@@ -17,10 +17,16 @@ import (
 )
 
 // Demo is a scenario with one or more processes to load.
+//
+// Cores is optional: when greater than zero, LoadProgram switches the
+// underlying kernel to that core count before loading the procs. Default-zero
+// leaves the current configuration untouched, so legacy single-core demos
+// behave as before.
 type Demo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Category    string `json:"category,omitempty"`
+	Cores       int    `json:"cores,omitempty"`
 	Procs       []Proc `json:"-"`
 }
 
@@ -68,9 +74,10 @@ type Simulator struct {
 	clients  map[*Client]struct{}
 	clientMu sync.RWMutex
 
-	running bool
-	runStop chan struct{}
-	stepHz  int
+	running  bool
+	runStop  chan struct{}
+	stepHz   int
+	hzChange chan int
 
 	logger *slog.Logger
 }
@@ -109,10 +116,19 @@ func New(cfg Config) *Simulator {
 func (s *Simulator) LoadProgram(name string) error {
 	s.mu.Lock()
 	demo, ok := s.programs[name]
+	s.mu.Unlock()
 	if !ok {
-		s.mu.Unlock()
 		return fmt.Errorf("unknown demo: %q", name)
 	}
+	if demo.Cores > 0 {
+		// SetNumCores is a no-op when the kernel already has the requested
+		// count; otherwise it rebuilds the kernel with a fresh layout. Either
+		// way it acquires s.mu internally, so it must run outside our lock.
+		if err := s.SetNumCores(demo.Cores); err != nil {
+			return err
+		}
+	}
+	s.mu.Lock()
 	s.kernel.Reset()
 	pids := make([]int, 0, len(demo.Procs))
 	sources := make(map[int]string)
@@ -181,7 +197,9 @@ func (s *Simulator) StartRun(hz int) {
 	s.stepHz = hz
 	s.running = true
 	s.runStop = make(chan struct{})
+	s.hzChange = make(chan int, 1)
 	stop := s.runStop
+	hzCh := s.hzChange
 	interval := time.Second / time.Duration(hz)
 	s.mu.Unlock()
 
@@ -194,6 +212,10 @@ func (s *Simulator) StartRun(hz int) {
 			select {
 			case <-stop:
 				return
+			case newHz := <-hzCh:
+				if newHz > 0 {
+					ticker.Reset(time.Second / time.Duration(newHz))
+				}
 			case <-ticker.C:
 				s.mu.Lock()
 				hasWork := s.kernel.HasWork()
@@ -214,6 +236,37 @@ func (s *Simulator) StartRun(hz int) {
 	}()
 }
 
+// SetSpeed adjusts the run loop frequency on the fly. If the run loop is
+// active the ticker is reset without restarting the loop; otherwise only the
+// stored stepHz is updated so the next StartRun picks it up. A `state` event
+// announces the change to every connected client.
+func (s *Simulator) SetSpeed(hz int) {
+	if hz < 1 {
+		hz = 1
+	}
+	if hz > 60 {
+		hz = 60
+	}
+	s.mu.Lock()
+	if s.stepHz == hz {
+		s.mu.Unlock()
+		return
+	}
+	s.stepHz = hz
+	ch := s.hzChange
+	running := s.running
+	s.mu.Unlock()
+	if running && ch != nil {
+		// Non-blocking send: the loop drains one value per iteration, and a
+		// previous unread value already reflects user intent close enough.
+		select {
+		case ch <- hz:
+		default:
+		}
+	}
+	s.Broadcast(map[string]any{"type": "state", "hz": hz})
+}
+
 // StopRun stops the run loop.
 func (s *Simulator) StopRun() {
 	s.mu.Lock()
@@ -224,6 +277,7 @@ func (s *Simulator) StopRun() {
 	s.running = false
 	close(s.runStop)
 	s.runStop = nil
+	s.hzChange = nil
 	s.mu.Unlock()
 	s.Broadcast(map[string]any{"type": "state", "running": false})
 }
@@ -361,6 +415,8 @@ func (s *Simulator) snapshotLocked() map[string]any {
 		"source_maps":   s.procSourceMaps,
 		"cores":         cores,
 		"num_cores":     s.kernel.NumCores(),
+		"running":       s.running,
+		"hz":            s.stepHz,
 	}
 }
 

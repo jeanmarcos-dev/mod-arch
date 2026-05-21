@@ -83,10 +83,23 @@ func (EventModeSwitch) Tag() string { return "mode_switch" }
 //
 // It is the companion to EventModeSwitch: IRQ_FIRE explains WHY the kernel is
 // being entered, while ModeSwitch documents WHEN the HW flips the bit.
+//
+// Handler is the address read from IDT[vector] that the CPU is about to jump
+// to. FromMode is the privilege level the CPU was running at right before the
+// trap (3 = user, 0 = kernel). When FromMode == ModeUser the HW pushes a
+// three-word interrupt frame to the kernel stack; SavedEIP/SavedCS/SavedEFLAGS
+// carry that frame so the UI can render it without having to read kernel
+// memory. For kernel-mode interrupts those fields are omitted (the HW does not
+// push a frame when there is no privilege transition).
 type EventIRQFire struct {
-	CoreID int    `json:"core_id"`
-	Vector uint8  `json:"vector"`
-	Source string `json:"source"` // "HW" | "SW"
+	CoreID      int    `json:"core_id"`
+	Vector      uint8  `json:"vector"`
+	Source      string `json:"source"` // "HW" | "SW"
+	Handler     uint32 `json:"handler"`
+	FromMode    uint8  `json:"from_mode"`
+	SavedEIP    uint32 `json:"saved_eip,omitempty"`
+	SavedCS     uint16 `json:"saved_cs,omitempty"`
+	SavedEFLAGS uint32 `json:"saved_eflags,omitempty"`
 }
 
 // Tag returns the event tag.
@@ -140,11 +153,13 @@ func (EventPCBRestore) Tag() string { return "pcb_restore" }
 
 // EventSchedDecision is the headline event of the demo: the scheduler chose
 // to evict FromPID and run ToPID. ReadyQueue shows the queue state after the
-// decision.
+// decision. Reason names the trigger ("timer", "block", "exit", ...) so the
+// frontend can colour the entry differently in the context-switch feed.
 type EventSchedDecision struct {
-	FromPID    int   `json:"from_pid"`
-	ToPID      int   `json:"to_pid"`
-	ReadyQueue []int `json:"ready_queue"`
+	FromPID    int    `json:"from_pid"`
+	ToPID      int    `json:"to_pid"`
+	Reason     string `json:"reason,omitempty"`
+	ReadyQueue []int  `json:"ready_queue"`
 }
 
 // Tag returns the event tag.

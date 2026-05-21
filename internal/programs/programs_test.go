@@ -133,6 +133,98 @@ func TestPhilosophersSafe_HaltsWithoutDeadlock(t *testing.T) {
 	}
 }
 
+// TestShowcase_ConfigurationIsValid checks the showcase demo is registered
+// with the expected shape: it requests 4 cores, ships 4 procs, and every
+// proc has both bytes and a source map whose offsets fall inside the binary.
+// The source map is required so the CodeAsmSplit panel can light up the C
+// line matching EIP on each of the 4 PIDs.
+func TestShowcase_ConfigurationIsValid(t *testing.T) {
+	demo := findDemo(t, "showcase")
+	if demo.Cores != 4 {
+		t.Errorf("showcase.Cores = %d, want 4", demo.Cores)
+	}
+	if demo.Category != "showcase" {
+		t.Errorf("showcase.Category = %q, want %q", demo.Category, "showcase")
+	}
+	if len(demo.Procs) != 4 {
+		t.Fatalf("showcase has %d procs, want 4", len(demo.Procs))
+	}
+	for _, p := range demo.Procs {
+		if len(p.Bytes) == 0 {
+			t.Errorf("proc %q has empty Bytes", p.Name)
+			continue
+		}
+		if len(p.SourceMap) == 0 {
+			t.Errorf("proc %q has no SourceMap", p.Name)
+		}
+		for _, sl := range p.SourceMap {
+			if int(sl.Offset) >= len(p.Bytes) {
+				t.Errorf("proc %q SourceMap offset 0x%X >= len(Bytes)=%d", p.Name, sl.Offset, len(p.Bytes))
+			}
+		}
+	}
+}
+
+// TestShowcase_RunOnFourCoresHitsExpectedStories drives the demo for enough
+// ticks on a 4-core kernel to confirm the four narrative beats land:
+//
+//  1. The producer creates exactly one semaphore (SemCreate via INT 0x81).
+//  2. The consumer eventually page-faults (state ZOMBIE, IRQ 0x0E fired).
+//  3. memwalk completes via sys_exit (state ZOMBIE).
+//  4. The reader stays BLOCKED because the test never pushes a key.
+//
+// We also check that each of the relevant IRQ vectors fires at least once
+// (0x0E, 0x20, 0x80, 0x81). IRQ 0x21 only fires when a key arrives, which
+// is the user's responsibility — out of scope for an automated test.
+func TestShowcase_RunOnFourCoresHitsExpectedStories(t *testing.T) {
+	demo := findDemo(t, "showcase")
+	k := kernel.NewMulti(cpu.DefaultMemSize, 4)
+	k.TimerQuantum = 8
+	loadDemo(t, k, demo)
+
+	seenVec := make(map[uint8]bool)
+	const budget = 8000
+	for step := 0; step < budget && !k.AllHalted(); step++ {
+		evs, err := k.Step()
+		if err != nil {
+			t.Fatalf("step %d: %v", step, err)
+		}
+		for _, e := range evs {
+			if ev, ok := e.(cpu.EventIRQFire); ok {
+				seenVec[ev.Vector] = true
+			}
+		}
+	}
+	if !k.AllHalted() {
+		t.Fatalf("kernel did not halt within %d steps (reader stuck non-BLOCKED?)", budget)
+	}
+
+	if len(k.Semaphores) != 1 {
+		t.Errorf("Semaphores = %d, want 1 (producer should have created sem id 1)", len(k.Semaphores))
+	}
+	if walker, ok := k.Processes[1]; !ok {
+		t.Error("PID 1 (memwalk) not registered")
+	} else if walker.State != kernel.StateZombie {
+		t.Errorf("memwalk state = %s, want ZOMBIE (sys_exit)", walker.State)
+	}
+	if reader, ok := k.Processes[2]; !ok {
+		t.Error("PID 2 (reader) not registered")
+	} else if reader.State != kernel.StateBlocked {
+		t.Errorf("reader state = %s, want BLOCKED (no key pushed)", reader.State)
+	}
+	if consumer, ok := k.Processes[4]; !ok {
+		t.Error("PID 4 (consumer_fault) not registered")
+	} else if consumer.State != kernel.StateZombie {
+		t.Errorf("consumer state = %s, want ZOMBIE (page fault)", consumer.State)
+	}
+
+	for _, v := range []uint8{0x0E, 0x20, 0x80, 0x81} {
+		if !seenVec[v] {
+			t.Errorf("IRQ 0x%02X never fired", v)
+		}
+	}
+}
+
 func TestSafeCounter_OnTwoCoresStillReaches400(t *testing.T) {
 	// Same demo but spread across two cores. The mutex still serializes the
 	// section, so the result must hold.

@@ -307,6 +307,7 @@ func (k *Kernel) blockOnSync(core *Core, reason string) []cpu.Event {
 			cpu.EventSchedDecision{
 				FromPID:    curPID,
 				ToPID:      nextPID,
+				Reason:     "block",
 				ReadyQueue: k.Ready.Snapshot(),
 			},
 			cpu.EventCoreRelease{CoreID: core.ID, PID: curPID, Reason: reason},
@@ -377,7 +378,7 @@ func (k *Kernel) wakeWaiter(pid int, reason string) []cpu.Event {
 		pcb.Core = idle.ID
 		k.loadCPUFromPCB(idle, pcb)
 		out = append(out,
-			cpu.EventSchedDecision{FromPID: 0, ToPID: pid, ReadyQueue: k.Ready.Snapshot()},
+			cpu.EventSchedDecision{FromPID: 0, ToPID: pid, Reason: "wake", ReadyQueue: k.Ready.Snapshot()},
 			cpu.EventCoreAssign{CoreID: idle.ID, PID: pid},
 			cpu.EventProcessState{PID: pid, State: string(StateRun)},
 		)

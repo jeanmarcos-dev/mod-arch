@@ -13,6 +13,11 @@ type Demo struct {
 	// etc.). Empty means "uncategorized" and the demo appears in the
 	// default picker.
 	Category string
+	// Cores requests a specific number of active CPU cores when this demo is
+	// loaded. Zero (the default) leaves the current kernel layout untouched,
+	// preserving single-core behavior for legacy demos. Values are clamped to
+	// [1, kernel.MaxCores] by sim.SetNumCores.
+	Cores int
 }
 
 // Proc is a single binary that the kernel loads as a process.
@@ -947,6 +952,238 @@ int main(void) {
 				philoBytes("philo_1_safe", 1, 2, 3, "filo 1: 2 → 3"),
 				// Asimetría: philo 2 toma 1 primero (lower) y luego 3.
 				philoBytes("philo_2_safe", 2, 1, 3, "filo 2: 1 → 3 (asimétrico, rompe el ciclo)"),
+			},
+		},
+
+		// ─── Showcase ─────────────────────────────────────────────────────
+		// Single demo that exercises every CPU-driven animation in one run.
+		// Cuatro procesos repartidos automáticamente uno por core: P1 camina
+		// memoria compartida (ByteFlight + heat grid + minimap pins), P2
+		// bloquea esperando teclado (BLOCKED + IRQ 0x21), P3 crea un
+		// semáforo y emite signals (INT 0x81 + ModeFlip C2), P4 espera el
+		// semáforo y termina con un page fault deliberado en kernel space.
+		{
+			Name:     "showcase",
+			Category: "showcase",
+			Cores:    4,
+			Description: "Paseo completo en 4 cores. Toca byte flights, heat de memoria, semáforos, sys_read bloqueante y page fault — exhibe casi todas las animaciones del simulador en una sola corrida. Apriete una tecla en la consola para desbloquear al reader (C1). HandRaiseBadge, ConnectionBanner y el glosario inline se prueban aparte (no son disparables desde un programa).",
+			Procs: []Proc{
+				{
+					Name: "memwalk",
+					Source: `// memwalk (Core 0) — recorre cuatro contadores compartidos en USER_STACK.
+// Cinco iteraciones × (load + inc + store) sobre cuatro direcciones
+// distintas. Resultado visible: byte flights repetidos hacia el HexGrid,
+// celdas con heat, pins en el minimap a 4 direcciones contiguas, eventos
+// con tag C0 en el ActivityFeed.
+
+int *counters = (int *)0x3FFE00;   // 4 ints contiguos
+
+int main(void) {
+    for (int i = 0; i < 5; i++) {
+        counters[0]++;
+        counters[1]++;
+        counters[2]++;
+        counters[3]++;
+    }
+    exit(0);
+}
+`,
+					Bytes: []byte{
+						0xB9, 0x05, 0x00, 0x00, 0x00, // mov ecx, 5
+						0xA1, 0x00, 0xFE, 0x3F, 0x00, // L: mov eax, [0x3FFE00]
+						0x40,                         // inc eax
+						0xA3, 0x00, 0xFE, 0x3F, 0x00, // mov [0x3FFE00], eax
+						0xA1, 0x04, 0xFE, 0x3F, 0x00, // mov eax, [0x3FFE04]
+						0x40,                         // inc eax
+						0xA3, 0x04, 0xFE, 0x3F, 0x00, // mov [0x3FFE04], eax
+						0xA1, 0x08, 0xFE, 0x3F, 0x00, // mov eax, [0x3FFE08]
+						0x40,                         // inc eax
+						0xA3, 0x08, 0xFE, 0x3F, 0x00, // mov [0x3FFE08], eax
+						0xA1, 0x0C, 0xFE, 0x3F, 0x00, // mov eax, [0x3FFE0C]
+						0x40,                         // inc eax
+						0xA3, 0x0C, 0xFE, 0x3F, 0x00, // mov [0x3FFE0C], eax
+						0x49,       // dec ecx
+						0x75, 0xD1, // jne L (target 0x05, after 0x34 → -0x2F)
+						0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1 (sys_exit)
+						0x31, 0xDB, // xor ebx, ebx
+						0xCD, 0x80, // int 0x80
+					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV ECX, 5    ; for init", CLine: 10},
+						{Offset: 0x05, Mnemonic: "MOV EAX, [0x3FFE00]", CLine: 11},
+						{Offset: 0x0A, Mnemonic: "INC EAX", CLine: 11},
+						{Offset: 0x0B, Mnemonic: "MOV [0x3FFE00], EAX", CLine: 11},
+						{Offset: 0x10, Mnemonic: "MOV EAX, [0x3FFE04]", CLine: 12},
+						{Offset: 0x15, Mnemonic: "INC EAX", CLine: 12},
+						{Offset: 0x16, Mnemonic: "MOV [0x3FFE04], EAX", CLine: 12},
+						{Offset: 0x1B, Mnemonic: "MOV EAX, [0x3FFE08]", CLine: 13},
+						{Offset: 0x20, Mnemonic: "INC EAX", CLine: 13},
+						{Offset: 0x21, Mnemonic: "MOV [0x3FFE08], EAX", CLine: 13},
+						{Offset: 0x26, Mnemonic: "MOV EAX, [0x3FFE0C]", CLine: 14},
+						{Offset: 0x2B, Mnemonic: "INC EAX", CLine: 14},
+						{Offset: 0x2C, Mnemonic: "MOV [0x3FFE0C], EAX", CLine: 14},
+						{Offset: 0x31, Mnemonic: "DEC ECX", CLine: 10},
+						{Offset: 0x32, Mnemonic: "JNE -47       ; for loop", CLine: 10},
+						{Offset: 0x34, Mnemonic: "MOV EAX, 1    ; sys_exit", CLine: 17},
+						{Offset: 0x39, Mnemonic: "XOR EBX, EBX", CLine: 17},
+						{Offset: 0x3B, Mnemonic: "INT 0x80", CLine: 17},
+					},
+				},
+				{
+					Name: "reader",
+					Source: `// reader (Core 1) — eco de teclado limitado a 3 lecturas.
+// Cada sys_read BLOQUEA al proc (estado BLOCKED visible en /procesos
+// y en el WaitQueue) hasta que llega IRQ 0x21. Al recibir la tecla:
+// IRET visible en InterruptNarrator, PCBCopy restore al volver a user.
+
+char buf;  // en su stack @ 0x37FFE0 (PID 2 → stack base 0x340000)
+
+int main(void) {
+    for (int i = 0; i < 3; i++) {
+        read(0, &buf, 1);     // → BLOCKED hasta IRQ 0x21
+        write(1, &buf, 1);    // echo a stdout
+    }
+    exit(0);
+}
+`,
+					Bytes: []byte{
+						0xBF, 0x03, 0x00, 0x00, 0x00, // mov edi, 3 (loop counter)
+						0xB8, 0x03, 0x00, 0x00, 0x00, // L: mov eax, 3 (sys_read)
+						0xBB, 0x00, 0x00, 0x00, 0x00, // mov ebx, 0
+						0xB9, 0xE0, 0xFF, 0x37, 0x00, // mov ecx, 0x37FFE0
+						0xBA, 0x01, 0x00, 0x00, 0x00, // mov edx, 1
+						0xCD, 0x80, // int 0x80
+						0xB8, 0x04, 0x00, 0x00, 0x00, // mov eax, 4 (sys_write)
+						0xBB, 0x01, 0x00, 0x00, 0x00, // mov ebx, 1
+						0xB9, 0xE0, 0xFF, 0x37, 0x00, // mov ecx, 0x37FFE0
+						0xBA, 0x01, 0x00, 0x00, 0x00, // mov edx, 1
+						0xCD, 0x80, // int 0x80
+						0x4F,       // dec edi
+						0x75, 0xD1, // jne L (target 0x05, after 0x34 → -0x2F)
+						0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1 (sys_exit)
+						0x31, 0xDB, // xor ebx, ebx
+						0xCD, 0x80, // int 0x80
+					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV EDI, 3    ; for init", CLine: 8},
+						{Offset: 0x05, Mnemonic: "MOV EAX, 3    ; sys_read", CLine: 9},
+						{Offset: 0x0A, Mnemonic: "MOV EBX, 0    ; fd=stdin", CLine: 9},
+						{Offset: 0x0F, Mnemonic: "MOV ECX, 0x37FFE0", CLine: 9},
+						{Offset: 0x14, Mnemonic: "MOV EDX, 1", CLine: 9},
+						{Offset: 0x19, Mnemonic: "INT 0x80      ; BLOCKED → IRQ 0x21", CLine: 9},
+						{Offset: 0x1B, Mnemonic: "MOV EAX, 4    ; sys_write", CLine: 10},
+						{Offset: 0x20, Mnemonic: "MOV EBX, 1    ; fd=stdout", CLine: 10},
+						{Offset: 0x25, Mnemonic: "MOV ECX, 0x37FFE0", CLine: 10},
+						{Offset: 0x2A, Mnemonic: "MOV EDX, 1", CLine: 10},
+						{Offset: 0x2F, Mnemonic: "INT 0x80      ; echo", CLine: 10},
+						{Offset: 0x31, Mnemonic: "DEC EDI", CLine: 8},
+						{Offset: 0x32, Mnemonic: "JNE -47       ; for loop", CLine: 8},
+						{Offset: 0x34, Mnemonic: "MOV EAX, 1    ; sys_exit", CLine: 13},
+						{Offset: 0x39, Mnemonic: "XOR EBX, EBX", CLine: 13},
+						{Offset: 0x3B, Mnemonic: "INT 0x80", CLine: 13},
+					},
+				},
+				{
+					Name: "producer",
+					Source: `// producer (Core 2) — crea un semáforo y emite cinco signals.
+// El consumer (Core 3) espera ese mismo semáforo. INT 0x81 dispara el arc
+// del InterruptNarrator y un ModeFlip user→kernel→user en cada signal.
+// El kernel render del semáforo es visible en /concurrencia.
+
+int main(void) {
+    sem_create(0);                  // sem id 1 (primer sem del kernel)
+    for (int i = 0; i < 5; i++) {
+        sem_signal(1);
+    }
+    exit(0);
+}
+`,
+					Bytes: []byte{
+						0xB8, 0x20, 0x00, 0x00, 0x00, // mov eax, 0x20 (SemCreate)
+						0xBB, 0x00, 0x00, 0x00, 0x00, // mov ebx, 0    (init=0)
+						0xCD, 0x81, // int 0x81 → eax=1
+						0xB9, 0x05, 0x00, 0x00, 0x00, // mov ecx, 5
+						0xBB, 0x01, 0x00, 0x00, 0x00, // L: mov ebx, 1 (sem id)
+						0xB8, 0x22, 0x00, 0x00, 0x00, // mov eax, 0x22 (SemSignal)
+						0xCD, 0x81, // int 0x81
+						0x49,       // dec ecx
+						0x75, 0xF1, // jne L (target 0x11, after 0x20 → -0x0F)
+						0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1 (sys_exit)
+						0x31, 0xDB, // xor ebx, ebx
+						0xCD, 0x80, // int 0x80
+					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV EAX, 0x20  ; SemCreate", CLine: 6},
+						{Offset: 0x05, Mnemonic: "MOV EBX, 0     ; init=0", CLine: 6},
+						{Offset: 0x0A, Mnemonic: "INT 0x81       ; → eax=1", CLine: 6},
+						{Offset: 0x0C, Mnemonic: "MOV ECX, 5     ; for init", CLine: 7},
+						{Offset: 0x11, Mnemonic: "MOV EBX, 1     ; sem id", CLine: 8},
+						{Offset: 0x16, Mnemonic: "MOV EAX, 0x22  ; SemSignal", CLine: 8},
+						{Offset: 0x1B, Mnemonic: "INT 0x81", CLine: 8},
+						{Offset: 0x1D, Mnemonic: "DEC ECX", CLine: 7},
+						{Offset: 0x1E, Mnemonic: "JNE -15        ; for loop", CLine: 7},
+						{Offset: 0x20, Mnemonic: "MOV EAX, 1     ; sys_exit", CLine: 10},
+						{Offset: 0x25, Mnemonic: "XOR EBX, EBX", CLine: 10},
+						{Offset: 0x27, Mnemonic: "INT 0x80", CLine: 10},
+					},
+				},
+				{
+					Name: "consumer_fault",
+					Source: `// consumer_fault (Core 3) — espera el semáforo del producer y muere
+// deliberadamente con page fault para exhibir IRQ 0x0E.
+//
+// Arranca con un delay (20 ticks) para darle margen al producer a crear
+// el sem id 1. Después hace tres sem_wait (consume signals del producer)
+// y termina escribiendo a 0x100000 — memoria del kernel, prohibida en
+// modo usuario. La MMU dispara IRQ 0x0E → kernel mata el proc con state
+// ZOMBIE y causa "page_fault", animado con el shake del PCB.
+
+int main(void) {
+    for (volatile int i = 0; i < 20; i++);   // espera al productor
+
+    sem_wait(1);
+    sem_wait(1);
+    sem_wait(1);
+
+    *(int *)0x100000 = 0xDEAD;   // ← PAGE FAULT
+    return 0;                     // hlt (unreachable)
+}
+`,
+					Bytes: []byte{
+						0xB9, 0x14, 0x00, 0x00, 0x00, // mov ecx, 20
+						0x49,       // DL: dec ecx
+						0x75, 0xFD, // jne DL (target 0x05, after 0x08 → -3)
+						0xBB, 0x01, 0x00, 0x00, 0x00, // mov ebx, 1
+						0xB8, 0x21, 0x00, 0x00, 0x00, // mov eax, 0x21 (SemWait)
+						0xCD, 0x81, // int 0x81  ← 1st wait
+						0xBB, 0x01, 0x00, 0x00, 0x00, // mov ebx, 1
+						0xB8, 0x21, 0x00, 0x00, 0x00,
+						0xCD, 0x81, // int 0x81  ← 2nd wait
+						0xBB, 0x01, 0x00, 0x00, 0x00,
+						0xB8, 0x21, 0x00, 0x00, 0x00,
+						0xCD, 0x81, // int 0x81  ← 3rd wait
+						0xB8, 0xAD, 0xDE, 0x00, 0x00, // mov eax, 0xDEAD
+						0xA3, 0x00, 0x00, 0x10, 0x00, // mov [0x100000], eax ← ¡fault!
+						0xF4, // hlt (unreachable)
+					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV ECX, 20    ; delay init", CLine: 10},
+						{Offset: 0x05, Mnemonic: "DEC ECX", CLine: 10},
+						{Offset: 0x06, Mnemonic: "JNE -3         ; spin wait", CLine: 10},
+						{Offset: 0x08, Mnemonic: "MOV EBX, 1     ; sem id", CLine: 12},
+						{Offset: 0x0D, Mnemonic: "MOV EAX, 0x21  ; SemWait #1", CLine: 12},
+						{Offset: 0x12, Mnemonic: "INT 0x81", CLine: 12},
+						{Offset: 0x14, Mnemonic: "MOV EBX, 1", CLine: 13},
+						{Offset: 0x19, Mnemonic: "MOV EAX, 0x21  ; SemWait #2", CLine: 13},
+						{Offset: 0x1E, Mnemonic: "INT 0x81", CLine: 13},
+						{Offset: 0x20, Mnemonic: "MOV EBX, 1", CLine: 14},
+						{Offset: 0x25, Mnemonic: "MOV EAX, 0x21  ; SemWait #3", CLine: 14},
+						{Offset: 0x2A, Mnemonic: "INT 0x81", CLine: 14},
+						{Offset: 0x2C, Mnemonic: "MOV EAX, 0xDEAD", CLine: 16},
+						{Offset: 0x31, Mnemonic: "MOV [0x100000], EAX  ; ¡fault!", CLine: 16},
+						{Offset: 0x36, Mnemonic: "HLT            ; unreachable", CLine: 17},
+					},
+				},
 			},
 		},
 	}

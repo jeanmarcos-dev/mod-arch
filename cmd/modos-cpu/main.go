@@ -91,6 +91,7 @@ func runServer(args []string) {
 			Name:        d.Name,
 			Description: d.Description,
 			Category:    d.Category,
+			Cores:       d.Cores,
 			Procs:       procs,
 		})
 	}

@@ -439,6 +439,7 @@ func (k *Kernel) killCurrent(core *Core, reason string) []cpu.Event {
 			out = append(out, cpu.EventSchedDecision{
 				FromPID:    curPID,
 				ToPID:      nextPID,
+				Reason:     reason,
 				ReadyQueue: k.Ready.Snapshot(),
 			})
 

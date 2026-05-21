@@ -36,18 +36,32 @@ func (c *CPU) dispatchIRQ(vector uint8, source string) error {
 		return fmt.Errorf("dispatch IRQ %d: IDT[0x%02X] not installed", vector, vector)
 	}
 
-	c.Emit(EventIRQFire{CoreID: c.CoreID, Vector: vector, Source: source})
-
-	// If the CPU was halted waiting for an IRQ, wake it up. This models the
-	// x86 behavior of HLT: "sleep until any interrupt arrives".
-	c.Halted = false
-
-	// Remember the current state to push and later restore on IRET.
+	// Snapshot the pre-trap state. We capture before emitting EventIRQFire so
+	// the event itself can carry the frame the HW is about to push — UI code
+	// then renders the kernel stack without having to read memory back.
 	oldEFLAGS := c.R.EFLAGS
 	oldCS := c.R.CS
 	oldEIP := c.R.EIP
 	oldESP := c.R.ESP
 	oldMode := c.Mode
+
+	fire := EventIRQFire{
+		CoreID:   c.CoreID,
+		Vector:   vector,
+		Source:   source,
+		Handler:  handler,
+		FromMode: oldMode,
+	}
+	if oldMode == ModeUser {
+		fire.SavedEIP = oldEIP
+		fire.SavedCS = oldCS
+		fire.SavedEFLAGS = oldEFLAGS
+	}
+	c.Emit(fire)
+
+	// If the CPU was halted waiting for an IRQ, wake it up. This models the
+	// x86 behavior of HLT: "sleep until any interrupt arrives".
+	c.Halted = false
 
 	// If coming from user, switch to the kernel stack. In real x86 this is
 	// done by consulting the TSS, which is per-CPU; here each core carries its

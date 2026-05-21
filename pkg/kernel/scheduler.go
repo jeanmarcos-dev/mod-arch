@@ -99,6 +99,7 @@ func (k *Kernel) scheduleNext(core *Core) []cpu.Event {
 	out = append(out, cpu.EventSchedDecision{
 		FromPID:    curPID,
 		ToPID:      nextPID,
+		Reason:     "timer",
 		ReadyQueue: k.Ready.Snapshot(),
 	})
 

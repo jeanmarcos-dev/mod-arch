@@ -52,6 +52,7 @@ func (k *Kernel) blockCurrent(core *Core, reason string) []cpu.Event {
 			cpu.EventSchedDecision{
 				FromPID:    curPID,
 				ToPID:      nextPID,
+				Reason:     "block",
 				ReadyQueue: k.Ready.Snapshot(),
 			},
 			cpu.EventCoreRelease{CoreID: core.ID, PID: curPID, Reason: reason},
@@ -120,6 +121,7 @@ func (k *Kernel) handleKeyboard(core *Core) []cpu.Event {
 		out = append(out, cpu.EventSchedDecision{
 			FromPID:    0,
 			ToPID:      req.PID,
+			Reason:     "wake",
 			ReadyQueue: k.Ready.Snapshot(),
 		})
 		out = append(out, k.switchTo(core, req.PID)...)

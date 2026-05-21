@@ -55,3 +55,53 @@ func TestSetNumCores_NoOpWhenSame(t *testing.T) {
 		t.Error("kernel was rebuilt despite same NumCores")
 	}
 }
+
+// TestLoadProgram_DemoCoresSwitchesLayout verifies that loading a demo whose
+// Cores field is set rebuilds the kernel with that core count before procs
+// are wired in. This is the mechanism the showcase demo uses to guarantee 4
+// cores regardless of MODOS_CPU_CORES.
+func TestLoadProgram_DemoCoresSwitchesLayout(t *testing.T) {
+	s := New(Config{
+		NumCores: 1,
+		Demos: []Demo{{
+			Name:  "tiny_quad",
+			Cores: 4,
+			Procs: []Proc{{Name: "p1", Bytes: []byte{0xF4}}}, // single HLT
+		}},
+	})
+	if got := s.kernel.NumCores(); got != 1 {
+		t.Fatalf("initial NumCores = %d, want 1", got)
+	}
+
+	if err := s.LoadProgram("tiny_quad"); err != nil {
+		t.Fatalf("LoadProgram: %v", err)
+	}
+	if got := s.kernel.NumCores(); got != 4 {
+		t.Errorf("after LoadProgram NumCores = %d, want 4", got)
+	}
+	if got := len(s.kernel.Processes); got != 1 {
+		t.Errorf("Processes after load = %d, want 1", got)
+	}
+}
+
+// TestLoadProgram_DemoCoresZeroPreservesLayout verifies legacy demos with
+// Cores=0 do not rebuild the kernel — the existing core count is kept.
+func TestLoadProgram_DemoCoresZeroPreservesLayout(t *testing.T) {
+	s := New(Config{
+		NumCores: 2,
+		Demos: []Demo{{
+			Name:  "legacy",
+			Procs: []Proc{{Name: "p1", Bytes: []byte{0xF4}}},
+		}},
+	})
+	k := s.kernel
+	if err := s.LoadProgram("legacy"); err != nil {
+		t.Fatalf("LoadProgram: %v", err)
+	}
+	if s.kernel != k {
+		t.Error("kernel was rebuilt despite Cores=0")
+	}
+	if got := s.kernel.NumCores(); got != 2 {
+		t.Errorf("NumCores changed: got %d, want 2", got)
+	}
+}
