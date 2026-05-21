@@ -92,6 +92,13 @@ type CPU struct {
 	// other's interrupt frames.
 	KernelStackTop uint32
 
+	// lastInstrStart records the EIP at which the most recent execInstruction
+	// began (set before any fetch). Faults that occur mid-instruction restore
+	// EIP to this value before dispatching, so the kernel-stack frame points
+	// at the offending instruction — matching the x86 rule that faults save
+	// the offending EIP while traps save the next one.
+	lastInstrStart uint32
+
 	// events buffers events emitted in the current step. Cleared at the start
 	// of each Step and consumed by the caller at the end.
 	events []Event
@@ -255,7 +262,7 @@ func (c *CPU) Step() ([]Event, error) {
 				Mode:       mf.Mode,
 				PermNeeded: mf.PermNeeded,
 			})
-			if disp := c.dispatchIRQ(0x0E, "fault"); disp != nil {
+			if disp := c.dispatchFault(0x0E); disp != nil {
 				return c.DrainEvents(), disp
 			}
 			c.Tick++

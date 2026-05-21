@@ -95,23 +95,56 @@ func (k *Kernel) handleSyscall(core *Core) []cpu.Event {
 	return out
 }
 
+// userBufferFault returns the first offending byte and false if the range
+// [addr, addr+count) falls outside the user-accessible window (user_code,
+// user_stack). Returns 0, true when the range is fully inside it.
+//
+// Real kernels do something equivalent (access_ok / copy_from_user) to stop
+// a process from passing a pointer into kernel memory: without this check
+// sys_write with bufAddr in the kernel range would happily exfiltrate kernel
+// bytes, and sys_read would let user clobber the IDT, kernel handlers, or a
+// neighbouring PCB.
+func userBufferFault(addr, count uint32) (uint32, bool) {
+	if count == 0 {
+		return 0, true
+	}
+	end := addr + count - 1
+	if end < addr {
+		// uint32 wraparound: the buffer "wraps" past the top of memory.
+		return addr, false
+	}
+	if addr < cpu.AddrUserBase {
+		return addr, false
+	}
+	if end > cpu.AddrUserTop {
+		// The buffer starts in user space but spills past its top.
+		return cpu.AddrUserTop + 1, false
+	}
+	return 0, true
+}
+
 // sysWrite implements write(fd, buf, count).
 //
 //   - fd=1 (stdout) or fd=2 (stderr): bytes flow to the console buffer and an
 //     EventConsoleOut is emitted.
 //   - Other fds: not supported, returns -1.
 //
-// The user buffer is read with PL0 permissions (kernel can read any region,
-// including user_code where program .data sometimes lives). A real OS would
-// validate the user is allowed to read the range to prevent a malicious
-// pointer into kernel memory; we skip that check because this demo is a
-// pedagogical tool, not a security sandbox.
+// Buffers that touch kernel memory (or wrap around uint32) are rejected with
+// a page fault event and -EFAULT, matching Linux's access_ok / copy_from_user.
 func (k *Kernel) sysWrite(core *Core, fd, bufAddr, count uint32) (uint32, []cpu.Event) {
 	if fd != FdStdout && fd != FdStderr {
 		return ^uint32(0), nil
 	}
 	if count == 0 {
 		return 0, nil
+	}
+	if bad, ok := userBufferFault(bufAddr, count); !ok {
+		return ^uint32(0), []cpu.Event{cpu.EventPageFault{
+			CoreID:     core.CPU.CoreID,
+			Addr:       bad,
+			Mode:       cpu.ModeUser,
+			PermNeeded: "R",
+		}}
 	}
 
 	bytes := make([]byte, count)

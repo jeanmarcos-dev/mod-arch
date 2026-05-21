@@ -315,7 +315,18 @@ func (k *Kernel) stepCore(core *Core) ([]cpu.Event, error) {
 		core.CPU.PendingIRQs = append(core.CPU.PendingIRQs, IRQTimer)
 		core.lastTimerFiredAt = core.CPU.Tick
 	}
+	// Snapshot the running PID *before* the step so EventInstruction (emitted
+	// at fetch time, inside CPU.Step) can be stamped with the process that
+	// actually executed it — even if a later handler in this same step
+	// switches the core to a different process.
+	runningPID := core.CurrentPID
 	evs, err := core.CPU.Step()
+	for i, e := range evs {
+		if inst, ok := e.(cpu.EventInstruction); ok {
+			inst.PID = runningPID
+			evs[i] = inst
+		}
+	}
 	if err != nil {
 		return evs, err
 	}
@@ -393,6 +404,13 @@ func (k *Kernel) runHandlerLogic(core *Core, vector uint8, source string) []cpu.
 			return nil
 		}
 		return k.killCurrent(core, "page_fault")
+	case IRQGeneralProt:
+		// #GP is raised by the CPU when user code executes a privileged
+		// instruction (HLT in PL3), uses a bad segment, etc. Kill the process.
+		if source != "fault" {
+			return nil
+		}
+		return k.killCurrent(core, "general_protection")
 	case IRQKeyboard:
 		// Keyboard: HW (PushKey) injects this IRQ with source HW. Deliver any
 		// pending bytes to the first process BLOCKED in sys_read.

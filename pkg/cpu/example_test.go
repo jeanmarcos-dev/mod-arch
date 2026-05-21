@@ -10,12 +10,15 @@ import (
 // EAX and halt. The CPU executes one instruction per Step call and returns the
 // stream of events that describe what just happened.
 func ExampleCPU_Step() {
+	// Run in kernel mode so HLT halts cleanly. In user mode HLT is privileged
+	// and would raise #GP (vector 0x0D) — fine for a real boot, but this
+	// example focuses on a single MOV without any kernel surrounding it.
 	c := cpu.New(cpu.DefaultMemSize)
-	c.Mode = cpu.ModeUser
+	c.Mode = cpu.ModeKernel
 	c.R.EIP = cpu.AddrUserBase
-	c.R.CS = cpu.SelUserCode
-	c.R.DS = cpu.SelUserData
-	c.R.SS = cpu.SelUserData
+	c.R.CS = cpu.SelKernelCode
+	c.R.DS = cpu.SelKernelData
+	c.R.SS = cpu.SelKernelData
 
 	// MOV EAX, 0x42  ; HLT
 	program := []byte{0xB8, 0x42, 0x00, 0x00, 0x00, 0xF4}

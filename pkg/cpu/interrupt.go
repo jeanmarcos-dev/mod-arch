@@ -97,7 +97,7 @@ func (c *CPU) dispatchIRQ(vector uint8, source string) error {
 	// the full EFLAGS).
 	c.FlagSet(FlagIF, false)
 
-	c.R.EIP = handler
+	c.setEIP(handler)
 
 	return nil
 }
@@ -129,7 +129,7 @@ func (c *CPU) handleIRET() error {
 	// Bits 0-1 of an x86 selector encode the RPL; PL3 = 11b.
 	returningToUser := uint8(cs)&0b11 == ModeUser
 
-	c.R.EIP = eip
+	c.setEIP(eip)
 	c.R.CS = uint16(cs)
 	// Restored verbatim, IF included.
 	c.R.EFLAGS = eflags
@@ -166,11 +166,23 @@ func (c *CPU) popKernel() (uint32, error) {
 	return v, nil
 }
 
-// causeOf maps "HW"/"SW" to the string used in EventModeSwitch.
+// dispatchFault is the entry point for CPU-generated exceptions (page fault,
+// #GP, divide error, ...). Unlike traps (INT N) and HW IRQs — which save the
+// next EIP because the trapped instruction has already completed — faults
+// must save the EIP of the offending instruction so the kernel and the UI
+// see the actual fault site. fetch8/fetch32 have already advanced EIP past
+// the opcode by the time a fault fires; rewind it to lastInstrStart before
+// the standard dispatch captures the kernel-stack frame.
+func (c *CPU) dispatchFault(vector uint8) error {
+	c.R.EIP = c.lastInstrStart
+	return c.dispatchIRQ(vector, "fault")
+}
+
+// causeOf maps the dispatch source to the string surfaced in EventModeSwitch.
 //
 //	HW IRQ -> "INT"   (CPU took the interrupt from the IRQ bus)
 //	SW INT -> "INT"   (the `int N` instruction invokes the same mechanism)
-//	fault  -> "fault" (CPU exception)
+//	fault  -> "fault" (CPU exception: page fault, #GP, etc.)
 func causeOf(source string) string {
 	if source == "fault" {
 		return "fault"

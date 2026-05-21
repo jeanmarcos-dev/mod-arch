@@ -142,6 +142,41 @@ func TestMutex_UnlockByNonHolderFails(t *testing.T) {
 	}
 }
 
+func TestMutex_UnlockByNonHolderEmitsRejectedEvent(t *testing.T) {
+	k := freshKernelWithProcs(t, 2)
+	id := k.mutexCreate()
+	_, _, _ = k.mutexLock(k.BootCore(), id) // PID 1 holds
+	k.BootCore().CurrentPID = 2             // PID 2 attempts unlock
+
+	evs, ok := k.mutexUnlock(k.BootCore(), id)
+	if ok {
+		t.Fatal("unlock by non-holder ok=true, want false")
+	}
+	ops := mutexOps(evs)
+	if len(ops) != 1 || ops[0] != "rejected" {
+		t.Errorf("ops = %v, want [rejected]", ops)
+	}
+	// Mutex state must be unchanged: PID 1 still holds, no waiters.
+	m := k.Mutexes[id-1]
+	if m.Holder != 1 {
+		t.Errorf("Holder = %d, want 1 (unchanged)", m.Holder)
+	}
+	if len(m.Waiters) != 0 {
+		t.Errorf("Waiters = %v, want []", m.Waiters)
+	}
+	// The emitted event must name the offender (PID 2), not the holder.
+	for _, e := range evs {
+		if mo, isMutex := e.(cpu.EventMutexOp); isMutex && mo.Op == "rejected" {
+			if mo.PID != 2 {
+				t.Errorf("rejected event PID = %d, want 2 (the attempted unlocker)", mo.PID)
+			}
+			if mo.MutexID != id {
+				t.Errorf("rejected event MutexID = %d, want %d", mo.MutexID, id)
+			}
+		}
+	}
+}
+
 func TestSemaphore_WaitImmediateDecrements(t *testing.T) {
 	k := freshKernelWithProcs(t, 1)
 	id := k.semCreate(2)

@@ -25,11 +25,13 @@ interface IDTRow {
 }
 
 const idt = reactive<IDTRow[]>([
-  { vec: 0x00, hex: '0x00', name: 'Divide error',    source: 'fault', lastFired: 0 },
-  { vec: 0x0e, hex: '0x0E', name: 'Page fault',      source: 'fault', lastFired: 0 },
-  { vec: 0x20, hex: '0x20', name: 'IRQ timer',       source: 'HW',    lastFired: 0 },
-  { vec: 0x21, hex: '0x21', name: 'IRQ keyboard',    source: 'HW',    lastFired: 0 },
-  { vec: 0x80, hex: '0x80', name: 'System call',     source: 'SW',    lastFired: 0 },
+  { vec: 0x00, hex: '0x00', name: 'Divide error',       source: 'fault', lastFired: 0 },
+  { vec: 0x0d, hex: '0x0D', name: 'General protection', source: 'fault', lastFired: 0 },
+  { vec: 0x0e, hex: '0x0E', name: 'Page fault',         source: 'fault', lastFired: 0 },
+  { vec: 0x20, hex: '0x20', name: 'IRQ timer',          source: 'HW',    lastFired: 0 },
+  { vec: 0x21, hex: '0x21', name: 'IRQ keyboard',       source: 'HW',    lastFired: 0 },
+  { vec: 0x80, hex: '0x80', name: 'System call',        source: 'SW',    lastFired: 0 },
+  { vec: 0x81, hex: '0x81', name: 'Mutex/semáforo',     source: 'SW',    lastFired: 0 },
 ]);
 
 // Recent mode switches feed. We could parse the log but a structured ring
@@ -495,18 +497,18 @@ const narratorHint = computed(() =>
 
 .ints-table__row td {
   padding: var(--space-2);
-  border-bottom: 1px dashed rgba(255, 179, 71, 0.06);
+  border-bottom: 1px dashed rgba(var(--accent-rgb), 0.06);
 }
 
 .ints-table__row--active {
-  background: rgba(255, 179, 71, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   box-shadow: inset 2px 0 0 var(--amber);
   animation: ints-row-pulse 1.2s ease-out;
 }
 
 @keyframes ints-row-pulse {
-  0%   { background: rgba(255, 179, 71, 0.32); }
-  100% { background: rgba(255, 179, 71, 0.05); }
+  0%   { background: rgba(var(--accent-rgb), 0.32); }
+  100% { background: rgba(var(--accent-rgb), 0.05); }
 }
 
 .ints-table__vec {
@@ -565,7 +567,7 @@ const narratorHint = computed(() =>
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   padding: 4px var(--space-2);
-  border-bottom: 1px dashed rgba(255, 179, 71, 0.06);
+  border-bottom: 1px dashed rgba(var(--accent-rgb), 0.06);
 }
 .ints-feed--multi .ints-feed__row {
   grid-template-columns: auto auto auto auto 1fr auto;
@@ -575,7 +577,7 @@ const narratorHint = computed(() =>
   font-size: 10px;
   letter-spacing: 1px;
   color: var(--amber);
-  background: rgba(255, 179, 71, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 1px 5px;
@@ -625,7 +627,7 @@ const narratorHint = computed(() =>
 
 .ints-table__row--active .ints-table__handler-addr {
   color: var(--amber);
-  background: rgba(255, 179, 71, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   border-color: var(--amber);
 }
 
@@ -669,7 +671,7 @@ const narratorHint = computed(() =>
 .ints-stack--active {
   border-color: var(--amber);
   box-shadow: var(--shadow-glow-amber);
-  background: rgba(255, 179, 71, 0.04);
+  background: rgba(var(--accent-rgb), 0.04);
 }
 
 .ints-stack--idle {

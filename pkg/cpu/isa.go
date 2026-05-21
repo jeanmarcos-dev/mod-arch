@@ -52,6 +52,19 @@ func (c *CPU) setRegByIdx(i uint8, val uint32) {
 	c.Emit(EventRegWrite{CoreID: c.CoreID, Reg: regNames[i], Old: old, New: val})
 }
 
+// setEIP redirects the instruction pointer and emits reg_write so the UI sees
+// the jump explicitly. Used by JMP/CALL/RET and the HW dispatch/IRET paths.
+// The implicit EIP advance done by fetch8/fetch32 does NOT go through here —
+// emitting reg_write per byte would drown the event stream.
+func (c *CPU) setEIP(val uint32) {
+	if c.R.EIP == val {
+		return
+	}
+	old := c.R.EIP
+	c.R.EIP = val
+	c.Emit(EventRegWrite{CoreID: c.CoreID, Reg: "EIP", Old: old, New: val})
+}
+
 // fetch8 reads one instruction byte at EIP, requiring execute permission, and
 // advances EIP.
 func (c *CPU) fetch8() (uint8, error) {
@@ -77,11 +90,41 @@ func (c *CPU) fetch32() (uint32, error) {
 	return binary.LittleEndian.Uint32(buf[:]), nil
 }
 
-// updateArithFlags updates ZF and SF from a 32-bit result. CF/OF could be
-// computed more precisely; ZF and SF are enough for this subset.
-func (c *CPU) updateArithFlags(result uint32) {
+// arithOp tags how updateArithFlags must compute CF and OF (ZF/SF are always
+// derived from the result). The x86 manual specifies per-instruction whether
+// each flag is set, cleared, or untouched; this enum encodes that policy.
+type arithOp int
+
+const (
+	opADD arithOp = iota
+	opSUB // CMP shares the same flag effects as SUB.
+	opAND
+	opXOR
+	opINC // CF preserved; OF set only when crossing the signed maximum.
+	opDEC // CF preserved; OF set only when crossing the signed minimum.
+)
+
+// updateArithFlags applies the x86 flag-update rules for a 32-bit arithmetic
+// or logical result. a is the destination value before the operation, b the
+// second operand (ignored for INC/DEC).
+func (c *CPU) updateArithFlags(op arithOp, a, b, result uint32) {
 	c.FlagSet(FlagZF, result == 0)
 	c.FlagSet(FlagSF, result&0x80000000 != 0)
+	switch op {
+	case opADD:
+		c.FlagSet(FlagCF, result < a)
+		c.FlagSet(FlagOF, (^(a^b)&(a^result))&0x80000000 != 0)
+	case opSUB:
+		c.FlagSet(FlagCF, a < b)
+		c.FlagSet(FlagOF, ((a^b)&(a^result))&0x80000000 != 0)
+	case opAND, opXOR:
+		c.FlagSet(FlagCF, false)
+		c.FlagSet(FlagOF, false)
+	case opINC:
+		c.FlagSet(FlagOF, a == 0x7FFFFFFF)
+	case opDEC:
+		c.FlagSet(FlagOF, a == 0x80000000)
+	}
 }
 
 // execInstruction is the decoder/executor. It reads EIP, dispatches by opcode,
@@ -93,6 +136,9 @@ func (c *CPU) updateArithFlags(result uint32) {
 //nolint:gocognit,gocyclo // x86 opcode dispatcher; complexity reflects ISA size and is intentional.
 func execInstruction(c *CPU) error {
 	startEIP := c.R.EIP
+	// Record the fault site so dispatchFault can rewind EIP if a mid-instruction
+	// fault fires (e.g. page fault on a memory operand, #GP from HLT in PL3).
+	c.lastInstrStart = startEIP
 
 	opcode, err := c.fetch8()
 	if err != nil {
@@ -115,19 +161,19 @@ func execInstruction(c *CPU) error {
 	// DEC r32   — opcode 48+rd  (1 byte)
 	case opcode >= 0x40 && opcode <= 0x47:
 		regI := opcode - 0x40
-		p := c.regPtrByIdx(regI)
+		old := *c.regPtrByIdx(regI)
 		c.emitInstr(startEIP, fmt.Sprintf("INC %s", regNames[regI]))
-		result := *p + 1
+		result := old + 1
 		c.setRegByIdx(regI, result)
-		c.updateArithFlags(result)
+		c.updateArithFlags(opINC, old, 0, result)
 
 	case opcode >= 0x48 && opcode <= 0x4F:
 		regI := opcode - 0x48
-		p := c.regPtrByIdx(regI)
+		old := *c.regPtrByIdx(regI)
 		c.emitInstr(startEIP, fmt.Sprintf("DEC %s", regNames[regI]))
-		result := *p - 1
+		result := old - 1
 		c.setRegByIdx(regI, result)
-		c.updateArithFlags(result)
+		c.updateArithFlags(opDEC, old, 0, result)
 
 	// PUSH r32  — opcode 50+rd  (1 byte)
 	// POP  r32  — opcode 58+rd  (1 byte)
@@ -170,20 +216,25 @@ func execInstruction(c *CPU) error {
 		dst := *c.regPtrByIdx(rm)
 		var result uint32
 		var mnem string
+		var op arithOp
 		switch opcode {
 		case 0x01:
 			result = dst + src
 			mnem = "ADD"
+			op = opADD
 		case 0x29:
 			result = dst - src
 			mnem = "SUB"
+			op = opSUB
 		case 0x31:
 			result = dst ^ src
 			mnem = "XOR"
+			op = opXOR
 		case 0x39:
 			// CMP does not write back, only updates flags.
 			result = dst - src
 			mnem = "CMP"
+			op = opSUB
 		case 0x89:
 			result = src
 			mnem = "MOV"
@@ -194,7 +245,7 @@ func execInstruction(c *CPU) error {
 		}
 		if opcode != 0x89 {
 			// MOV does not affect flags.
-			c.updateArithFlags(result)
+			c.updateArithFlags(op, dst, src, result)
 		}
 
 	// 81 /N r/m32, imm32 — arithmetic with immediate. N goes in the ModR/M
@@ -216,22 +267,28 @@ func execInstruction(c *CPU) error {
 		dst := *c.regPtrByIdx(rm)
 		var result uint32
 		var mnem string
+		var op arithOp
 		switch sub {
 		case 0:
 			result = dst + imm
 			mnem = "ADD"
+			op = opADD
 		case 4:
 			result = dst & imm
 			mnem = "AND"
+			op = opAND
 		case 5:
 			result = dst - imm
 			mnem = "SUB"
+			op = opSUB
 		case 6:
 			result = dst ^ imm
 			mnem = "XOR"
+			op = opXOR
 		case 7:
 			result = dst - imm
 			mnem = "CMP"
+			op = opSUB
 		default:
 			return fmt.Errorf("0x81 /%d not supported", sub)
 		}
@@ -239,7 +296,7 @@ func execInstruction(c *CPU) error {
 		if sub != 7 {
 			c.setRegByIdx(rm, result)
 		}
-		c.updateArithFlags(result)
+		c.updateArithFlags(op, dst, imm, result)
 
 	// Short relative jumps (1-byte signed offset)
 	//   EB rel8   JMP
@@ -268,7 +325,7 @@ func execInstruction(c *CPU) error {
 		target := uint32(int32(c.R.EIP) + rel)
 		c.emitInstr(startEIP, fmt.Sprintf("%s 0x%X", mnem, target))
 		if take {
-			c.R.EIP = target
+			c.setEIP(target)
 		}
 
 	// Long jumps (4-byte offset)
@@ -280,7 +337,7 @@ func execInstruction(c *CPU) error {
 		}
 		target := uint32(int32(c.R.EIP) + int32(off))
 		c.emitInstr(startEIP, fmt.Sprintf("JMP 0x%X", target))
-		c.R.EIP = target
+		c.setEIP(target)
 
 	// E8 rel32   CALL (push return address, jump)
 	// C3         RET   (pop EIP)
@@ -297,7 +354,7 @@ func execInstruction(c *CPU) error {
 			return err
 		}
 		c.setRegByIdx(4, newESP)
-		c.R.EIP = target
+		c.setEIP(target)
 
 	case opcode == 0xC3:
 		c.emitInstr(startEIP, "RET")
@@ -306,7 +363,7 @@ func execInstruction(c *CPU) error {
 			return err
 		}
 		c.setRegByIdx(4, c.R.ESP+4)
-		c.R.EIP = retAddr
+		c.setEIP(retAddr)
 
 	// MOV EAX, [moffs32]   — opcode A1  (load 32 bits from absolute address)
 	// MOV [moffs32], EAX   — opcode A3  (store EAX at absolute address)
@@ -351,6 +408,14 @@ func execInstruction(c *CPU) error {
 
 	case opcode == 0xF4:
 		c.emitInstr(startEIP, "HLT")
+		if c.Mode == ModeUser {
+			// HLT is privileged. In real x86 PL3 executing HLT raises #GP
+			// (vector 0x0D, a CPU exception); the kernel-side handler kills
+			// the process. dispatchFault rewinds EIP back to startEIP so the
+			// saved frame points at the HLT itself — that is how x86 reports
+			// faults, and the UI relies on it to highlight the offending byte.
+			return c.dispatchFault(0x0D)
+		}
 		c.Halted = true
 		c.Emit(EventHalt{CoreID: c.CoreID})
 
@@ -377,7 +442,8 @@ func (c *CPU) emitInstr(startEIP uint32, mnemonic string) {
 	bytes := append([]byte(nil), c.Mem.Bytes[startEIP:c.R.EIP]...)
 	c.Emit(EventInstruction{
 		CoreID: c.CoreID,
-		// PID is overwritten by the kernel once processes exist.
+		// PID is stamped by Kernel.stepCore (which knows the running process);
+		// CPU itself has no notion of processes.
 		PID:      0,
 		EIP:      startEIP,
 		Mnemonic: mnemonic,

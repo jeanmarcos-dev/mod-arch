@@ -150,7 +150,9 @@ func (k *Kernel) mutexLock(core *Core, id int) ([]cpu.Event, bool, bool) {
 
 // mutexUnlock releases the mutex. If anyone was waiting, the first PID in the
 // queue takes the lock and is moved to READY (handoff). Returns ok=false if
-// the ID is unknown or the caller does not hold the lock.
+// the ID is unknown or the caller does not hold the lock; in the latter case
+// a "rejected" EventMutexOp is also emitted so the frontend can surface the
+// misuse instead of failing silently.
 func (k *Kernel) mutexUnlock(core *Core, id int) ([]cpu.Event, bool) {
 	m := k.findMutex(id)
 	if m == nil {
@@ -158,7 +160,9 @@ func (k *Kernel) mutexUnlock(core *Core, id int) ([]cpu.Event, bool) {
 	}
 	pid := core.CurrentPID
 	if m.Holder != pid {
-		return nil, false
+		return []cpu.Event{cpu.EventMutexOp{
+			CoreID: core.ID, PID: pid, MutexID: id, Op: "rejected",
+		}}, false
 	}
 
 	if len(m.Waiters) == 0 {

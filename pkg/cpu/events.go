@@ -224,7 +224,7 @@ type EventCoreRelease struct {
 func (EventCoreRelease) Tag() string { return "core_release" }
 
 // EventMutexOp summarizes every action on a kernel mutex so the frontend can
-// animate locks, contention, and handoffs without juggling four near-identical
+// animate locks, contention, and handoffs without juggling near-identical
 // event types. Op values:
 //
 //   - "create"   — mutex_create returned a new ID.
@@ -232,6 +232,8 @@ func (EventCoreRelease) Tag() string { return "core_release" }
 //   - "waiting"  — pid blocked because someone else held the lock.
 //   - "released" — pid released the lock and no one was waiting.
 //   - "handoff"  — pid released the lock and the next waiter took it.
+//   - "rejected" — pid attempted to unlock a mutex it does not hold; the
+//     kernel rejects the call and leaves the mutex state unchanged.
 type EventMutexOp struct {
 	CoreID  int    `json:"core_id"`
 	PID     int    `json:"pid"`

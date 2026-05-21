@@ -4,19 +4,22 @@ import (
 	"testing"
 )
 
-// newTestCPU prepares a CPU ready to run user code: default memory, EIP at
-// user_code base, ESP at the top of user_stack, mode PL3.
+// newTestCPU prepares a CPU ready to exercise the ISA in isolation: default
+// memory, EIP at user_code base, ESP at the top of user_stack, mode PL0
+// (kernel). Tests in this file focus on opcode semantics — flag updates,
+// register writes, control flow — which are independent of the privilege
+// level. Running in kernel mode lets HLT terminate the test loop directly
+// (since HLT is privileged: in PL3 it raises #GP, see TestISA_HLT_*).
 func newTestCPU(t *testing.T, code []byte) *CPU {
 	t.Helper()
 	c := New(DefaultMemSize)
-	c.Mode = ModeUser
+	c.Mode = ModeKernel
 	c.R.EIP = AddrUserBase
-	// Stack top (grows downward).
 	c.R.ESP = AddrUserStack + 0xFF000
 	c.R.EBP = c.R.ESP
-	c.R.CS = SelUserCode
-	c.R.DS = SelUserData
-	c.R.SS = SelUserData
+	c.R.CS = SelKernelCode
+	c.R.DS = SelKernelData
+	c.R.SS = SelKernelData
 	if err := c.Mem.LoadBytes(AddrUserBase, code); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -263,6 +266,181 @@ func TestISA_EmitsInstructionEvent(t *testing.T) {
 	}
 	if first.EIP != AddrUserBase {
 		t.Errorf("event EIP = 0x%X, want 0x%X", first.EIP, AddrUserBase)
+	}
+}
+
+func TestISA_ADD_SetsCFOnUnsignedOverflow(t *testing.T) {
+	// MOV EAX, 0xFFFFFFFF ; MOV EBX, 1 ; ADD EAX, EBX ; HLT
+	c := newTestCPU(t, []byte{
+		0xB8, 0xFF, 0xFF, 0xFF, 0xFF,
+		0xBB, 0x01, 0x00, 0x00, 0x00,
+		0x01, 0xD8,
+		0xF4,
+	})
+	for !c.Halted {
+		if _, err := c.Step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c.R.EAX != 0 {
+		t.Errorf("EAX = 0x%X, want 0", c.R.EAX)
+	}
+	if !c.FlagOn(FlagCF) {
+		t.Error("CF should be set (0xFFFFFFFF + 1 overflows)")
+	}
+	if !c.FlagOn(FlagZF) {
+		t.Error("ZF should be set (result is 0)")
+	}
+	if c.FlagOn(FlagOF) {
+		t.Error("OF should be clear (no signed overflow: -1 + 1 = 0)")
+	}
+}
+
+func TestISA_ADD_SetsOFOnSignedOverflow(t *testing.T) {
+	// MOV EAX, 0x7FFFFFFF ; MOV EBX, 1 ; ADD EAX, EBX ; HLT
+	c := newTestCPU(t, []byte{
+		0xB8, 0xFF, 0xFF, 0xFF, 0x7F,
+		0xBB, 0x01, 0x00, 0x00, 0x00,
+		0x01, 0xD8,
+		0xF4,
+	})
+	for !c.Halted {
+		if _, err := c.Step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !c.FlagOn(FlagOF) {
+		t.Error("OF should be set (INT_MAX + 1 wraps to INT_MIN)")
+	}
+	if !c.FlagOn(FlagSF) {
+		t.Error("SF should be set (result has bit 31 = 1)")
+	}
+	if c.FlagOn(FlagCF) {
+		t.Error("CF should be clear (no unsigned overflow)")
+	}
+}
+
+func TestISA_SUB_SetsCFOnBorrow(t *testing.T) {
+	// MOV EAX, 1 ; MOV EBX, 5 ; SUB EAX, EBX ; HLT
+	c := newTestCPU(t, []byte{
+		0xB8, 0x01, 0x00, 0x00, 0x00,
+		0xBB, 0x05, 0x00, 0x00, 0x00,
+		0x29, 0xD8,
+		0xF4,
+	})
+	for !c.Halted {
+		if _, err := c.Step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !c.FlagOn(FlagCF) {
+		t.Error("CF should be set (1 - 5 borrows)")
+	}
+	if !c.FlagOn(FlagSF) {
+		t.Error("SF should be set (result is negative)")
+	}
+}
+
+func TestISA_INC_SetsOFAtSignedMax(t *testing.T) {
+	// Pre-set CF so we can verify INC preserves it. STC has no opcode here,
+	// so trigger CF via ADD overflow, then INC and check CF survives.
+	// MOV EAX, 0xFFFFFFFF ; MOV EBX, 1 ; ADD EAX, EBX (sets CF, EAX=0)
+	// MOV EAX, 0x7FFFFFFF ; INC EAX ; HLT (should set OF, leave CF)
+	c := newTestCPU(t, []byte{
+		0xB8, 0xFF, 0xFF, 0xFF, 0xFF,
+		0xBB, 0x01, 0x00, 0x00, 0x00,
+		0x01, 0xD8,
+		0xB8, 0xFF, 0xFF, 0xFF, 0x7F,
+		0x40,
+		0xF4,
+	})
+	for !c.Halted {
+		if _, err := c.Step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !c.FlagOn(FlagOF) {
+		t.Error("OF should be set (INC of 0x7FFFFFFF crosses signed max)")
+	}
+	if !c.FlagOn(FlagCF) {
+		t.Error("CF should be preserved across INC (was set by previous ADD)")
+	}
+}
+
+func TestISA_XOR_ClearsCFAndOF(t *testing.T) {
+	// Set CF first (ADD overflow), then XOR EAX, EAX. CF and OF must be 0.
+	c := newTestCPU(t, []byte{
+		0xB8, 0xFF, 0xFF, 0xFF, 0xFF,
+		0xBB, 0x01, 0x00, 0x00, 0x00,
+		0x01, 0xD8,
+		0x31, 0xC0,
+		0xF4,
+	})
+	for !c.Halted {
+		if _, err := c.Step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c.FlagOn(FlagCF) {
+		t.Error("CF should be cleared by XOR")
+	}
+	if c.FlagOn(FlagOF) {
+		t.Error("OF should be cleared by XOR")
+	}
+	if !c.FlagOn(FlagZF) {
+		t.Error("ZF should be set (XOR EAX, EAX = 0)")
+	}
+}
+
+func TestISA_JMP_EmitsEIPRegWriteWithTarget(t *testing.T) {
+	// JMP rel32 to offset 0x10 from the next instruction. EIP should land at
+	// AddrUserBase + 5 + 0x10, and an EventRegWrite{Reg:"EIP"} must announce it
+	// with the real target — not (eip + bytes.length).
+	c := newTestCPU(t, []byte{
+		0xE9, 0x10, 0x00, 0x00, 0x00, // jmp +0x10
+	})
+	evs, err := c.Step()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTarget := AddrUserBase + 5 + 0x10
+	if c.R.EIP != wantTarget {
+		t.Errorf("EIP after JMP = 0x%X, want 0x%X", c.R.EIP, wantTarget)
+	}
+	var sawEIPWrite bool
+	for _, e := range evs {
+		rw, ok := e.(EventRegWrite)
+		if !ok || rw.Reg != "EIP" {
+			continue
+		}
+		sawEIPWrite = true
+		if rw.New != wantTarget {
+			t.Errorf("EventRegWrite{EIP}.New = 0x%X, want 0x%X", rw.New, wantTarget)
+		}
+	}
+	if !sawEIPWrite {
+		t.Error("expected EventRegWrite for EIP after JMP, none emitted")
+	}
+}
+
+func TestISA_JE_NotTaken_NoEIPRegWrite(t *testing.T) {
+	// Conditional jump not taken must NOT emit reg_write for EIP. Otherwise
+	// fall-through would flood the event stream.
+	c := newTestCPU(t, []byte{
+		0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1 (clears ZF)
+		0x74, 0x05, // je +5 (not taken because ZF=0)
+	})
+	if _, err := c.Step(); err != nil { // MOV
+		t.Fatal(err)
+	}
+	evs, err := c.Step() // JE not taken
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range evs {
+		if rw, ok := e.(EventRegWrite); ok && rw.Reg == "EIP" {
+			t.Errorf("JE not taken emitted EventRegWrite{EIP}=0x%X — should be silent", rw.New)
+		}
 	}
 }
 

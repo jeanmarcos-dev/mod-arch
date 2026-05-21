@@ -148,6 +148,17 @@ func (k *Kernel) sysRead(core *Core, fd, bufAddr, count uint32) (uint32, []cpu.E
 	if count == 0 {
 		return 0, nil
 	}
+	// Reject pointers that would let user code make the kernel scribble onto
+	// the IDT, kernel handlers or another process's PCB. Also catches the
+	// uint32 wraparound case.
+	if bad, ok := userBufferFault(bufAddr, count); !ok {
+		return ^uint32(0), []cpu.Event{cpu.EventPageFault{
+			CoreID:     core.CPU.CoreID,
+			Addr:       bad,
+			Mode:       cpu.ModeUser,
+			PermNeeded: "W",
+		}}
+	}
 
 	// Fast path: bytes already available.
 	if uint32(len(k.KeyboardBuf)) > 0 {

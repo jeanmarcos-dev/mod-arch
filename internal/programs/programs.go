@@ -67,20 +67,24 @@ func Demos() []Demo {
 int main(void) {
     register int a = 10;     // mov eax, 10
     register int b = 32;     // mov ebx, 32
-    return a + b;            // add eax, ebx  ;  hlt
+    return a + b;            // add eax, ebx ; sys_exit(EAX)
 }
 `,
 				Bytes: []byte{
 					0xB8, 0x0A, 0x00, 0x00, 0x00, // mov eax, 10
 					0xBB, 0x20, 0x00, 0x00, 0x00, // mov ebx, 32
 					0x01, 0xD8, // add eax, ebx
-					0xF4, // hlt
+					0x89, 0xC3, // mov ebx, eax  (exit code = result)
+					0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1   (sys_exit)
+					0xCD, 0x80, // int 0x80
 				},
 				SourceMap: []SourceLine{
 					{Offset: 0x00, Mnemonic: "MOV EAX, 10", CLine: 3},
 					{Offset: 0x05, Mnemonic: "MOV EBX, 32", CLine: 4},
 					{Offset: 0x0A, Mnemonic: "ADD EAX, EBX", CLine: 5},
-					{Offset: 0x0C, Mnemonic: "HLT", CLine: 5},
+					{Offset: 0x0C, Mnemonic: "MOV EBX, EAX     ; exit code", CLine: 5},
+					{Offset: 0x0E, Mnemonic: "MOV EAX, 1       ; sys_exit", CLine: 5},
+					{Offset: 0x13, Mnemonic: "INT 0x80", CLine: 5},
 				},
 			}},
 		},
@@ -96,7 +100,7 @@ int main(void) {
     while (i != max) {         // L: cmp eax, ecx ; jne L
         i++;                   //    inc eax
     }
-    return i;                  // hlt
+    return i;                  // sys_exit(EAX)
 }
 `,
 				Bytes: []byte{
@@ -105,7 +109,9 @@ int main(void) {
 					0x40,       // inc eax
 					0x39, 0xC8, // cmp eax, ecx
 					0x75, 0xFB, // jne -5
-					0xF4,
+					0x89, 0xC3, // mov ebx, eax  (exit code = count)
+					0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1   (sys_exit)
+					0xCD, 0x80, // int 0x80
 				},
 				SourceMap: []SourceLine{
 					{Offset: 0x00, Mnemonic: "MOV EAX, 0", CLine: 3},
@@ -113,7 +119,9 @@ int main(void) {
 					{Offset: 0x0A, Mnemonic: "INC EAX", CLine: 6},
 					{Offset: 0x0B, Mnemonic: "CMP EAX, ECX", CLine: 5},
 					{Offset: 0x0D, Mnemonic: "JNE -5", CLine: 5},
-					{Offset: 0x0F, Mnemonic: "HLT", CLine: 8},
+					{Offset: 0x0F, Mnemonic: "MOV EBX, EAX     ; exit code", CLine: 8},
+					{Offset: 0x11, Mnemonic: "MOV EAX, 1       ; sys_exit", CLine: 8},
+					{Offset: 0x16, Mnemonic: "INT 0x80", CLine: 8},
 				},
 			}},
 		},
@@ -135,15 +143,19 @@ int main(void) {
 					0xB8, 0xFE, 0xCA, 0x00, 0x00, // mov eax, 0xCAFE
 					0x50,                         // push eax
 					0xB8, 0x00, 0x00, 0x00, 0x00, // mov eax, 0
-					0x58, // pop eax
-					0xF4,
+					0x58,       // pop eax
+					0x89, 0xC3, // mov ebx, eax  (exit code = popped value)
+					0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
+					0xCD, 0x80, // int 0x80
 				},
 				SourceMap: []SourceLine{
 					{Offset: 0x00, Mnemonic: "MOV EAX, 0xCAFE", CLine: 3},
 					{Offset: 0x05, Mnemonic: "PUSH EAX", CLine: 4},
 					{Offset: 0x06, Mnemonic: "MOV EAX, 0", CLine: 5},
 					{Offset: 0x0B, Mnemonic: "POP EAX", CLine: 6},
-					{Offset: 0x0C, Mnemonic: "HLT", CLine: 7},
+					{Offset: 0x0C, Mnemonic: "MOV EBX, EAX     ; exit code", CLine: 7},
+					{Offset: 0x0E, Mnemonic: "MOV EAX, 1       ; sys_exit", CLine: 7},
+					{Offset: 0x13, Mnemonic: "INT 0x80", CLine: 7},
 				},
 			}},
 		},
@@ -158,20 +170,24 @@ int fn(void) {
 }
 
 int main(void) {
-    return fn();               // call fn  ; hlt
+    return fn();               // call fn ; sys_exit(EAX)
 }
 `,
 				Bytes: []byte{
-					0xE8, 0x01, 0x00, 0x00, 0x00, // call +1
-					0xF4,                         // hlt (skipped)
+					0xE8, 0x09, 0x00, 0x00, 0x00, // call +9  (jump past exit sequence)
+					0x89, 0xC3,                   // mov ebx, eax  (exit code = fn result)
+					0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
+					0xCD, 0x80,                   // int 0x80
 					0xB8, 0x99, 0x00, 0x00, 0x00, // mov eax, 0x99
 					0xC3, // ret
 				},
 				SourceMap: []SourceLine{
 					{Offset: 0x00, Mnemonic: "CALL fn", CLine: 7},
-					{Offset: 0x05, Mnemonic: "HLT", CLine: 7},
-					{Offset: 0x06, Mnemonic: "MOV EAX, 0x99", CLine: 3},
-					{Offset: 0x0B, Mnemonic: "RET", CLine: 3},
+					{Offset: 0x05, Mnemonic: "MOV EBX, EAX     ; exit code", CLine: 7},
+					{Offset: 0x07, Mnemonic: "MOV EAX, 1       ; sys_exit", CLine: 7},
+					{Offset: 0x0C, Mnemonic: "INT 0x80", CLine: 7},
+					{Offset: 0x0E, Mnemonic: "MOV EAX, 0x99", CLine: 3},
+					{Offset: 0x13, Mnemonic: "RET", CLine: 3},
 				},
 			}},
 		},
@@ -186,20 +202,24 @@ int main(void) {
     register int x = 1;        // mov eax, 1
     asm("int 0x80");           // HW → PL0, salta a IDT[0x80], handler iret
     x++;                       // inc eax  (ejecuta después del IRET)
-    return x;                  // hlt
+    return x;                  // sys_exit(EAX)
 }
 `,
 				Bytes: []byte{
 					0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
 					0xCD, 0x80, // int 0x80
-					0x40, // inc eax
-					0xF4,
+					0x40,       // inc eax
+					0x89, 0xC3, // mov ebx, eax  (exit code)
+					0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
+					0xCD, 0x80, // int 0x80
 				},
 				SourceMap: []SourceLine{
 					{Offset: 0x00, Mnemonic: "MOV EAX, 1", CLine: 4},
 					{Offset: 0x05, Mnemonic: "INT 0x80", CLine: 5},
 					{Offset: 0x07, Mnemonic: "INC EAX", CLine: 6},
-					{Offset: 0x08, Mnemonic: "HLT", CLine: 7},
+					{Offset: 0x08, Mnemonic: "MOV EBX, EAX     ; exit code", CLine: 7},
+					{Offset: 0x0A, Mnemonic: "MOV EAX, 1       ; sys_exit", CLine: 7},
+					{Offset: 0x0F, Mnemonic: "INT 0x80", CLine: 7},
 				},
 			}},
 		},
@@ -213,13 +233,15 @@ int main(void) {
 int main(void) {
     for (int i = 0; i < 16; i++)
         asm("nop");            // 16 × nop
-    return 0;                  // hlt
+    return 0;                  // sys_exit(0)
 }
 `,
 				Bytes: []byte{
 					0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
 					0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
-					0xF4,
+					0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
+					0xBB, 0x00, 0x00, 0x00, 0x00, // mov ebx, 0
+					0xCD, 0x80, // int 0x80 (sys_exit)
 				},
 				SourceMap: []SourceLine{
 					{Offset: 0x00, Mnemonic: "NOP", CLine: 5},
@@ -238,7 +260,9 @@ int main(void) {
 					{Offset: 0x0D, Mnemonic: "NOP", CLine: 5},
 					{Offset: 0x0E, Mnemonic: "NOP", CLine: 5},
 					{Offset: 0x0F, Mnemonic: "NOP", CLine: 5},
-					{Offset: 0x10, Mnemonic: "HLT", CLine: 6},
+					{Offset: 0x10, Mnemonic: "MOV EAX, 1       ; sys_exit", CLine: 6},
+					{Offset: 0x15, Mnemonic: "MOV EBX, 0       ; status", CLine: 6},
+					{Offset: 0x1A, Mnemonic: "INT 0x80", CLine: 6},
 				},
 			}},
 		},
@@ -342,18 +366,22 @@ int main(void) {
 int main(void) {
     int *kernel_addr = (int*)0x100000;     // mov eax, 0xDEAD
     *kernel_addr = 0xDEAD;                 // mov [0x100000], eax  ← ¡fault!
-    return 0;                              // hlt (nunca se alcanza)
+    return 0;                              // sys_exit(0) (nunca se alcanza)
 }
 `,
 				Bytes: []byte{
 					0xB8, 0xAD, 0xDE, 0x00, 0x00, // mov eax, 0xDEAD
 					0xA3, 0x00, 0x00, 0x10, 0x00, // mov [0x100000], eax
-					0xF4,
+					0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1       (unreachable)
+					0xBB, 0x00, 0x00, 0x00, 0x00, // mov ebx, 0
+					0xCD, 0x80, // int 0x80
 				},
 				SourceMap: []SourceLine{
 					{Offset: 0x00, Mnemonic: "MOV EAX, 0xDEAD", CLine: 5},
 					{Offset: 0x05, Mnemonic: "MOV [0x100000], EAX  ; ¡fault!", CLine: 6},
-					{Offset: 0x0A, Mnemonic: "HLT  ; unreachable", CLine: 7},
+					{Offset: 0x0A, Mnemonic: "MOV EAX, 1       ; sys_exit (unreachable)", CLine: 7},
+					{Offset: 0x0F, Mnemonic: "MOV EBX, 0", CLine: 7},
+					{Offset: 0x14, Mnemonic: "INT 0x80", CLine: 7},
 				},
 			}},
 		},
@@ -955,6 +983,239 @@ int main(void) {
 			},
 		},
 
+		// ─── Failure-pattern demos ────────────────────────────────────────
+		{
+			Name:        "stack_overflow",
+			Category:    "fallos",
+			Description: "Fuerza un stack overflow en pocos pasos: acerca ESP al borde inferior del user_stack y hace CALL recursivo infinito. El segundo CALL intenta escribir el return address en user_code (R-X) → page fault.",
+			Procs: []Proc{{
+				Name: "stack_overflow",
+				Source: `// Stack overflow deliberado. En x86 real, cada CALL pushea la dirección
+// de retorno. Aquí acercamos ESP al borde de user_stack para provocar el
+// fault rápido y ver la MMU detener el proceso.
+int recurse(void) {
+    return recurse();       // call recurse
+}
+
+int main(void) {
+    asm("mov esp, 0x300004");  // borde inferior del user_stack
+    return recurse();          // segundo CALL escribe en user_code → fault
+}
+`,
+				Bytes: []byte{
+					0xBC, 0x04, 0x00, 0x30, 0x00, // mov esp, 0x300004
+					0xE8, 0xFB, 0xFF, 0xFF, 0xFF, // call -5 (target = same CALL)
+					0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1       (unreachable)
+					0xBB, 0x00, 0x00, 0x00, 0x00, // mov ebx, 0
+					0xCD, 0x80, // int 0x80
+				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "MOV ESP, 0x300004  ; near stack floor", CLine: 9},
+					{Offset: 0x05, Mnemonic: "CALL recurse       ; pushes return address", CLine: 10},
+					{Offset: 0x0A, Mnemonic: "MOV EAX, 1         ; sys_exit (unreachable)", CLine: 10},
+					{Offset: 0x0F, Mnemonic: "MOV EBX, 0", CLine: 10},
+					{Offset: 0x14, Mnemonic: "INT 0x80", CLine: 10},
+				},
+			}},
+		},
+
+		{
+			Name:        "syscall_kernel_pointer",
+			Category:    "fallos",
+			Description: "Pasa un puntero kernel a sys_write. Un kernel real debe rechazarlo con -EFAULT; esta demo existe para contrastar esa regla con la simplificación actual del simulador.",
+			Procs: []Proc{{
+				Name: "syscall_kernel_pointer",
+				Source: `// Puntero inválido en syscall. En un OS real copy_from_user validaría
+// que el buffer sea accesible desde user mode antes de leerlo.
+int main(void) {
+    write(1, (char *)0x100000, 8);  // kernel pointer: debería ser -EFAULT
+    exit(0);
+}
+`,
+				Bytes: []byte{
+					0xB8, 0x04, 0x00, 0x00, 0x00, // mov eax, 4 (sys_write)
+					0xBB, 0x01, 0x00, 0x00, 0x00, // mov ebx, 1 (stdout)
+					0xB9, 0x00, 0x00, 0x10, 0x00, // mov ecx, 0x100000 (kernel)
+					0xBA, 0x08, 0x00, 0x00, 0x00, // mov edx, 8
+					0xCD, 0x80, // int 0x80
+					0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1 (sys_exit)
+					0x31, 0xDB, // xor ebx, ebx
+					0xCD, 0x80, // int 0x80
+				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "MOV EAX, 4     ; sys_write", CLine: 4},
+					{Offset: 0x05, Mnemonic: "MOV EBX, 1     ; stdout", CLine: 4},
+					{Offset: 0x0A, Mnemonic: "MOV ECX, 0x100000  ; kernel ptr", CLine: 4},
+					{Offset: 0x0F, Mnemonic: "MOV EDX, 8", CLine: 4},
+					{Offset: 0x14, Mnemonic: "INT 0x80       ; should be -EFAULT", CLine: 4},
+					{Offset: 0x16, Mnemonic: "MOV EAX, 1     ; sys_exit", CLine: 5},
+					{Offset: 0x1B, Mnemonic: "XOR EBX, EBX", CLine: 5},
+					{Offset: 0x1D, Mnemonic: "INT 0x80", CLine: 5},
+				},
+			}},
+		},
+
+		{
+			Name:        "unknown_syscall",
+			Category:    "fallos",
+			Description: "Invoca un número de syscall no implementado. El kernel devuelve 0xFFFFFFFF en EAX, equivalente pedagógico de un error tipo -ENOSYS.",
+			Procs: []Proc{{
+				Name: "unknown_syscall",
+				Source: `// Syscall inexistente: el kernel no conoce EAX=999.
+int main(void) {
+    long r = syscall(999);   // EAX queda en 0xFFFFFFFF
+    exit(0);
+}
+`,
+				Bytes: []byte{
+					0xB8, 0xE7, 0x03, 0x00, 0x00, // mov eax, 999
+					0xCD, 0x80, // int 0x80
+					0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
+					0x31, 0xDB, // xor ebx, ebx
+					0xCD, 0x80, // int 0x80
+				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "MOV EAX, 999   ; unknown syscall", CLine: 3},
+					{Offset: 0x05, Mnemonic: "INT 0x80       ; EAX=0xFFFFFFFF", CLine: 3},
+					{Offset: 0x07, Mnemonic: "MOV EAX, 1     ; sys_exit", CLine: 4},
+					{Offset: 0x0C, Mnemonic: "XOR EBX, EBX", CLine: 4},
+					{Offset: 0x0E, Mnemonic: "INT 0x80", CLine: 4},
+				},
+			}},
+		},
+
+		{
+			Name:        "double_unlock",
+			Category:    "fallos",
+			Description: "Crea un mutex e intenta desbloquearlo sin ser holder. El kernel rechaza la operación con EAX=0xFFFFFFFF; útil para ver errores de sincronización que no son page faults.",
+			Procs: []Proc{{
+				Name: "double_unlock",
+				Source: `// Bug clásico: unlock sin ownership. El mutex existe, pero nadie lo tomó.
+int main(void) {
+    int m = mutex_create();  // id=1
+    mutex_unlock(m);         // error: caller no es holder
+    exit(0);
+}
+`,
+				Bytes: []byte{
+					0xB8, 0x10, 0x00, 0x00, 0x00, // mov eax, 0x10 (MutexCreate)
+					0xCD, 0x81, // int 0x81
+					0xBB, 0x01, 0x00, 0x00, 0x00, // mov ebx, 1
+					0xB8, 0x12, 0x00, 0x00, 0x00, // mov eax, 0x12 (MutexUnlock)
+					0xCD, 0x81, // int 0x81
+					0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
+					0x31, 0xDB, // xor ebx, ebx
+					0xCD, 0x80, // int 0x80
+				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "MOV EAX, 0x10  ; MutexCreate", CLine: 3},
+					{Offset: 0x05, Mnemonic: "INT 0x81       ; m=1", CLine: 3},
+					{Offset: 0x07, Mnemonic: "MOV EBX, 1     ; mutex id", CLine: 4},
+					{Offset: 0x0C, Mnemonic: "MOV EAX, 0x12  ; MutexUnlock", CLine: 4},
+					{Offset: 0x11, Mnemonic: "INT 0x81       ; EAX=0xFFFFFFFF", CLine: 4},
+					{Offset: 0x13, Mnemonic: "MOV EAX, 1     ; sys_exit", CLine: 5},
+					{Offset: 0x18, Mnemonic: "XOR EBX, EBX", CLine: 5},
+					{Offset: 0x1A, Mnemonic: "INT 0x80", CLine: 5},
+				},
+			}},
+		},
+
+		{
+			Name:        "semaphore_leak",
+			Category:    "fallos",
+			Description: "Crea tres semáforos y termina sin usarlos ni liberarlos. No rompe el kernel, pero deja recursos vivos: una demo compacta de resource leak.",
+			Procs: []Proc{{
+				Name: "semaphore_leak",
+				Source: `// Resource leak: objetos kernel creados y nunca liberados.
+int main(void) {
+    sem_create(1);
+    sem_create(2);
+    sem_create(3);
+    exit(0);
+}
+`,
+				Bytes: []byte{
+					0xB8, 0x20, 0x00, 0x00, 0x00, // mov eax, 0x20
+					0xBB, 0x01, 0x00, 0x00, 0x00, // mov ebx, 1
+					0xCD, 0x81,
+					0xB8, 0x20, 0x00, 0x00, 0x00,
+					0xBB, 0x02, 0x00, 0x00, 0x00,
+					0xCD, 0x81,
+					0xB8, 0x20, 0x00, 0x00, 0x00,
+					0xBB, 0x03, 0x00, 0x00, 0x00,
+					0xCD, 0x81,
+					0xB8, 0x01, 0x00, 0x00, 0x00,
+					0x31, 0xDB,
+					0xCD, 0x80,
+				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "MOV EAX, 0x20  ; SemCreate", CLine: 3},
+					{Offset: 0x05, Mnemonic: "MOV EBX, 1     ; init=1", CLine: 3},
+					{Offset: 0x0A, Mnemonic: "INT 0x81       ; sem 1", CLine: 3},
+					{Offset: 0x0C, Mnemonic: "MOV EAX, 0x20  ; SemCreate", CLine: 4},
+					{Offset: 0x11, Mnemonic: "MOV EBX, 2     ; init=2", CLine: 4},
+					{Offset: 0x16, Mnemonic: "INT 0x81       ; sem 2", CLine: 4},
+					{Offset: 0x18, Mnemonic: "MOV EAX, 0x20  ; SemCreate", CLine: 5},
+					{Offset: 0x1D, Mnemonic: "MOV EBX, 3     ; init=3", CLine: 5},
+					{Offset: 0x22, Mnemonic: "INT 0x81       ; sem 3", CLine: 5},
+					{Offset: 0x24, Mnemonic: "MOV EAX, 1     ; sys_exit", CLine: 6},
+					{Offset: 0x29, Mnemonic: "XOR EBX, EBX", CLine: 6},
+					{Offset: 0x2B, Mnemonic: "INT 0x80", CLine: 6},
+				},
+			}},
+		},
+
+		{
+			Name:        "latency_quantum",
+			Category:    "scheduler",
+			Description: "Dos procesos CPU-bound y uno interactivo. Con quantum alto, el reader tarda más en volver a correr después de una tecla; con quantum bajo, la latencia baja pero suben los context switches.",
+			Procs: []Proc{
+				spinCounterProc("hog_eax", "EAX", 0x40),
+				spinCounterProc("hog_ebx", "EBX", 0x43),
+				{
+					Name: "interactive_reader",
+					Source: `// Proceso interactivo: bloquea esperando teclado y luego hace echo.
+// Compare quantum alto vs bajo: la tecla llega por IRQ, pero la vuelta a RUN
+// compite con los CPU-bound en la ready queue.
+char buf;  // PID 3 → stack @ 0x3BFFE0
+
+int main(void) {
+    while (1) {
+        read(0, &buf, 1);
+        write(1, &buf, 1);
+    }
+}
+`,
+					Bytes: []byte{
+						0xB8, 0x03, 0x00, 0x00, 0x00,
+						0xBB, 0x00, 0x00, 0x00, 0x00,
+						0xB9, 0xE0, 0xFF, 0x3B, 0x00,
+						0xBA, 0x01, 0x00, 0x00, 0x00,
+						0xCD, 0x80,
+						0xB8, 0x04, 0x00, 0x00, 0x00,
+						0xBB, 0x01, 0x00, 0x00, 0x00,
+						0xB9, 0xE0, 0xFF, 0x3B, 0x00,
+						0xBA, 0x01, 0x00, 0x00, 0x00,
+						0xCD, 0x80,
+						0xEB, 0xD2,
+					},
+					SourceMap: []SourceLine{
+						{Offset: 0x00, Mnemonic: "MOV EAX, 3    ; sys_read", CLine: 8},
+						{Offset: 0x05, Mnemonic: "MOV EBX, 0    ; stdin", CLine: 8},
+						{Offset: 0x0A, Mnemonic: "MOV ECX, 0x3BFFE0", CLine: 8},
+						{Offset: 0x0F, Mnemonic: "MOV EDX, 1", CLine: 8},
+						{Offset: 0x14, Mnemonic: "INT 0x80      ; BLOCKED", CLine: 8},
+						{Offset: 0x16, Mnemonic: "MOV EAX, 4    ; sys_write", CLine: 9},
+						{Offset: 0x1B, Mnemonic: "MOV EBX, 1    ; stdout", CLine: 9},
+						{Offset: 0x20, Mnemonic: "MOV ECX, 0x3BFFE0", CLine: 9},
+						{Offset: 0x25, Mnemonic: "MOV EDX, 1", CLine: 9},
+						{Offset: 0x2A, Mnemonic: "INT 0x80      ; echo", CLine: 9},
+						{Offset: 0x2C, Mnemonic: "JMP -46       ; while(1)", CLine: 7},
+					},
+				},
+			},
+		},
+
 		// ─── Showcase ─────────────────────────────────────────────────────
 		// Single demo that exercises every CPU-driven animation in one run.
 		// Cuatro procesos repartidos automáticamente uno por core: P1 camina
@@ -963,9 +1224,9 @@ int main(void) {
 		// semáforo y emite signals (INT 0x81 + ModeFlip C2), P4 espera el
 		// semáforo y termina con un page fault deliberado en kernel space.
 		{
-			Name:     "showcase",
-			Category: "showcase",
-			Cores:    4,
+			Name:        "showcase",
+			Category:    "showcase",
+			Cores:       4,
 			Description: "Paseo completo en 4 cores. Toca byte flights, heat de memoria, semáforos, sys_read bloqueante y page fault — exhibe casi todas las animaciones del simulador en una sola corrida. Apriete una tecla en la consola para desbloquear al reader (C1). HandRaiseBadge, ConnectionBanner y el glosario inline se prueban aparte (no son disparables desde un programa).",
 			Procs: []Proc{
 				{
@@ -1146,7 +1407,7 @@ int main(void) {
     sem_wait(1);
 
     *(int *)0x100000 = 0xDEAD;   // ← PAGE FAULT
-    return 0;                     // hlt (unreachable)
+    return 0;                     // sys_exit(0) (unreachable)
 }
 `,
 					Bytes: []byte{
@@ -1164,7 +1425,9 @@ int main(void) {
 						0xCD, 0x81, // int 0x81  ← 3rd wait
 						0xB8, 0xAD, 0xDE, 0x00, 0x00, // mov eax, 0xDEAD
 						0xA3, 0x00, 0x00, 0x10, 0x00, // mov [0x100000], eax ← ¡fault!
-						0xF4, // hlt (unreachable)
+						0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1       (unreachable)
+						0xBB, 0x00, 0x00, 0x00, 0x00, // mov ebx, 0
+						0xCD, 0x80, // int 0x80
 					},
 					SourceMap: []SourceLine{
 						{Offset: 0x00, Mnemonic: "MOV ECX, 20    ; delay init", CLine: 10},
@@ -1181,7 +1444,9 @@ int main(void) {
 						{Offset: 0x2A, Mnemonic: "INT 0x81", CLine: 14},
 						{Offset: 0x2C, Mnemonic: "MOV EAX, 0xDEAD", CLine: 16},
 						{Offset: 0x31, Mnemonic: "MOV [0x100000], EAX  ; ¡fault!", CLine: 16},
-						{Offset: 0x36, Mnemonic: "HLT            ; unreachable", CLine: 17},
+						{Offset: 0x36, Mnemonic: "MOV EAX, 1       ; sys_exit (unreachable)", CLine: 17},
+						{Offset: 0x3B, Mnemonic: "MOV EBX, 0", CLine: 17},
+						{Offset: 0x40, Mnemonic: "INT 0x80", CLine: 17},
 					},
 				},
 			},
@@ -1264,6 +1529,52 @@ func philoBytes(name string, idx, firstFork, secondFork int, label string) Proc 
 			{Offset: 0x3F, Mnemonic: "XOR EBX, EBX", CLine: 10},
 			{Offset: 0x41, Mnemonic: "INT 0x80", CLine: 10},
 		},
+	}
+}
+
+// spinCounterProc is a tiny infinite CPU-bound process for scheduler demos.
+// incOpcode is one of INC r32 (0x40..0x47), matching the register named in reg.
+func spinCounterProc(name, reg string, incOpcode byte) Proc {
+	return Proc{
+		Name: name,
+		Source: "// CPU-bound: nunca bloquea, solo consume quantum.\n" +
+			"int main(void) {\n" +
+			"    register int n = 0;      // mov " + reg + ", 0\n" +
+			"    while (1) n++;           // inc " + reg + " ; jmp\n" +
+			"}\n",
+		Bytes: []byte{
+			0xB8 + regOpcodeIndex(reg), 0x00, 0x00, 0x00, 0x00,
+			incOpcode,
+			0xEB, 0xFD,
+		},
+		SourceMap: []SourceLine{
+			{Offset: 0x00, Mnemonic: "MOV " + reg + ", 0", CLine: 3},
+			{Offset: 0x05, Mnemonic: "INC " + reg, CLine: 4},
+			{Offset: 0x06, Mnemonic: "JMP -3        ; while(1)", CLine: 4},
+		},
+	}
+}
+
+func regOpcodeIndex(reg string) byte {
+	switch reg {
+	case "EAX":
+		return 0
+	case "ECX":
+		return 1
+	case "EDX":
+		return 2
+	case "EBX":
+		return 3
+	case "ESP":
+		return 4
+	case "EBP":
+		return 5
+	case "ESI":
+		return 6
+	case "EDI":
+		return 7
+	default:
+		return 0
 	}
 }
 

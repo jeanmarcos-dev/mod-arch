@@ -373,3 +373,131 @@ func TestContextSwitch_RegsArePreserved(t *testing.T) {
 	}
 	t.Fatal("p1 never returned to RUN")
 }
+
+func TestHLT_InUserModeRaisesGPAndKillsProcess(t *testing.T) {
+	// HLT is privileged. A user process that runs it must hit #GP (vector
+	// 0x0D), enter the kernel and end up ZOMBIE with reason
+	// "general_protection". The other process keeps running normally.
+	hltProg := []byte{0xF4}              // hlt (illegal in PL3)
+	loopProg := []byte{0x90, 0xEB, 0xFE} // nop ; jmp -2
+	k := newTestKernelMulti(t, hltProg, loopProg)
+	k.TimerQuantum = 0
+
+	var sawGPFire bool
+	for range 20 {
+		evs, err := k.Step()
+		if err != nil {
+			t.Fatalf("step: %v", err)
+		}
+		for _, e := range evs {
+			if fire, ok := e.(cpu.EventIRQFire); ok && fire.Vector == 0x0D {
+				sawGPFire = true
+				if fire.Source != "fault" {
+					t.Errorf("#GP source = %q, want fault", fire.Source)
+				}
+			}
+		}
+		if k.Processes[1].State == StateZombie {
+			break
+		}
+	}
+	if !sawGPFire {
+		t.Error("no #GP (vector 0x0D) IRQFire emitted")
+	}
+	if k.Processes[1].State != StateZombie {
+		t.Errorf("P1 state = %s, want ZOMBIE", k.Processes[1].State)
+	}
+	if k.Processes[1].BlockedOn != "general_protection" {
+		t.Errorf("P1 reason = %q, want general_protection", k.Processes[1].BlockedOn)
+	}
+	if k.Processes[2].State == StateZombie {
+		t.Error("P2 should not be affected by P1's #GP")
+	}
+}
+
+func TestHLT_GPFrameSavesOffendingEIP(t *testing.T) {
+	// For faults x86 saves the EIP of the offending instruction, not the
+	// next one. Run HLT in user mode and verify the IRQFire frame points at
+	// the HLT byte itself — otherwise the UI would highlight the byte AFTER
+	// the fault site.
+	k := newTestKernel(t, []byte{0x90, 0xF4}) // nop ; hlt
+	k.TimerQuantum = 0
+
+	var fire *cpu.EventIRQFire
+	for range 10 {
+		evs, err := k.Step()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range evs {
+			if f, ok := e.(cpu.EventIRQFire); ok && f.Vector == 0x0D {
+				cp := f
+				fire = &cp
+			}
+		}
+		if fire != nil {
+			break
+		}
+	}
+	if fire == nil {
+		t.Fatal("no #GP IRQFire emitted")
+	}
+	// Program loaded at AddrUserBase. NOP is at offset 0, HLT at offset 1.
+	wantEIP := cpu.AddrUserBase + 1
+	if fire.SavedEIP != wantEIP {
+		t.Errorf("saved_eip = 0x%X, want 0x%X (HLT offset, not NOP+1)", fire.SavedEIP, wantEIP)
+	}
+}
+
+func TestHLT_InKernelModeHaltsCleanly(t *testing.T) {
+	// Sanity check that the privilege gate only fires in PL3. Run HLT directly
+	// on a CPU set to kernel mode and verify it just halts.
+	c := cpu.New(cpu.DefaultMemSize)
+	c.Mode = cpu.ModeKernel
+	c.R.EIP = cpu.AddrKernelText
+	c.R.CS = cpu.SelKernelCode
+	if err := c.Mem.LoadBytes(cpu.AddrKernelText, []byte{0xF4}); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if _, err := c.Step(); err != nil {
+		t.Fatalf("step: %v", err)
+	}
+	if !c.Halted {
+		t.Error("expected CPU to be halted after HLT in kernel mode")
+	}
+}
+
+func TestEventInstruction_PIDStampedFromRunningProcess(t *testing.T) {
+	// With two processes alternating under the timer, every EventInstruction
+	// must carry the PID of the process that actually executed it (snapshot
+	// taken before the step, since a context switch *inside* the step would
+	// otherwise leak the next PID back into the past).
+	k := newTestKernelMulti(t,
+		[]byte{0x40, 0xEB, 0xFE}, // p1: inc eax; jmp -2
+		[]byte{0x43, 0xEB, 0xFE}, // p2: inc ebx; jmp -2
+	)
+	k.TimerQuantum = 4
+
+	sawPID := map[int]bool{}
+	for range 40 {
+		pidBefore := k.BootCore().CurrentPID
+		evs, err := k.Step()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range evs {
+			inst, ok := e.(cpu.EventInstruction)
+			if !ok {
+				continue
+			}
+			if inst.PID != pidBefore {
+				t.Errorf("EventInstruction PID=%d, want %d (pre-step running PID)",
+					inst.PID, pidBefore)
+			}
+			sawPID[inst.PID] = true
+		}
+	}
+	if !sawPID[1] || !sawPID[2] {
+		t.Errorf("expected EventInstruction from both PIDs, saw: %v", sawPID)
+	}
+}

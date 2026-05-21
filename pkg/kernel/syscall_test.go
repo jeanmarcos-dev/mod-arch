@@ -134,3 +134,118 @@ func TestSyscall_ExitSchedulesNext(t *testing.T) {
 		t.Errorf("P1 EAX = %d, want 5 (exit code)", k.Processes[1].Regs.EAX)
 	}
 }
+
+func TestSyscall_WriteRejectsKernelPointer(t *testing.T) {
+	// User asks sys_write to read from 0x100000 (inside kernel). The kernel
+	// must refuse with -EFAULT and a page fault event, NOT exfiltrate kernel
+	// bytes to stdout.
+	prog := []byte{
+		0xB8, 0x04, 0x00, 0x00, 0x00, // mov eax, 4   (sys_write)
+		0xBB, 0x01, 0x00, 0x00, 0x00, // mov ebx, 1   (stdout)
+		0xB9, 0x00, 0x00, 0x10, 0x00, // mov ecx, 0x100000  (KERNEL!)
+		0xBA, 0x04, 0x00, 0x00, 0x00, // mov edx, 4
+		0xCD, 0x80, // int 0x80
+		0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1   (sys_exit)
+		0xBB, 0x00, 0x00, 0x00, 0x00, // mov ebx, 0
+		0xCD, 0x80, // int 0x80
+	}
+	k := newTestKernel(t, prog)
+	k.TimerQuantum = 0
+
+	var sawFault bool
+	var sawConsole bool
+	var syscallRet uint32
+	for range 50 {
+		evs, err := k.Step()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range evs {
+			switch ev := e.(type) {
+			case cpu.EventPageFault:
+				sawFault = true
+				if ev.Addr != 0x100000 {
+					t.Errorf("page fault addr = 0x%X, want 0x100000", ev.Addr)
+				}
+				if ev.PermNeeded != "R" {
+					t.Errorf("page fault perm = %q, want R", ev.PermNeeded)
+				}
+			case cpu.EventConsoleOut:
+				sawConsole = true
+			case cpu.EventSyscall:
+				if ev.Num == 4 {
+					syscallRet = ev.Result
+				}
+			}
+		}
+		if k.Processes[1].State == StateZombie {
+			break
+		}
+	}
+	if !sawFault {
+		t.Error("no EventPageFault emitted for kernel-pointer sys_write")
+	}
+	if sawConsole {
+		t.Error("EventConsoleOut emitted — kernel exfiltrated bytes (security bug)")
+	}
+	if syscallRet != ^uint32(0) {
+		t.Errorf("sys_write result = 0x%X, want 0xFFFFFFFF (-EFAULT)", syscallRet)
+	}
+}
+
+func TestSyscall_ReadRejectsKernelPointer(t *testing.T) {
+	// User asks sys_read to write the keyboard byte into 0x100008 (inside
+	// kernel). The kernel must refuse with -EFAULT and a page fault event,
+	// NOT let user clobber the IDT or kernel handlers.
+	prog := []byte{
+		0xB8, 0x03, 0x00, 0x00, 0x00, // mov eax, 3   (sys_read)
+		0xBB, 0x00, 0x00, 0x00, 0x00, // mov ebx, 0   (stdin)
+		0xB9, 0x08, 0x00, 0x10, 0x00, // mov ecx, 0x100008 (KERNEL!)
+		0xBA, 0x01, 0x00, 0x00, 0x00, // mov edx, 1
+		0xCD, 0x80, // int 0x80
+		0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1
+		0xBB, 0x00, 0x00, 0x00, 0x00, // mov ebx, 0
+		0xCD, 0x80, // int 0x80
+	}
+	k := newTestKernel(t, prog)
+	k.TimerQuantum = 0
+	// Pre-load a byte in the keyboard buffer so the fast path runs; the fault
+	// must fire BEFORE that byte is copied.
+	k.KeyboardBuf = append(k.KeyboardBuf, 'X')
+
+	var sawFault bool
+	var syscallRet uint32
+	for range 50 {
+		evs, err := k.Step()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range evs {
+			switch ev := e.(type) {
+			case cpu.EventPageFault:
+				sawFault = true
+				if ev.PermNeeded != "W" {
+					t.Errorf("page fault perm = %q, want W", ev.PermNeeded)
+				}
+			case cpu.EventSyscall:
+				if ev.Num == 3 {
+					syscallRet = ev.Result
+				}
+			}
+		}
+		if k.Processes[1].State == StateZombie {
+			break
+		}
+	}
+	if !sawFault {
+		t.Error("no EventPageFault emitted for kernel-pointer sys_read")
+	}
+	if syscallRet != ^uint32(0) {
+		t.Errorf("sys_read result = 0x%X, want 0xFFFFFFFF (-EFAULT)", syscallRet)
+	}
+	// Kernel memory at 0x100008 should still be whatever it was (here zero):
+	// the rejected write must not have happened.
+	if k.Mem.Bytes[0x100008] == 'X' {
+		t.Error("kernel byte was overwritten — read clobbered memory before validating")
+	}
+}

@@ -32,7 +32,12 @@ describe('findEntry', () => {
     expect(findEntry('mutex')?.term).toBe('Mutex');
     expect(findEntry('interbloqueo')?.term).toBe('Deadlock');
     expect(findEntry('sección crítica')?.term).toBe('Critical section');
-    expect(findEntry('int 0x81')?.term).toBe('IRQ 0x81 — Mutex/Semáforo');
+    expect(findEntry('int 0x81')?.term).toBe('INT 0x81 — Mutex/Semáforo');
+    expect(findEntry('IRQ 0x80')?.term).toBe('INT 0x80 — Syscall');
+    expect(findEntry('IRQ 0x0E')?.term).toBe('Vector 0x0E — Page Fault');
+    expect(findEntry('IRQ 0x00')?.term).toBe('Vector 0x00 — Divide error');
+    expect(findEntry('exception')?.term).toBe('Excepción');
+    expect(findEntry('trap')?.term).toBe('Software interrupt');
   });
 
   it('returns null for unknown terms', () => {

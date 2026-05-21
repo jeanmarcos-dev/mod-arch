@@ -10,13 +10,22 @@ import (
 //
 // In real x86 the first 32 vectors (0x00-0x1F) are Intel-reserved exceptions
 // and HW IRQs begin at 0x20 after PIC remap. We keep that convention.
+//
+// Naming note: these constants use the "IRQ" prefix as a catch-all for
+// everything that enters via the IDT — strictly speaking, only Timer (0x20)
+// and Keyboard (0x21) are IRQs in the x86 sense. DivideError and PageFault
+// are CPU exceptions; Syscall and Sync are software interrupts (INT N). The
+// frontend glossary (web/src/data/glossary.ts) draws the formal distinction
+// for students; the code keeps "IRQ" as an umbrella because Linux uses the
+// same convention and renaming would churn many callers for little gain.
 const (
-	IRQDivideError uint8 = 0x00
-	IRQPageFault   uint8 = 0x0E
-	IRQTimer       uint8 = 0x20 // PIT
-	IRQKeyboard    uint8 = 0x21
-	IRQSyscall     uint8 = 0x80 // Linux convention
-	IRQSync        uint8 = 0x81 // mutex / semaphore subsystem
+	IRQDivideError  uint8 = 0x00
+	IRQPageFault    uint8 = 0x0E
+	IRQGeneralProt  uint8 = 0x0D // #GP: privileged instruction in user mode, bad segment, etc.
+	IRQTimer        uint8 = 0x20 // PIT
+	IRQKeyboard     uint8 = 0x21
+	IRQSyscall      uint8 = 0x80 // Linux convention
+	IRQSync         uint8 = 0x81 // mutex / semaphore subsystem
 )
 
 // InstallDefaultIDT writes minimal handlers into kernel memory and registers
@@ -27,6 +36,7 @@ const (
 func (k *Kernel) InstallDefaultIDT() {
 	noopHandler := []byte{0xCF}                // iret
 	pageFaultHandler := []byte{0x90, 0xCF}     // nop + iret
+	gpHandler := []byte{0x90, 0xCF}            // nop + iret (process is killed by handler logic)
 	timerHandler := []byte{0x90, 0xCF}         // nop + iret
 	syscallHandler := []byte{0x90, 0x90, 0xCF} // nop nop iret
 	keyboardHandler := []byte{0x90, 0xCF}
@@ -36,6 +46,7 @@ func (k *Kernel) InstallDefaultIDT() {
 	// distinguish in hex dumps and visualizations.
 	handlerAddrs := map[uint8]uint32{
 		IRQDivideError: cpu.AddrKernelText + 0x00,
+		IRQGeneralProt: cpu.AddrKernelText + 0x60,
 		IRQPageFault:   cpu.AddrKernelText + 0x10,
 		IRQTimer:       cpu.AddrKernelText + 0x20,
 		IRQKeyboard:    cpu.AddrKernelText + 0x30,
@@ -46,6 +57,7 @@ func (k *Kernel) InstallDefaultIDT() {
 	boot := k.BootCPU()
 	writeHandler(boot, handlerAddrs[IRQDivideError], noopHandler)
 	writeHandler(boot, handlerAddrs[IRQPageFault], pageFaultHandler)
+	writeHandler(boot, handlerAddrs[IRQGeneralProt], gpHandler)
 	writeHandler(boot, handlerAddrs[IRQTimer], timerHandler)
 	writeHandler(boot, handlerAddrs[IRQKeyboard], keyboardHandler)
 	writeHandler(boot, handlerAddrs[IRQSyscall], syscallHandler)

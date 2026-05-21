@@ -82,6 +82,40 @@ func TestPageFault_KillsProcessSwitchesToNext(t *testing.T) {
 	}
 }
 
+func TestPageFault_FrameSavesOffendingEIP(t *testing.T) {
+	// Like #GP, page faults must save the EIP of the offending instruction
+	// so the kernel and the UI can point at the byte that caused the fault.
+	k := newTestKernel(t, badmemBytes)
+	k.TimerQuantum = 0
+
+	var fire *cpu.EventIRQFire
+	for range 20 {
+		evs, err := k.Step()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range evs {
+			if f, ok := e.(cpu.EventIRQFire); ok && f.Vector == 0x0E {
+				cp := f
+				fire = &cp
+			}
+		}
+		if fire != nil {
+			break
+		}
+	}
+	if fire == nil {
+		t.Fatal("no page fault IRQFire emitted")
+	}
+	// badmemBytes layout: mov eax, 0xDEAD (5 bytes), mov [0x100000], eax (5 bytes).
+	// The fault fires inside the second instruction (offset 5).
+	wantEIP := cpu.AddrUserBase + 5
+	if fire.SavedEIP != wantEIP {
+		t.Errorf("saved_eip = 0x%X, want 0x%X (offending MOV, not the byte after)",
+			fire.SavedEIP, wantEIP)
+	}
+}
+
 func TestPageFault_UserCannotReadKernelEither(t *testing.T) {
 	// This time the user tries to READ from kernel memory; must also fault.
 	readKernel := []byte{

@@ -133,6 +133,59 @@ func TestPhilosophersSafe_HaltsWithoutDeadlock(t *testing.T) {
 	}
 }
 
+func TestFailureDemos_RegisterAndRun(t *testing.T) {
+	for _, name := range []string{
+		"stack_overflow",
+		"syscall_kernel_pointer",
+		"unknown_syscall",
+		"double_unlock",
+		"semaphore_leak",
+		"latency_quantum",
+	} {
+		demo := findDemo(t, name)
+		if demo.Category == "" {
+			t.Errorf("%s: Category is empty", name)
+		}
+		if len(demo.Procs) == 0 {
+			t.Errorf("%s: no procs", name)
+		}
+	}
+}
+
+func TestStackOverflow_PageFaultsQuickly(t *testing.T) {
+	demo := findDemo(t, "stack_overflow")
+	k := kernel.New(cpu.DefaultMemSize)
+	loadDemo(t, k, demo)
+	runToHalt(t, k, 100)
+
+	p := k.Processes[1]
+	if p == nil {
+		t.Fatal("PID 1 not registered")
+	}
+	if p.State != kernel.StateZombie {
+		t.Fatalf("state = %s, want ZOMBIE", p.State)
+	}
+	if p.BlockedOn != "page_fault" {
+		t.Fatalf("BlockedOn = %q, want page_fault", p.BlockedOn)
+	}
+}
+
+func TestSemaphoreLeak_LeavesThreeKernelObjects(t *testing.T) {
+	demo := findDemo(t, "semaphore_leak")
+	k := kernel.New(cpu.DefaultMemSize)
+	loadDemo(t, k, demo)
+	runToHalt(t, k, 200)
+
+	if got := len(k.Semaphores); got != 3 {
+		t.Fatalf("len(Semaphores) = %d, want 3", got)
+	}
+	for i, want := range []int{1, 2, 3} {
+		if k.Semaphores[i].Count != want {
+			t.Errorf("sem %d count = %d, want %d", i+1, k.Semaphores[i].Count, want)
+		}
+	}
+}
+
 // TestShowcase_ConfigurationIsValid checks the showcase demo is registered
 // with the expected shape: it requests 4 cores, ships 4 procs, and every
 // proc has both bytes and a source map whose offsets fall inside the binary.
