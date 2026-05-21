@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useCpuStore } from '../stores/cpu';
+import { useCpuStore, type CoreInfo, type PCBInfo } from '../stores/cpu';
 import { computed } from 'vue';
 
 const cpu = useCpuStore();
@@ -15,7 +15,42 @@ function stateClass(state: string) {
 // Lista ordenada por PID para que la tabla no salte
 const sortedProcs = computed(() => [...cpu.procs].sort((a, b) => a.pid - b.pid));
 
-const currentPCB = computed(() => sortedProcs.value.find(p => p.pid === cpu.currentPID));
+// In multicore each visible core has its own running process. We surface one
+// PCB block per visible core so the user does not have to flip focus to see
+// what is running on C1, C2, ... Single-core just collapses to one block.
+interface PCBView { core: CoreInfo; pcb: PCBInfo }
+const visiblePCBs = computed<PCBView[]>(() => {
+  const out: PCBView[] = [];
+  for (const c of cpu.cores) {
+    if (!cpu.isCoreVisible(c.id)) continue;
+    if (c.current_pid <= 0) continue;
+    const pcb = sortedProcs.value.find((p) => p.pid === c.current_pid);
+    if (pcb) out.push({ core: c, pcb });
+  }
+  return out.sort((a, b) => a.core.id - b.core.id);
+});
+
+// PIDs currently running on any visible core. Used by the table to mark the
+// rows that are actually live (not just the focused-core one).
+const runningPIDs = computed<Set<number>>(() => {
+  const s = new Set<number>();
+  for (const c of cpu.cores) {
+    if (!cpu.isCoreVisible(c.id)) continue;
+    if (c.current_pid > 0) s.add(c.current_pid);
+  }
+  return s;
+});
+
+// Live EIP for a PID: prefer the core where it is currently running so the
+// value tracks instruction-by-instruction. Falls back to the PCB snapshot
+// (stale, but the correct thing for non-running procs).
+function liveEIP(pid: number): number {
+  for (const c of cpu.cores) {
+    if (!cpu.isCoreVisible(c.id)) continue;
+    if (c.current_pid === pid) return c.regs.EIP ?? 0;
+  }
+  return sortedProcs.value.find((p) => p.pid === pid)?.regs.EIP ?? 0;
+}
 
 function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: number }> {
   const order = ['EAX', 'EBX', 'ECX', 'EDX', 'ESP', 'EBP', 'EIP'];
@@ -46,14 +81,14 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
           :key="p.pid"
           :class="[
             stateClass(p.state),
-            { current: p.pid === cpu.currentPID, flash: cpu.flashingPIDs.has(p.pid) },
+            { current: runningPIDs.has(p.pid), flash: cpu.flashingPIDs.has(p.pid) },
           ]"
-          :title="p.pid === cpu.currentPID ? 'Proceso actualmente en RUN — sus registros viven en el CPU.' : 'Proceso fuera de RUN — su estado completo está preservado en su PCB.'"
+          :title="runningPIDs.has(p.pid) ? 'Proceso actualmente en RUN — sus registros viven en el CPU.' : 'Proceso fuera de RUN — su estado completo está preservado en su PCB.'"
         >
           <td class="pid">P{{ p.pid }}</td>
           <td class="state">{{ p.state }}</td>
           <td class="name">{{ p.name }}</td>
-          <td class="eip">{{ hex(p.pid === cpu.currentPID ? cpu.regs.EIP : (p.regs.EIP || 0)) }}</td>
+          <td class="eip">{{ hex(liveEIP(p.pid)) }}</td>
         </tr>
       </tbody>
     </table>
@@ -87,22 +122,29 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
       </div>
     </div>
 
-    <div class="pcb-detail" v-if="currentPCB">
+    <div class="pcb-detail" v-if="visiblePCBs.length > 0">
       <div
         class="pcb-section-title clickable-label"
         title="Process Control Block: estructura del kernel que guarda el estado completo de un proceso.&#10;&#10;— click para más info —"
         @click="cpu.openGlossary('PCB')"
-      >PCB DEL PROCESO ACTUAL</div>
-      <div class="pcb-meta">
-        <span class="pid-tag">P{{ currentPCB.pid }}</span>
-        <span class="pcb-name">{{ currentPCB.name }}</span>
-        <span class="pcb-addr" title="Dirección donde el kernel cargó el binario .text de este proceso. Cada proceso ocupa un slot de 256 KB.">@ {{ hex(currentPCB.code_base) }}</span>
-      </div>
-      <div class="pcb-regs">
-        <span v-for="r in pcbRegs(currentPCB.regs)" :key="r.name" :title="`${r.name} guardado en el PCB. Mientras el proceso está RUN este valor está stale; al ceder el CPU se actualiza desde los regs del CPU.`">
-          <span class="r-name">{{ r.name }}</span>
-          <span class="r-val">{{ hex(r.val, 8) }}</span>
-        </span>
+      >{{ visiblePCBs.length === 1 ? 'PCB DEL PROCESO ACTUAL' : 'PCB POR NÚCLEO' }}</div>
+      <div
+        v-for="v in visiblePCBs"
+        :key="v.core.id"
+        class="pcb-block"
+      >
+        <div class="pcb-meta">
+          <span v-if="cpu.numCores > 1" class="pcb-core" :title="`Núcleo C${v.core.id}`">C{{ v.core.id }}</span>
+          <span class="pid-tag">P{{ v.pcb.pid }}</span>
+          <span class="pcb-name">{{ v.pcb.name }}</span>
+          <span class="pcb-addr" title="Dirección donde el kernel cargó el binario .text de este proceso. Cada proceso ocupa un slot de 256 KB.">@ {{ hex(v.pcb.code_base) }}</span>
+        </div>
+        <div class="pcb-regs">
+          <span v-for="r in pcbRegs(v.core.regs)" :key="r.name" :title="`${r.name} vivo del núcleo C${v.core.id} mientras P${v.pcb.pid} corre allí. Al ceder el CPU el kernel lo copia al PCB.`">
+            <span class="r-name">{{ r.name }}</span>
+            <span class="r-val">{{ hex(r.val, 8) }}</span>
+          </span>
+        </div>
       </div>
     </div>
   </div>
@@ -285,6 +327,29 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
   letter-spacing: 2px;
   text-transform: uppercase;
   margin-bottom: 8px;
+}
+
+/* Each running core gets its own PCB block. Faint divider between them so
+   they read as a stack without competing with the parent panel border. */
+.pcb-block {
+  padding: 6px 0;
+}
+.pcb-block + .pcb-block {
+  border-top: 1px dashed rgba(255, 179, 71, 0.18);
+  margin-top: 4px;
+}
+
+.pcb-core {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--amber);
+  background: rgba(255, 179, 71, 0.12);
+  border: 1px solid var(--amber);
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+  min-width: 26px;
+  text-align: center;
 }
 
 .clickable-title, .clickable-label, .clickable-th {

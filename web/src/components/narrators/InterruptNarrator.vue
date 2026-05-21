@@ -31,10 +31,30 @@ interface Hop {
   frame: { EIP: string; CS: string; EFLAGS: string };
 }
 
+// IRETArrow is one of the three "stack → CPU" mini-arrows we fire when the
+// kernel executes iret. Each arrow re-traces the journey of one saved word
+// (EIP / CS / EFLAGS) from the stack panel back to its home register, with a
+// small delay so the user reads them as a sequence rather than a single blob.
+interface IRETArrow {
+  id: number;
+  coreId: number;
+  label: 'EIP' | 'CS' | 'EFLAGS';
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  delayMs: number;
+}
+
 const hops = ref<Hop[]>([]);
+const iretArrows = ref<IRETArrow[]>([]);
 const root = ref<HTMLElement | null>(null);
 
 const MAX_HOPS = 4;
+// Total time the mini-arrow stays on screen, before stagger scaling.
+const IRET_ARROW_MS = 700;
+// Stagger between the three saved-word arrows (EIP, CS, EFLAGS).
+const IRET_STAGGER_MS = 120;
 
 const props = withDefaults(
   defineProps<{
@@ -106,6 +126,14 @@ function spawn(h: Omit<Hop, 'id'>) {
 }
 
 narrators.onIrqFire((ev: IrqFire) => {
+  // Bookkeeping first, rendering second. The enterStack must stay balanced
+  // even if the user toggles the core off mid-flight, otherwise a later IRET
+  // pops the wrong vector. Nested kernel→kernel IRQs never produce a mode
+  // flip on IRET, so we skip the push entirely to keep enter/pop paired.
+  if (ev.fromMode === 'user') {
+    pushEnter(ev.coreId, ev.vector);
+  }
+
   if (!cpu.isCoreVisible(ev.coreId)) return;
   const cpuEl = document.querySelector(props.cpuSelector);
   const idtEl = props.idtTarget ? props.idtTarget(ev.vector) : defaultIdtTarget(ev.vector);
@@ -121,7 +149,6 @@ narrators.onIrqFire((ev: IrqFire) => {
     kind: 'enter', source: ev.source,
     frame: snapshotFrame(ev.coreId),
   });
-  pushEnter(ev.coreId, ev.vector);
 });
 
 narrators.onModeSwitch((ev: ModeSwitch) => {
@@ -129,10 +156,13 @@ narrators.onModeSwitch((ev: ModeSwitch) => {
   // (a fault elevating into kernel) are handled by ModeFlipNarrator.
   if (ev.to !== 'user') return;
   if (!/iret/i.test(ev.cause)) return;
-  if (!cpu.isCoreVisible(ev.coreId)) return;
 
+  // Pop unconditionally so the per-core stack stays balanced even when the
+  // core is hidden in the SimBar. Render is what gates on visibility.
   const vec = popEnter(ev.coreId);
   if (vec === undefined) return;
+
+  if (!cpu.isCoreVisible(ev.coreId)) return;
 
   const cpuEl = document.querySelector(props.cpuSelector);
   const idtEl = props.idtTarget ? props.idtTarget(vec) : defaultIdtTarget(vec);
@@ -148,10 +178,55 @@ narrators.onModeSwitch((ev: ModeSwitch) => {
     kind: 'iret', source: ev.cause,
     frame: snapshotFrame(ev.coreId),
   });
+
+  spawnIretArrows(ev.coreId);
 });
+
+// spawnIretArrows fires three small arrows from the stack-frame panel rows
+// (EIP / CS / EFLAGS) toward the CPU anchor, each delayed slightly so they
+// read as a sequence. If the stack panel is not mounted (e.g. the user is on
+// a different route, the narrator still runs because the bus is global) we
+// silently skip — there is nothing to animate from.
+function spawnIretArrows(coreId: number) {
+  const stackRoot = document.querySelector(`[data-irq-stack="C${coreId}"]`);
+  if (!stackRoot) return;
+  const cpuEl = document.querySelector(props.cpuSelector);
+  if (!cpuEl) return;
+  const cpuTarget = rectCenter(cpuEl);
+  if (!cpuTarget) return;
+
+  const labels: Array<{ slot: string; label: 'EIP' | 'CS' | 'EFLAGS' }> = [
+    { slot: 'eip', label: 'EIP' },
+    { slot: 'cs', label: 'CS' },
+    { slot: 'eflags', label: 'EFLAGS' },
+  ];
+
+  for (let i = 0; i < labels.length; i++) {
+    const { slot, label } = labels[i];
+    const slotEl = stackRoot.querySelector(`[data-stack-slot="${slot}"]`);
+    if (!slotEl) continue;
+    const from = rectCenter(slotEl);
+    if (!from) continue;
+    seq++;
+    const id = seq;
+    iretArrows.value.push({
+      id,
+      coreId,
+      label,
+      fromX: from.x, fromY: from.y,
+      toX: cpuTarget.x, toY: cpuTarget.y,
+      delayMs: i * IRET_STAGGER_MS,
+    });
+    const lifetime = (IRET_ARROW_MS + i * IRET_STAGGER_MS) / prefs.animationSpeed + 50;
+    window.setTimeout(() => {
+      iretArrows.value = iretArrows.value.filter(a => a.id !== id);
+    }, lifetime);
+  }
+}
 
 onUnmounted(() => {
   hops.value = [];
+  iretArrows.value = [];
   enterStacks.value = {};
 });
 
@@ -170,12 +245,15 @@ function curvePath(h: Hop): string {
 // The card sits near the arc's destination so the student reads it after
 // the arrow lands.
 function cardPos(h: Hop): { x: number; y: number } {
-  // Drop the card a touch to the right of the IDT row for ENTER, or above
-  // the CPU anchor for IRET, so it never overlaps the underlying content.
+  // ENTER lands on the IDT row — drop the card to the right of it.
+  // IRET lands on the CPU anchor — drop the card BELOW it so the card
+  // never overlaps section titles or sticky chrome sitting above the CPU
+  // anchor (the mode chip on /interrupciones has the page title to its
+  // right and only empty body below).
   if (h.kind === 'enter') {
     return { x: h.toX + 40, y: h.toY };
   }
-  return { x: h.toX, y: h.toY - 40 };
+  return { x: h.toX, y: h.toY + 70 };
 }
 
 function vecLabel(v: number): string {
@@ -185,12 +263,15 @@ function vecLabel(v: number): string {
 
 <template>
   <div ref="root" class="int-narrator" aria-hidden="true">
-    <svg v-if="hops.length" class="int-narrator__svg">
+    <svg v-if="hops.length || iretArrows.length" class="int-narrator__svg">
       <defs>
         <marker id="int-arrow-enter" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
           <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
         </marker>
         <marker id="int-arrow-iret" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
+        </marker>
+        <marker id="int-arrow-mini" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
           <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
         </marker>
       </defs>
@@ -201,6 +282,21 @@ function vecLabel(v: number): string {
           :marker-end="h.kind === 'enter' ? 'url(#int-arrow-enter)' : 'url(#int-arrow-iret)'"
           :style="{ '--ttl': `${props.ttlMs / prefs.animationSpeed}ms` }"
         />
+      </template>
+      <template v-for="a in iretArrows" :key="`ia-${a.id}`">
+        <path
+          class="int-narrator__mini"
+          :d="`M ${a.fromX},${a.fromY} L ${a.toX},${a.toY}`"
+          marker-end="url(#int-arrow-mini)"
+          :style="{ '--delay': `${a.delayMs / prefs.animationSpeed}ms`, '--ttl': `${IRET_ARROW_MS / prefs.animationSpeed}ms` }"
+        />
+        <text
+          class="int-narrator__mini-label"
+          :x="(a.fromX + a.toX) / 2"
+          :y="(a.fromY + a.toY) / 2 - 6"
+          text-anchor="middle"
+          :style="{ '--delay': `${a.delayMs / prefs.animationSpeed}ms`, '--ttl': `${IRET_ARROW_MS / prefs.animationSpeed}ms` }"
+        >{{ a.label }}</text>
       </template>
     </svg>
 
@@ -368,8 +464,50 @@ function vecLabel(v: number): string {
   100% { opacity: 0; transform: translate(calc(var(--x) - 50%), calc(var(--y) - 50%)) scale(1.05); }
 }
 
+/* Mini-arrows for the IRET: one per saved word flying from the stack panel
+   back to the CPU. They share a stagger driven by the per-arrow --delay so
+   the three reads as a sequence. */
+.int-narrator__mini {
+  fill: none;
+  stroke: #7fffaa;
+  color: #7fffaa;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  opacity: 0;
+  filter: drop-shadow(0 0 4px rgba(127, 255, 170, 0.55));
+  animation: int-mini-arc var(--ttl) ease-out forwards;
+  animation-delay: var(--delay);
+}
+
+.int-narrator__mini-label {
+  fill: #7fffaa;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  opacity: 0;
+  text-shadow: 0 0 6px rgba(127, 255, 170, 0.6);
+  animation: int-mini-label var(--ttl) ease-out forwards;
+  animation-delay: var(--delay);
+}
+
+@keyframes int-mini-arc {
+  0%   { opacity: 0; stroke-dashoffset: 0; }
+  20%  { opacity: 1; }
+  100% { opacity: 0; stroke-dashoffset: -60; }
+}
+
+@keyframes int-mini-label {
+  0%   { opacity: 0; }
+  25%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .int-narrator__arc,
-  .int-narrator__card { animation-duration: 0.001ms !important; }
+  .int-narrator__card,
+  .int-narrator__mini,
+  .int-narrator__mini-label { animation-duration: 0.001ms !important; }
 }
 </style>
