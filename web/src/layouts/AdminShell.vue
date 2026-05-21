@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue';
+import { computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { Gauge, Monitor, Users, Mail, Lock, ScrollText, ExternalLink, LogOut } from '@lucide/vue';
+import { Gauge, Monitor, Users, Mail, Lock, ScrollText, ExternalLink, LogOut, ShieldUser } from '@lucide/vue';
 import { useAdminStore } from '../stores/admin';
 import { useToastStore } from '../stores/toast';
 import Sidebar from '../components/shell/Sidebar.vue';
@@ -12,14 +12,26 @@ const admin = useAdminStore();
 const router = useRouter();
 const toast = useToastStore();
 
-const items = [
-  { to: '/admin', label: 'Resumen', icon: Gauge, group: 'ADMINISTRACIÓN' },
-  { to: '/admin/sesiones', label: 'Sesiones', icon: Monitor, group: 'ADMINISTRACIÓN' },
-  { to: '/admin/usuarios', label: 'Usuarios', icon: Users, group: 'ADMINISTRACIÓN' },
-  { to: '/admin/invitaciones', label: 'Invitaciones', icon: Mail, group: 'ADMINISTRACIÓN' },
-  { to: '/admin/accesos', label: 'Accesos', icon: Lock, group: 'ADMINISTRACIÓN' },
-  { to: '/admin/auditoria', label: 'Auditoría', icon: ScrollText, group: 'ADMINISTRACIÓN' },
-];
+// Items moderators can reach: dashboard + read tables + the kick action lives
+// inside /sesiones and /usuarios. Admin-only items (Invitaciones, Accesos)
+// are filtered out so the sidebar reflects the same gating the API enforces.
+const items = computed(() => {
+  const baseAll = [
+    { to: '/admin', label: 'Resumen', icon: Gauge, group: 'ADMINISTRACIÓN' },
+    { to: '/admin/sesiones', label: 'Sesiones', icon: Monitor, group: 'ADMINISTRACIÓN' },
+    { to: '/admin/usuarios', label: 'Usuarios', icon: Users, group: 'ADMINISTRACIÓN' },
+    { to: '/admin/invitaciones', label: 'Invitaciones', icon: Mail, group: 'ADMINISTRACIÓN' },
+    { to: '/admin/accesos', label: 'Accesos', icon: Lock, group: 'ADMINISTRACIÓN' },
+    { to: '/admin/auditoria', label: 'Auditoría', icon: ScrollText, group: 'ADMINISTRACIÓN' },
+  ];
+  if (admin.isModerator) {
+    return baseAll.filter(item =>
+      item.to !== '/admin/invitaciones' &&
+      item.to !== '/admin/accesos'
+    );
+  }
+  return baseAll;
+});
 
 let refreshTimer: number | undefined;
 
@@ -68,6 +80,10 @@ onUnmounted(() => {
         </template>
       </Topbar>
       <main class="admin-shell__content">
+        <div v-if="admin.isModerator" class="admin-shell__mod-banner" role="status">
+          <ShieldUser :size="14" :stroke-width="2" />
+          <span>Sesión de moderación — algunas acciones de gobierno quedan reservadas al administrador.</span>
+        </div>
         <RouterView v-slot="{ Component }">
           <Transition name="route" mode="out-in">
             <component :is="Component" />
@@ -126,8 +142,22 @@ onUnmounted(() => {
 
 .admin-shell__link:hover,
 .admin-shell__logout:hover {
-  background: rgba(255, 179, 71, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
   color: var(--amber);
+}
+
+.admin-shell__mod-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  align-self: flex-start;
+  padding: 6px 12px;
+  background: rgba(106, 212, 255, 0.08);
+  border: 1px solid var(--cyan);
+  color: var(--cyan);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  letter-spacing: 0.5px;
 }
 
 .route-enter-from { opacity: 0; transform: translateY(8px); }

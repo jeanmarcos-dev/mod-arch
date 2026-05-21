@@ -6,6 +6,9 @@ export interface AuthUser {
   id: string;
   name: string;
   email?: string;
+  // Role is reported by GET /api/auth/me so the student shell can decide
+  // whether to surface a "Admin panel" link.
+  role?: 'student' | 'moderator' | 'admin';
 }
 
 export interface LoginPayload {

@@ -35,6 +35,7 @@ type userPublic struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Email string `json:"email,omitempty"`
+	Role  string `json:"role,omitempty"`
 }
 
 // handleAuthLogin creates or reuses a user identity and attaches it to the
@@ -312,8 +313,64 @@ func (s *Server) currentUser(r *http.Request) (*store.UserRow, bool) {
 	return user, true
 }
 
+// EnvAdminUserID is the synthetic user id reported by userRoleForRequest when
+// the caller is the env-configured ADMIN_USER. It is NOT a real row in the
+// users table — promote/demote refuses to touch this id so the env admin is
+// always reachable for recovery.
+const EnvAdminUserID = "env-admin"
+
+// userRoleForRequest reports the authenticated identity behind a request and
+// its role for admin-side gating. It is the single source of truth used by
+// requireAdminAPI / requireModRole.
+//
+// Resolution order:
+//  1. If the mc_admin signed cookie is valid, return ("env-admin", "admin").
+//     The env admin is irrevocable and exists outside the users table.
+//  2. Otherwise, if the user session cookie (mc_sid) is attached to a known
+//     user row, return (user.id, user.role).
+//  3. Otherwise return ("", "").
+func (s *Server) userRoleForRequest(r *http.Request) (userID string, role string) {
+	if s.admin.enabled {
+		if c, err := r.Cookie(AdminCookie); err == nil {
+			if _, err := s.verifyCookie(c.Value); err == nil {
+				return EnvAdminUserID, store.RoleAdmin
+			}
+		}
+	}
+	if user, ok := s.currentUser(r); ok {
+		role := user.Role
+		if !store.ValidRole(role) {
+			role = store.RoleStudent
+		}
+		return user.ID, role
+	}
+	return "", ""
+}
+
+// roleActor returns the audit_log "actor" string for the current request,
+// matching the existing conventions: "admin:<user>" for env admin (carries
+// the configured ADMIN_USER name) and "user:<id>" for DB-backed identities.
+// Empty when the request is unauthenticated.
+func (s *Server) roleActor(r *http.Request) string {
+	if s.admin.enabled {
+		if c, err := r.Cookie(AdminCookie); err == nil {
+			if user, err := s.verifyCookie(c.Value); err == nil {
+				return "admin:" + user
+			}
+		}
+	}
+	if user, ok := s.currentUser(r); ok {
+		return "user:" + user.ID
+	}
+	return ""
+}
+
 func publicUser(u *store.UserRow) userPublic {
-	return userPublic{ID: u.ID, Name: u.Name, Email: u.Email}
+	role := u.Role
+	if !store.ValidRole(role) {
+		role = store.RoleStudent
+	}
+	return userPublic{ID: u.ID, Name: u.Name, Email: u.Email, Role: role}
 }
 
 func newAuthID() string {

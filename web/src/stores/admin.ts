@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { apiFetch } from '../lib/api';
 
 export interface AdminStats {
@@ -42,11 +42,14 @@ export interface UserSessionBrief {
   last_active: number;
 }
 
+export type UserRole = 'student' | 'moderator' | 'admin';
+
 export interface UserRow {
   id: string;
   name: string;
   email?: string;
   student_id?: string;
+  role: UserRole;
   last_login_at: number;
   sessions: UserSessionBrief[];
 }
@@ -74,8 +77,21 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
   return (await r.json()) as T;
 }
 
+interface MeResponse {
+  user: string;
+  user_id?: string;
+  role?: UserRole;
+  via_env?: boolean;
+  stats: AdminStats;
+}
+
+export const ENV_ADMIN_USER_ID = 'env-admin';
+
 export const useAdminStore = defineStore('admin', () => {
   const user = ref<string | null>(null);
+  const userId = ref<string | null>(null);
+  const role = ref<UserRole | null>(null);
+  const viaEnv = ref<boolean>(false);
   const stats = ref<AdminStats | null>(null);
   const sessions = ref<SessionRow[]>([]);
   const invites = ref<InviteRow[]>([]);
@@ -84,8 +100,33 @@ export const useAdminStore = defineStore('admin', () => {
   const audit = ref<AuditRow[]>([]);
   const lastError = ref<string | null>(null);
 
+  // Capability derivatives. Admins do everything; moderators are limited to
+  // observation + kick. Components gate UI off these instead of reading the
+  // role string directly so the rules live in one place.
+  const isAdmin = computed(() => role.value === 'admin');
+  const isModerator = computed(() => role.value === 'moderator');
+  const canManageSettings = computed(() => isAdmin.value);
+  const canManageInvites = computed(() => isAdmin.value);
+  const canChangeRoles = computed(() => isAdmin.value);
+
   async function fetchMe(): Promise<boolean> {
     return (await fetchMeStatus()) === 200;
+  }
+
+  function setMe(data: MeResponse | null) {
+    if (data) {
+      user.value = data.user;
+      userId.value = data.user_id ?? null;
+      role.value = data.role ?? null;
+      viaEnv.value = Boolean(data.via_env);
+      stats.value = data.stats;
+    } else {
+      user.value = null;
+      userId.value = null;
+      role.value = null;
+      viaEnv.value = false;
+      stats.value = null;
+    }
   }
 
   // fetchMeStatus returns the raw HTTP status of /admin/api/me so the router
@@ -95,17 +136,13 @@ export const useAdminStore = defineStore('admin', () => {
     try {
       const r = await apiFetch('/admin/api/me');
       if (r.ok) {
-        const data = (await r.json()) as { user: string; stats: AdminStats };
-        user.value = data.user;
-        stats.value = data.stats;
+        setMe((await r.json()) as MeResponse);
       } else {
-        user.value = null;
-        stats.value = null;
+        setMe(null);
       }
       return r.status;
     } catch {
-      user.value = null;
-      stats.value = null;
+      setMe(null);
       return 0;
     }
   }
@@ -113,8 +150,9 @@ export const useAdminStore = defineStore('admin', () => {
   async function login(creds: { user: string; pass: string }): Promise<boolean> {
     lastError.value = null;
     try {
-      const r = await send<{ ok: boolean; user: string }>('POST', '/admin/login', creds);
-      user.value = r.user;
+      await send<{ ok: boolean; user: string }>('POST', '/admin/login', creds);
+      // /admin/api/me is the source of truth for role + identity now that
+      // moderators can also log in via mc_sid; refresh from there.
       await fetchMe();
       return true;
     } catch (e) {
@@ -127,26 +165,29 @@ export const useAdminStore = defineStore('admin', () => {
     try {
       await send<{ ok: boolean }>('POST', '/admin/logout');
     } finally {
-      user.value = null;
-      stats.value = null;
+      setMe(null);
       sessions.value = [];
       invites.value = [];
+      users.value = [];
+      audit.value = [];
     }
   }
 
+  // refresh pulls every admin-side table at once. Moderators are restricted
+  // from invites/settings, so those calls are best-effort and fall through to
+  // empty/null on 401/403 without breaking the rest of the dashboard.
   async function refresh() {
     const [s, i, me, set, u, a] = await Promise.all([
-      send<SessionRow[]>('GET', '/admin/api/sessions'),
-      send<InviteRow[]>('GET', '/admin/api/invites'),
-      send<{ user: string; stats: AdminStats }>('GET', '/admin/api/me'),
+      send<SessionRow[]>('GET', '/admin/api/sessions').catch(() => []),
+      send<InviteRow[]>('GET', '/admin/api/invites').catch(() => []),
+      send<MeResponse>('GET', '/admin/api/me'),
       send<AccessSettings>('GET', '/admin/api/settings').catch(() => null),
       send<UserRow[]>('GET', '/admin/api/users').catch(() => []),
       send<AuditRow[]>('GET', '/admin/api/audit').catch(() => []),
     ]);
     sessions.value = s ?? [];
     invites.value = i ?? [];
-    user.value = me.user;
-    stats.value = me.stats;
+    setMe(me);
     settings.value = set;
     users.value = u ?? [];
     audit.value = a ?? [];
@@ -195,8 +236,20 @@ export const useAdminStore = defineStore('admin', () => {
     await refresh();
   }
 
+  async function setUserRole(id: string, newRole: UserRole) {
+    await send<{ ok: boolean; role: UserRole }>(
+      'POST',
+      `/admin/api/users/${id}/role`,
+      { role: newRole },
+    );
+    await refresh();
+  }
+
   return {
     user,
+    userId,
+    role,
+    viaEnv,
     stats,
     sessions,
     invites,
@@ -204,6 +257,11 @@ export const useAdminStore = defineStore('admin', () => {
     users,
     audit,
     lastError,
+    isAdmin,
+    isModerator,
+    canManageSettings,
+    canManageInvites,
+    canChangeRoles,
     fetchMe,
     fetchMeStatus,
     login,
@@ -216,5 +274,6 @@ export const useAdminStore = defineStore('admin', () => {
     revokeInvite,
     setSetting,
     kickUser,
+    setUserRole,
   };
 });

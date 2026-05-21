@@ -56,6 +56,87 @@ func TestOpen_FileBacked_PersistsAcrossOpens(t *testing.T) {
 	}
 }
 
+// TestMigrate_UpgradesFromV2 simulates the production scenario the user hit:
+// an existing database created at schema v2 (no users.role column) must
+// transparently grow the column + index when the binary boots at v3.
+//
+// Building the v2 baseline by hand avoids depending on archived snapshots:
+// we open a fresh file, hand-write the v2 users table without the role
+// column, stamp PRAGMA user_version=2, and then reopen the file using the
+// real Open() so the migrate() path runs in full.
+func TestMigrate_UpgradesFromV2(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.db")
+
+	// Hand-build a v2 baseline: same shape the binary used to ship, no role
+	// column, no idx_users_role index.
+	{
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		_, _ = s.db.Exec(`DROP TABLE IF EXISTS users`)
+		if _, err := s.db.Exec(`
+            CREATE TABLE users (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                email TEXT UNIQUE,
+                student_id TEXT UNIQUE,
+                created_at INTEGER NOT NULL,
+                last_login_at INTEGER NOT NULL
+            )
+        `); err != nil {
+			t.Fatalf("seed v2 schema: %v", err)
+		}
+		if _, err := s.db.Exec(`PRAGMA user_version = 2`); err != nil {
+			t.Fatalf("stamp v2: %v", err)
+		}
+		// Seed a row so we can check the default backfill survived.
+		if _, err := s.db.Exec(
+			`INSERT INTO users(id, name, email, student_id, created_at, last_login_at) VALUES (?, ?, NULL, NULL, ?, ?)`,
+			"u-legacy", "Pre-v3 user", 1, 1,
+		); err != nil {
+			t.Fatalf("seed row: %v", err)
+		}
+		_ = s.Close()
+	}
+
+	// Reopen — this is what failed in production until the migration order
+	// was fixed (CREATE INDEX raced against the missing column).
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("upgrade open: %v", err)
+	}
+	defer s.Close()
+
+	var version int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatalf("read user_version: %v", err)
+	}
+	if version != SchemaVersion {
+		t.Errorf("user_version after upgrade = %d, want %d", version, SchemaVersion)
+	}
+
+	row, err := s.GetUser(t.Context(), "u-legacy")
+	if err != nil {
+		t.Fatalf("get legacy user: %v", err)
+	}
+	if row.Role != RoleStudent {
+		t.Errorf("legacy row role = %q, want %q (the column default)", row.Role, RoleStudent)
+	}
+
+	// Confirm the index was created so query plans can use it.
+	var idxCount int
+	if err := s.db.QueryRow(
+		`SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_users_role'`,
+	).Scan(&idxCount); err != nil {
+		t.Fatalf("probe index: %v", err)
+	}
+	if idxCount != 1 {
+		t.Errorf("idx_users_role missing after upgrade")
+	}
+}
+
 func TestMigrate_Idempotent(t *testing.T) {
 	s, err := Open(":memory:")
 	if err != nil {

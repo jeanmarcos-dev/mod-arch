@@ -106,22 +106,41 @@ func (s *Server) verifyCookie(value string) (string, error) {
 	return p.User, nil
 }
 
-// requireAdminAPI is the middleware for /admin/api/* routes. Unlike requests
-// to /admin/* HTML, an unauthenticated API call returns a 401 JSON body so
-// the SPA can react (push the user to /admin/login) without following a 302.
+// requireAdminAPI gates admin-only endpoints. Two paths grant access:
+//
+//   - The env-configured ADMIN_USER with a valid signed mc_admin cookie.
+//   - A user row with role == "admin" carrying the standard mc_sid session
+//     cookie (DB-promoted admin).
+//
+// Anything else returns 401 with a JSON body so the SPA can push the user to
+// /admin/login without following a redirect.
 func (s *Server) requireAdminAPI(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !s.admin.enabled {
 			http.NotFound(w, r)
 			return
 		}
-		c, err := r.Cookie(AdminCookie)
-		if err != nil {
+		_, role := s.userRoleForRequest(r)
+		if role != store.RoleAdmin {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "no autenticado"})
 			return
 		}
-		if _, err := s.verifyCookie(c.Value); err != nil {
-			clearCookie(w, AdminCookie)
+		next(w, r)
+	}
+}
+
+// requireModRole gates endpoints visible to moderators (and admins). It is
+// the read-and-kick subset: list sessions, list users, list audit, kick
+// users, kill sessions. Settings, invites, role changes and label/public
+// toggles remain admin-only.
+func (s *Server) requireModRole(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.admin.enabled {
+			http.NotFound(w, r)
+			return
+		}
+		_, role := s.userRoleForRequest(r)
+		if role != store.RoleAdmin && role != store.RoleModerator {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "no autenticado"})
 			return
 		}
@@ -137,8 +156,18 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/logout", s.requireCSRF(s.handleAdminLogout))
 
 	mux.HandleFunc("GET /admin/api/me", s.handleAdminMe)
-	mux.HandleFunc("GET /admin/api/sessions", s.requireAdminAPI(s.handleAdminListSessions))
-	mux.HandleFunc("POST /admin/api/sessions/{id}/kill", s.requireAdminAPI(s.requireCSRF(s.handleAdminKillSession)))
+
+	// Moderator surface: read access to the operational tables plus the two
+	// "stop bad behavior" actions (kill session, kick user). Admins inherit
+	// the same set since requireModRole accepts both roles.
+	mux.HandleFunc("GET /admin/api/sessions", s.requireModRole(s.handleAdminListSessions))
+	mux.HandleFunc("POST /admin/api/sessions/{id}/kill", s.requireModRole(s.requireCSRF(s.handleAdminKillSession)))
+	mux.HandleFunc("GET /admin/api/users", s.requireModRole(s.handleAdminListUsers))
+	mux.HandleFunc("POST /admin/api/users/{id}/kick", s.requireModRole(s.requireCSRF(s.handleAdminKickUser)))
+	mux.HandleFunc("GET /admin/api/audit", s.requireModRole(s.handleAdminListAudit))
+
+	// Admin-only surface: anything that changes governance (labels, sharing,
+	// invites, access settings) plus role transitions.
 	mux.HandleFunc("POST /admin/api/sessions/{id}/label", s.requireAdminAPI(s.requireCSRF(s.handleAdminSetLabel)))
 	mux.HandleFunc("POST /admin/api/sessions/{id}/public", s.requireAdminAPI(s.requireCSRF(s.handleAdminTogglePublic)))
 
@@ -149,10 +178,7 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/api/settings", s.requireAdminAPI(s.handleAdminGetSettings))
 	mux.HandleFunc("PUT /admin/api/settings", s.requireAdminAPI(s.requireCSRF(s.handleAdminSetSetting)))
 
-	mux.HandleFunc("GET /admin/api/users", s.requireAdminAPI(s.handleAdminListUsers))
-	mux.HandleFunc("POST /admin/api/users/{id}/kick", s.requireAdminAPI(s.requireCSRF(s.handleAdminKickUser)))
-
-	mux.HandleFunc("GET /admin/api/audit", s.requireAdminAPI(s.handleAdminListAudit))
+	mux.HandleFunc("POST /admin/api/users/{id}/role", s.requireAdminAPI(s.requireCSRF(s.handleAdminSetUserRole)))
 
 	mux.HandleFunc("GET /admin", s.handleAdminSPA)
 	mux.HandleFunc("GET /admin/", s.handleAdminSPA)
@@ -195,27 +221,52 @@ func serveSPAStatus(w http.ResponseWriter, files fs.FS, status int) {
 
 // handleAdminMe reports the current admin identity to the SPA. Used by the
 // router guard: 401 means "go to /admin/login"; 200 means "render dashboard".
+// Either authentication path (env mc_admin or DB-promoted mc_sid) is accepted,
+// and the response includes the effective role so the SPA can hide admin-only
+// surfaces from moderators.
 func (s *Server) handleAdminMe(w http.ResponseWriter, r *http.Request) {
 	if !s.admin.enabled {
 		http.NotFound(w, r)
 		return
 	}
 	s.ensureCSRFCookie(w, r)
-	c, err := r.Cookie(AdminCookie)
-	if err != nil {
+
+	var (
+		userID      = ""
+		userLabel   = ""
+		role        = ""
+		viaEnv      = false
+	)
+	if c, err := r.Cookie(AdminCookie); err == nil {
+		if u, err := s.verifyCookie(c.Value); err == nil {
+			userID = EnvAdminUserID
+			userLabel = u
+			role = store.RoleAdmin
+			viaEnv = true
+		} else {
+			// Stale signed cookie — drop it so subsequent requests do not retry.
+			clearCookie(w, AdminCookie)
+		}
+	}
+	if role == "" {
+		if u, ok := s.currentUser(r); ok && (u.Role == store.RoleAdmin || u.Role == store.RoleModerator) {
+			userID = u.ID
+			userLabel = u.Name
+			role = u.Role
+		}
+	}
+	if role == "" {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "no autenticado"})
 		return
 	}
-	user, err := s.verifyCookie(c.Value)
-	if err != nil {
-		clearCookie(w, AdminCookie)
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "no autenticado"})
-		return
-	}
+
 	full, priv := s.manager.Count()
 	total, peak := s.manager.Metrics()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"user": user,
+		"user":    userLabel,
+		"user_id": userID,
+		"role":    role,
+		"via_env": viaEnv,
 		"stats": map[string]any{
 			"full":           full,
 			"privileged":     priv,
@@ -287,14 +338,14 @@ func (s *Server) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// adminActor extracts the admin username from a verified cookie. Returns the
-// fallback "admin" when the cookie cannot be decoded (should not happen for
-// requests that already passed requireAdminAPI).
+// adminActor extracts the admin actor for audit attribution. Honors both
+// authentication paths: env admin (cookie mc_admin → "admin:<user>") and a
+// DB-promoted role (mc_sid → "user:<id>"). Falls back to "admin" for the
+// degenerate case where the cookie cannot be decoded (should not happen for
+// requests that already passed requireAdminAPI / requireModRole).
 func (s *Server) adminActor(r *http.Request) string {
-	if c, err := r.Cookie(AdminCookie); err == nil {
-		if user, err := s.verifyCookie(c.Value); err == nil {
-			return "admin:" + user
-		}
+	if actor := s.roleActor(r); actor != "" {
+		return actor
 	}
 	return "admin"
 }

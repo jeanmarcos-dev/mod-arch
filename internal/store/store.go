@@ -17,7 +17,9 @@ var schemaSQL string
 
 // SchemaVersion is the current schema version stored via PRAGMA user_version.
 // Bump only when an incompatible migration is added.
-const SchemaVersion = 2
+//
+// v3: users.role column ('student' | 'moderator' | 'admin').
+const SchemaVersion = 3
 
 // Store is the database handle. Methods on Store are safe for concurrent use:
 // SQLite serializes writes internally and the connection pool handles reads.
@@ -88,6 +90,24 @@ func (s *Store) migrate(ctx context.Context) error {
 	if _, err := tx.ExecContext(ctx, schemaSQL); err != nil {
 		return fmt.Errorf("store: apply schema: %w", err)
 	}
+
+	// Additive column migrations for upgrade paths. CREATE TABLE IF NOT EXISTS
+	// above is a no-op for pre-existing tables, so we add missing columns
+	// explicitly. Each step checks `columnExists` to stay idempotent across
+	// repeated upgrades and re-runs.
+	if has, err := columnExists(ctx, tx, "users", "role"); err != nil {
+		return fmt.Errorf("store: probe users.role: %w", err)
+	} else if !has {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'student'`); err != nil {
+			return fmt.Errorf("store: add users.role: %w", err)
+		}
+	}
+	// Index creation comes AFTER the column-add so old databases bumping from
+	// v2 to v3 do not try to index a column that does not exist yet.
+	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)`); err != nil {
+		return fmt.Errorf("store: create idx_users_role: %w", err)
+	}
+
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
 		return fmt.Errorf("store: bump user_version: %w", err)
 	}
@@ -95,6 +115,34 @@ func (s *Store) migrate(ctx context.Context) error {
 		return fmt.Errorf("store: commit migration: %w", err)
 	}
 	return nil
+}
+
+// columnExists reports whether `table` already has a column named `column`.
+// Uses PRAGMA table_info which returns one row per column; iterating is the
+// canonical SQLite-portable way to introspect schema during migrations.
+func columnExists(ctx context.Context, tx *sql.Tx, table, column string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			ctype     string
+			notnull   int
+			dfltValue sql.NullString
+			pk        int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // DefaultPath returns the canonical on-disk location for the database. It

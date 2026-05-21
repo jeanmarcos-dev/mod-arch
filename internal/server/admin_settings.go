@@ -127,6 +127,7 @@ type userResponse struct {
 	Name        string             `json:"name"`
 	Email       string             `json:"email,omitempty"`
 	StudentID   string             `json:"student_id,omitempty"`
+	Role        string             `json:"role"`
 	LastLoginAt int64              `json:"last_login_at"`
 	Sessions    []userSessionBrief `json:"sessions"`
 }
@@ -176,6 +177,7 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 			Name:        u.Name,
 			Email:       u.Email,
 			StudentID:   u.StudentID,
+			Role:        u.Role,
 			LastLoginAt: u.LastLoginAt,
 			Sessions:    sess,
 		})
@@ -237,4 +239,54 @@ func (s *Server) handleAdminListAudit(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handleAdminSetUserRole promotes or demotes a user. The env admin id
+// (EnvAdminUserID) is rejected so the configured ADMIN_USER stays as the
+// irrevocable recovery account. Admins cannot demote themselves either —
+// blocking that path avoids accidental lock-outs where the only admin
+// downgrades to student.
+func (s *Server) handleAdminSetUserRole(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == EnvAdminUserID {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "el admin por env es irrevocable"})
+		return
+	}
+	callerID, _ := s.userRoleForRequest(r)
+	if callerID == id {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "no puede cambiar su propio rol"})
+		return
+	}
+	var body struct {
+		Role string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "body inválido"})
+		return
+	}
+	if !store.ValidRole(body.Role) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "role inválido"})
+		return
+	}
+	st := s.manager.Store()
+	if st == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "persistencia deshabilitada"})
+		return
+	}
+	prev, err := st.GetUser(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "usuario no encontrado"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "no se pudo leer el usuario"})
+		return
+	}
+	if err := st.UpdateUserRole(r.Context(), id, body.Role); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "no se pudo actualizar"})
+		return
+	}
+	meta, _ := json.Marshal(map[string]any{"from": prev.Role, "to": body.Role})
+	s.audit(r, "user.role.set", id, string(meta))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "role": body.Role})
 }

@@ -9,9 +9,15 @@ CREATE TABLE IF NOT EXISTS users (
     name          TEXT NOT NULL,
     email         TEXT UNIQUE,
     student_id    TEXT UNIQUE,
+    role          TEXT NOT NULL DEFAULT 'student',
     created_at    INTEGER NOT NULL,
     last_login_at INTEGER NOT NULL
 );
+
+-- The role index is created programmatically in store.go:migrate after the
+-- column-add migration runs, so that databases created at v2 (where the
+-- column did not exist yet) can be upgraded in-place without CREATE INDEX
+-- racing against the missing column.
 
 CREATE TABLE IF NOT EXISTS sessions (
     id             TEXT PRIMARY KEY,
