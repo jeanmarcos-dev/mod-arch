@@ -157,12 +157,12 @@ function stateClass(state: string): string {
 }
 
 .sched-metrics__table tbody tr:hover {
-  background: rgba(255, 179, 71, 0.04);
+  background: rgba(var(--accent-rgb), 0.04);
 }
 
 .sched-metrics__table td {
   padding: 4px 8px;
-  border-bottom: 1px dashed rgba(255, 179, 71, 0.04);
+  border-bottom: 1px dashed rgba(var(--accent-rgb), 0.04);
 }
 
 .sched-metrics__pid {
@@ -177,7 +177,7 @@ function stateClass(state: string): string {
   color: var(--text-dim);
 }
 
-.sched-metrics__table tr.is-run .sched-metrics__state    { color: #7fffaa; }
+.sched-metrics__table tr.is-run .sched-metrics__state    { color: var(--green); }
 .sched-metrics__table tr.is-ready .sched-metrics__state  { color: #ffd24f; }
 .sched-metrics__table tr.is-blocked .sched-metrics__state { color: #ff7a7a; }
 .sched-metrics__table tr.is-zombie .sched-metrics__state { color: var(--text-dim); }
@@ -188,7 +188,7 @@ function stateClass(state: string): string {
   font-variant-numeric: tabular-nums;
 }
 
-.sched-metrics__num--ok      { color: #7fffaa; }
+.sched-metrics__num--ok      { color: var(--green); }
 .sched-metrics__num--partial { color: var(--text-dim); }
 
 .sched-metrics__foot {

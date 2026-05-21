@@ -294,7 +294,7 @@ function fmtHex(n: number): string {
 .proc-tab:hover { border-color: var(--text-dim); color: var(--text); }
 .proc-tab.current { border-color: var(--green); color: var(--green); }
 .proc-tab.viewing {
-  background: rgba(255, 179, 71, 0.15);
+  background: rgba(var(--accent-rgb), 0.15);
   border-color: var(--amber);
   color: var(--amber);
 }
@@ -356,7 +356,7 @@ function fmtHex(n: number): string {
   align-items: baseline;
   padding: 4px 10px;
   border-bottom: 1px dashed var(--border);
-  background: rgba(255, 179, 71, 0.04);
+  background: rgba(var(--accent-rgb), 0.04);
   font-family: 'Major Mono Display', monospace;
   font-size: 10px;
   letter-spacing: 2px;
@@ -410,9 +410,9 @@ function fmtHex(n: number): string {
 .line-text { white-space: pre-wrap; }
 
 .line--current {
-  background: rgba(255, 179, 71, 0.14);
+  background: rgba(var(--accent-rgb), 0.14);
   border-left-color: var(--amber);
-  box-shadow: inset 6px 0 18px -10px rgba(255, 179, 71, 0.55);
+  box-shadow: inset 6px 0 18px -10px rgba(var(--accent-rgb), 0.55);
 }
 .line--current .line-no { color: var(--amber); font-weight: 700; }
 .line--current .line-text { color: var(--amber); }
@@ -451,7 +451,7 @@ function fmtHex(n: number): string {
 .exp-q { font-style: italic; }
 .explain[open] {
   padding: 8px;
-  background: rgba(255, 179, 71, 0.04);
+  background: rgba(var(--accent-rgb), 0.04);
   border-left: 2px solid var(--amber);
 }
 .explain p {

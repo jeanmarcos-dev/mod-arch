@@ -487,7 +487,7 @@ cpu.subscribe((ev) => {
 }
 
 .memory-page__presets button:last-child { border-right: none; }
-.memory-page__presets button:hover { background: rgba(255, 179, 71, 0.10); color: var(--amber); }
+.memory-page__presets button:hover { background: rgba(var(--accent-rgb), 0.10); color: var(--amber); }
 
 .memory-page__follow {
   display: inline-flex !important;

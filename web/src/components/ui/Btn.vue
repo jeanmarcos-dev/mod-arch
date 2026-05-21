@@ -60,12 +60,12 @@ defineEmits<{ (e: 'click', ev: MouseEvent): void }>();
 .btn--block { width: 100%; }
 
 .btn--primary {
-  background: rgba(255, 179, 71, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
   border: 1px solid var(--border-strong);
   color: var(--amber);
 }
 .btn--primary:hover:not(:disabled) {
-  background: rgba(255, 179, 71, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
   border-color: var(--amber);
   box-shadow: var(--shadow-glow-amber);
   transform: translateY(-1px);
@@ -77,7 +77,7 @@ defineEmits<{ (e: 'click', ev: MouseEvent): void }>();
   color: var(--text-dim);
 }
 .btn--ghost:hover:not(:disabled) {
-  background: rgba(255, 179, 71, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
   border-color: var(--border-strong);
   color: var(--amber);
 }

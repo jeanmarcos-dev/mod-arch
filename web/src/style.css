@@ -1,31 +1,18 @@
-/* Tema retro-CRT heredado de filosofos-so. */
+/* Tema retro-CRT heredado de filosofos-so.
+ *
+ * Theming model
+ * -------------
+ * Structural tokens (spacing, radii, transitions, z-index, density) live in
+ * the global :root block and are theme-agnostic. Color, glow, font and body
+ * gradient tokens live under :root[data-theme="..."] so changing the
+ * data-theme attribute on <html> retemes the whole app without touching any
+ * component CSS. Three themes ship today:
+ *   - amber:   the original CRT amber phosphor (default, also matches no attr)
+ *   - green:   CRT green phosphor (VT100-ish)
+ *   - modern:  flat dark with neutral palette + system sans for classrooms
+ */
 
 :root {
-  /* Palette. */
-  --bg-0: #07090e;
-  --bg-1: #0d1218;
-  --bg-2: #131a22;
-  --border: rgba(255, 179, 71, 0.18);
-  --border-strong: rgba(255, 179, 71, 0.45);
-  --amber: #ffb547;
-  --amber-dim: #c98a37;
-  --green: #7fffaa;
-  --green-glow: rgba(127, 255, 170, 0.45);
-  --cyan: #6ad4ff;
-  --yellow: #ffd54f;
-  --red: #ff3a3a;
-  --red-soft: #ff7a7a;
-  --text: #e8e3d4;
-  --text-dim: #aaa491;
-  --text-muted: #7d7868;
-
-  /* Surfaces layer on top of bg-0; use them for cards/popovers/menus so the
-     stack can be re-themed without touching individual components. */
-  --surface-0: var(--bg-0);
-  --surface-1: var(--bg-1);
-  --surface-2: var(--bg-2);
-  --surface-3: #1a212c;
-
   /* Spacing scale (4px base). Anything outside the scale is a smell. */
   --space-0: 0;
   --space-1: 4px;
@@ -48,32 +35,10 @@
   --transition-base: 200ms var(--ease-out-soft);
   --transition-slow: 320ms var(--ease-out-soft);
 
-  /* Glows and elevations. Glow tokens encode color; elevation tokens encode
-     depth and stay color-agnostic so dropping a new theme stays trivial. */
-  --shadow-glow-amber: 0 0 12px rgba(255, 179, 71, 0.25);
-  --shadow-glow-amber-strong: 0 0 18px rgba(255, 179, 71, 0.55);
-  --shadow-glow-green: 0 0 12px rgba(127, 255, 170, 0.30);
-  --shadow-glow-red: 0 0 12px rgba(255, 58, 58, 0.35);
-
-  /* Per-core accent palette. Used wherever a UI surface needs to attribute
-     activity to a specific CPU core (memory heatmap, byte flights, chip
-     borders). Palette is short on purpose: real demos top out at 4 cores. */
-  --core-0: #ffb547;             /* amber  — same as the global accent */
-  --core-1: #6ad4ff;             /* cyan   */
-  --core-2: #7fffaa;             /* green  */
-  --core-3: #c9a0ff;             /* violet */
-  --shadow-glow-core-0: 0 0 12px rgba(255, 181, 71,  0.45);
-  --shadow-glow-core-1: 0 0 12px rgba(106, 212, 255, 0.45);
-  --shadow-glow-core-2: 0 0 12px rgba(127, 255, 170, 0.45);
-  --shadow-glow-core-3: 0 0 12px rgba(201, 160, 255, 0.45);
+  /* Elevation tokens encode depth and stay color-agnostic so they survive a
+     theme swap unchanged. Color-laden shadows (glows) live in the theme block. */
   --shadow-elevation-1: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-elevation-2: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --shadow-elevation-floating: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 179, 71, 0.18);
-
-  /* Focus ring: an inner solid + outer glow so it reads on every surface. */
-  --focus-ring-inner: 0 0 0 1px var(--amber);
-  --focus-ring-outer: 0 0 0 3px rgba(255, 179, 71, 0.35);
-  --focus-ring: var(--focus-ring-inner), var(--focus-ring-outer);
 
   /* Z-index scale. Components reference tokens, never raw numbers. */
   --z-base: 0;
@@ -90,6 +55,210 @@
   --row-density: 1;
 }
 
+/* ──────────────── Theme: amber (default) ────────────────
+ * The :root selector at the end of the list makes this the fallback when no
+ * data-theme attribute has been set yet (first paint before the store boots). */
+:root,
+:root[data-theme="amber"] {
+  /* Background ramp + surfaces. */
+  --bg-0: #07090e;
+  --bg-1: #0d1218;
+  --bg-2: #131a22;
+  --surface-0: var(--bg-0);
+  --surface-1: var(--bg-1);
+  --surface-2: var(--bg-2);
+  --surface-3: #1a212c;
+
+  /* Primary accent. --accent is the new canonical token; --amber stays as a
+     retrocompatible alias so the ~hundred call sites already using it keep
+     working without a refactor pass. */
+  --accent:        #ffb547;
+  --accent-dim:    #c98a37;
+  --accent-rgb:    255, 181, 71;
+  --amber:         var(--accent);
+  --amber-dim:     var(--accent-dim);
+
+  /* Semantic accents (success / info / warn / danger). */
+  --green:      #7fffaa;
+  --green-glow: rgba(127, 255, 170, 0.45);
+  --cyan:       #6ad4ff;
+  --yellow:     #ffd54f;
+  --red:        #ff3a3a;
+  --red-soft:   #ff7a7a;
+
+  /* Text ramp. */
+  --text:       #e8e3d4;
+  --text-dim:   #aaa491;
+  --text-muted: #7d7868;
+
+  /* Borders are derived from the accent so they retint with the theme. */
+  --border:        rgba(255, 179, 71, 0.18);
+  --border-strong: rgba(255, 179, 71, 0.45);
+
+  /* Glows. */
+  --shadow-glow-amber:         0 0 12px rgba(255, 179, 71, 0.25);
+  --shadow-glow-amber-strong:  0 0 18px rgba(255, 179, 71, 0.55);
+  --shadow-glow-green:         0 0 12px rgba(127, 255, 170, 0.30);
+  --shadow-glow-red:           0 0 12px rgba(255,  58, 58, 0.35);
+  --shadow-elevation-floating: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 179, 71, 0.18);
+
+  /* Per-core accent palette. */
+  --core-0: #ffb547;
+  --core-1: #6ad4ff;
+  --core-2: #7fffaa;
+  --core-3: #c9a0ff;
+  --shadow-glow-core-0: 0 0 12px rgba(255, 181, 71,  0.45);
+  --shadow-glow-core-1: 0 0 12px rgba(106, 212, 255, 0.45);
+  --shadow-glow-core-2: 0 0 12px rgba(127, 255, 170, 0.45);
+  --shadow-glow-core-3: 0 0 12px rgba(201, 160, 255, 0.45);
+
+  /* Focus ring. */
+  --focus-ring-inner: 0 0 0 1px var(--accent);
+  --focus-ring-outer: 0 0 0 3px rgba(255, 179, 71, 0.35);
+  --focus-ring: var(--focus-ring-inner), var(--focus-ring-outer);
+
+  /* Body gradients + scanline overlay. Themes override these so the bg-CRT
+     glow follows the accent without touching the components. */
+  --body-gradient:
+    radial-gradient(ellipse 80% 50% at 50%   0%, rgba(255, 179, 71, 0.06) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 60% at 80% 100%, rgba(127, 255, 170, 0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 50% at  0%  50%, rgba(106, 212, 255, 0.03) 0%, transparent 70%),
+    var(--bg-0);
+  --scanline-color: rgba(255, 179, 71, 0.025);
+  --selection-bg:   rgba(255, 179, 71, 0.35);
+
+  /* Typography. Modern theme overrides --font-display + --font-body. */
+  --font-display: 'Major Mono Display', monospace;
+  --font-body:    'JetBrains Mono', monospace;
+  --font-code:    'JetBrains Mono', monospace;
+}
+
+/* ──────────────── Theme: green (CRT phosphor) ──────────────── */
+:root[data-theme="green"] {
+  --bg-0: #03100a;
+  --bg-1: #062017;
+  --bg-2: #0a2c20;
+  --surface-0: var(--bg-0);
+  --surface-1: var(--bg-1);
+  --surface-2: var(--bg-2);
+  --surface-3: #0e3a2a;
+
+  --accent:        #7fff95;
+  --accent-dim:    #5cc173;
+  --accent-rgb:    127, 255, 149;
+  --amber:         var(--accent);
+  --amber-dim:     var(--accent-dim);
+
+  --green:      #b8ffc8;
+  --green-glow: rgba(184, 255, 200, 0.45);
+  --cyan:       #86e0c7;
+  --yellow:     #d8ff7f;
+  --red:        #ff5a5a;
+  --red-soft:   #ff8a8a;
+
+  --text:       #d8f5e1;
+  --text-dim:   #8fc9a3;
+  --text-muted: #5e8f73;
+
+  --border:        rgba(127, 255, 149, 0.18);
+  --border-strong: rgba(127, 255, 149, 0.45);
+
+  --shadow-glow-amber:         0 0 12px rgba(127, 255, 149, 0.30);
+  --shadow-glow-amber-strong:  0 0 18px rgba(127, 255, 149, 0.55);
+  --shadow-glow-green:         0 0 12px rgba(184, 255, 200, 0.35);
+  --shadow-glow-red:           0 0 12px rgba(255,  90, 90, 0.35);
+  --shadow-elevation-floating: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(127, 255, 149, 0.20);
+
+  --core-0: #7fff95;
+  --core-1: #86e0c7;
+  --core-2: #d8ff7f;
+  --core-3: #b8c9ff;
+  --shadow-glow-core-0: 0 0 12px rgba(127, 255, 149, 0.45);
+  --shadow-glow-core-1: 0 0 12px rgba(134, 224, 199, 0.45);
+  --shadow-glow-core-2: 0 0 12px rgba(216, 255, 127, 0.45);
+  --shadow-glow-core-3: 0 0 12px rgba(184, 201, 255, 0.45);
+
+  --focus-ring-inner: 0 0 0 1px var(--accent);
+  --focus-ring-outer: 0 0 0 3px rgba(127, 255, 149, 0.35);
+  --focus-ring: var(--focus-ring-inner), var(--focus-ring-outer);
+
+  --body-gradient:
+    radial-gradient(ellipse 80% 50% at 50%   0%, rgba(127, 255, 149, 0.07) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 60% at 80% 100%, rgba(134, 224, 199, 0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 50% at  0%  50%, rgba(216, 255, 127, 0.03) 0%, transparent 70%),
+    var(--bg-0);
+  --scanline-color: rgba(127, 255, 149, 0.030);
+  --selection-bg:   rgba(127, 255, 149, 0.30);
+
+  --font-display: 'Major Mono Display', monospace;
+  --font-body:    'JetBrains Mono', monospace;
+  --font-code:    'JetBrains Mono', monospace;
+}
+
+/* ──────────────── Theme: modern (flat dark) ────────────────
+ * Drops the CRT scanline color saturation and swaps display/body fonts to a
+ * sans-serif system stack. JetBrains Mono is kept for actual code. */
+:root[data-theme="modern"] {
+  --bg-0: #0f1115;
+  --bg-1: #161a22;
+  --bg-2: #1e232e;
+  --surface-0: var(--bg-0);
+  --surface-1: var(--bg-1);
+  --surface-2: var(--bg-2);
+  --surface-3: #262c39;
+
+  --accent:        #7fa4ff;
+  --accent-dim:    #5c81d4;
+  --accent-rgb:    127, 164, 255;
+  --amber:         var(--accent);
+  --amber-dim:     var(--accent-dim);
+
+  --green:      #86d8a0;
+  --green-glow: rgba(134, 216, 160, 0.30);
+  --cyan:       #86b8ff;
+  --yellow:     #ffd86a;
+  --red:        #ef4444;
+  --red-soft:   #f87171;
+
+  --text:       #e1e5ec;
+  --text-dim:   #9aa3b3;
+  --text-muted: #6b7383;
+
+  --border:        rgba(127, 164, 255, 0.16);
+  --border-strong: rgba(127, 164, 255, 0.36);
+
+  --shadow-glow-amber:         0 0 10px rgba(127, 164, 255, 0.20);
+  --shadow-glow-amber-strong:  0 0 14px rgba(127, 164, 255, 0.42);
+  --shadow-glow-green:         0 0 10px rgba(134, 216, 160, 0.25);
+  --shadow-glow-red:           0 0 10px rgba(239,  68, 68, 0.30);
+  --shadow-elevation-floating: 0 12px 36px rgba(0, 0, 0, 0.70), 0 0 0 1px rgba(127, 164, 255, 0.20);
+
+  --core-0: #7fa4ff;
+  --core-1: #86b8ff;
+  --core-2: #86d8a0;
+  --core-3: #c9a0ff;
+  --shadow-glow-core-0: 0 0 12px rgba(127, 164, 255, 0.45);
+  --shadow-glow-core-1: 0 0 12px rgba(134, 184, 255, 0.45);
+  --shadow-glow-core-2: 0 0 12px rgba(134, 216, 160, 0.45);
+  --shadow-glow-core-3: 0 0 12px rgba(201, 160, 255, 0.45);
+
+  --focus-ring-inner: 0 0 0 1px var(--accent);
+  --focus-ring-outer: 0 0 0 3px rgba(127, 164, 255, 0.30);
+  --focus-ring: var(--focus-ring-inner), var(--focus-ring-outer);
+
+  --body-gradient:
+    radial-gradient(ellipse 80% 50% at 50%   0%, rgba(127, 164, 255, 0.05) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 60% at 80% 100%, rgba(134, 216, 160, 0.03) 0%, transparent 70%),
+    var(--bg-0);
+  /* No scanline in modern: transparent renders nothing. */
+  --scanline-color: transparent;
+  --selection-bg:   rgba(127, 164, 255, 0.30);
+
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-body:    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-code:    'JetBrains Mono', monospace;
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 /* Single accessible focus treatment for keyboard users. Mouse clicks rely on
@@ -100,15 +269,15 @@
   box-shadow: var(--focus-ring);
 }
 
-/* Text selection color matches the amber accent so highlights look intentional
-   on top of the CRT background. */
+/* Text selection color matches the active theme so highlights look intentional
+   on top of any background. */
 ::selection {
-  background: rgba(255, 179, 71, 0.35);
+  background: var(--selection-bg);
   color: var(--text);
 }
 
 a {
-  color: var(--amber);
+  color: var(--accent);
   text-decoration: none;
   transition: color var(--transition-fast);
 }
@@ -136,7 +305,7 @@ html, body {
   height: 100%;
   background: var(--bg-0);
   color: var(--text);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-body);
   font-size: 15px;
   line-height: 1.4;
   overflow: hidden;
@@ -144,11 +313,7 @@ html, body {
 }
 
 body {
-  background:
-    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(255, 179, 71, 0.06) 0%, transparent 70%),
-    radial-gradient(ellipse 60% 60% at 80% 100%, rgba(127, 255, 170, 0.04) 0%, transparent 70%),
-    radial-gradient(ellipse 50% 50% at 0% 50%, rgba(106, 212, 255, 0.03) 0%, transparent 70%),
-    var(--bg-0);
+  background: var(--body-gradient);
   background-attachment: fixed;
 }
 
@@ -160,8 +325,8 @@ body::before {
     0deg,
     transparent 0,
     transparent 2px,
-    rgba(255, 179, 71, 0.025) 2px,
-    rgba(255, 179, 71, 0.025) 3px
+    var(--scanline-color) 2px,
+    var(--scanline-color) 3px
   );
   pointer-events: none;
   z-index: 1000;

@@ -165,8 +165,8 @@ onUnmounted(() => {
 .tab.active {
   color: var(--amber);
   border-color: var(--amber);
-  background: rgba(255, 179, 71, 0.1);
-  box-shadow: 0 0 8px rgba(255, 179, 71, 0.2);
+  background: rgba(var(--accent-rgb), 0.1);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.2);
 }
 
 .credit {
@@ -195,7 +195,7 @@ onUnmounted(() => {
   font-size: 11px;
   color: var(--amber);
   letter-spacing: 3px;
-  text-shadow: 0 0 6px rgba(255, 179, 71, 0.3);
+  text-shadow: 0 0 6px rgba(var(--accent-rgb), 0.3);
 }
 
 .credit-name {
@@ -268,8 +268,8 @@ onUnmounted(() => {
   .mobile-tabs button.active {
     color: var(--amber);
     border-color: var(--amber);
-    background: rgba(255, 179, 71, 0.15);
-    box-shadow: 0 0 6px rgba(255, 179, 71, 0.3);
+    background: rgba(var(--accent-rgb), 0.15);
+    box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.3);
   }
 
   /* Las tabs internas del middle desaparecen — su función la cubre la mobile-tabs bar. */

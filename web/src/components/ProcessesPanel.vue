@@ -202,7 +202,7 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
 
 .proc-table td {
   padding: 5px 4px;
-  border-bottom: 1px dashed rgba(255, 179, 71, 0.08);
+  border-bottom: 1px dashed rgba(var(--accent-rgb), 0.08);
 }
 
 .proc-table tr.current td {
@@ -210,7 +210,7 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
 }
 
 .proc-table tr.flash td {
-  background: rgba(255, 179, 71, 0.15);
+  background: rgba(var(--accent-rgb), 0.15);
   animation: flash-green 800ms ease-out;
 }
 
@@ -312,7 +312,7 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
   margin-top: 14px;
   padding-top: 10px;
   border-top: 2px solid var(--border-strong);
-  background: rgba(255, 179, 71, 0.03);
+  background: rgba(var(--accent-rgb), 0.03);
   margin-left: -10px;
   margin-right: -10px;
   padding-left: 10px;
@@ -335,7 +335,7 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
   padding: 6px 0;
 }
 .pcb-block + .pcb-block {
-  border-top: 1px dashed rgba(255, 179, 71, 0.18);
+  border-top: 1px dashed rgba(var(--accent-rgb), 0.18);
   margin-top: 4px;
 }
 
@@ -344,7 +344,7 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
   font-size: 10px;
   letter-spacing: 1px;
   color: var(--amber);
-  background: rgba(255, 179, 71, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   border: 1px solid var(--amber);
   border-radius: var(--radius-sm);
   padding: 1px 5px;
@@ -373,7 +373,7 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
 .pid-tag {
   color: var(--amber);
   font-weight: 700;
-  background: rgba(255, 179, 71, 0.15);
+  background: rgba(var(--accent-rgb), 0.15);
   padding: 2px 6px;
   font-size: 12px;
   border: 1px solid var(--border-strong);
@@ -404,7 +404,7 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
 }
 
 .pcb-regs > span:hover {
-  background: rgba(255, 179, 71, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
 }
 
 .r-name {

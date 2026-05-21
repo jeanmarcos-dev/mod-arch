@@ -375,7 +375,7 @@ function onCoreAllClick() {
 }
 .sim-bar__core-tab:hover:not(:disabled) {
   color: var(--amber);
-  background: rgba(255, 179, 71, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 .sim-bar__core-tab:focus { outline: none; }
 .sim-bar__core-tab:focus-visible {
@@ -383,7 +383,7 @@ function onCoreAllClick() {
   outline-offset: -1px;
 }
 .sim-bar__core-tab--active {
-  background: rgba(255, 179, 71, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
   color: var(--amber);
   border-color: var(--amber);
 }
@@ -426,7 +426,7 @@ function onCoreAllClick() {
 }
 .sim-bar__core-all:hover:not(:disabled) {
   color: var(--amber);
-  background: rgba(255, 179, 71, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
   border-color: var(--amber);
 }
 .sim-bar__core-all:focus { outline: none; }

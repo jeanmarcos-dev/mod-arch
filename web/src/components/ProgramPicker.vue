@@ -98,7 +98,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  background: rgba(255, 179, 71, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
   border: 1px solid var(--border-strong);
   color: var(--amber);
   font-family: 'JetBrains Mono', monospace;
@@ -115,13 +115,13 @@ onBeforeUnmount(() => {
 }
 
 .trigger:hover {
-  background: rgba(255, 179, 71, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   border-color: var(--amber);
 }
 
 .trigger.open {
   border-color: var(--amber);
-  box-shadow: 0 0 8px rgba(255, 179, 71, 0.3);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.3);
 }
 
 .sel-name {
@@ -196,12 +196,12 @@ onBeforeUnmount(() => {
 }
 
 .opt:hover {
-  background: rgba(255, 179, 71, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
   box-shadow: none;
 }
 
 .opt.selected {
-  background: rgba(255, 179, 71, 0.15);
+  background: rgba(var(--accent-rgb), 0.15);
 }
 
 .opt.selected .opt-name {

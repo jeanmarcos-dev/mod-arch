@@ -234,7 +234,7 @@ const isEmpty = computed(() =>
 }
 
 .qt__grid {
-  stroke: rgba(255, 179, 71, 0.08);
+  stroke: rgba(var(--accent-rgb), 0.08);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }

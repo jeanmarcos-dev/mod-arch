@@ -254,5 +254,5 @@ const filtered = computed<T[]>(() => {
 .dtable__td--right { text-align: right; }
 .dtable__td--actions { white-space: nowrap; }
 
-tbody tr:hover { background: rgba(255, 179, 71, 0.04); }
+tbody tr:hover { background: rgba(var(--accent-rgb), 0.04); }
 </style>

@@ -126,13 +126,13 @@ function isActive(to: string): boolean {
 }
 
 .sidebar__toggle:hover {
-  background: rgba(255, 179, 71, 0.22);
+  background: rgba(var(--accent-rgb), 0.22);
   transform: scale(1.08);
 }
 
 .sidebar__toggle:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 3px rgba(255, 179, 71, 0.45);
+  box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 3px rgba(var(--accent-rgb), 0.45);
 }
 
 .sidebar__toggle svg { display: block; stroke-width: 2.5; }
@@ -222,16 +222,16 @@ function isActive(to: string): boolean {
 }
 
 .sidebar__link:hover {
-  background: rgba(255, 179, 71, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
   color: var(--amber);
   text-shadow: none;
 }
 
 .sidebar__link--active {
-  background: rgba(255, 179, 71, 0.10);
+  background: rgba(var(--accent-rgb), 0.10);
   color: var(--amber);
   border-left-color: var(--amber);
-  box-shadow: inset 4px 0 12px -8px rgba(255, 179, 71, 0.6);
+  box-shadow: inset 4px 0 12px -8px rgba(var(--accent-rgb), 0.6);
 }
 
 .sidebar__link--soon {

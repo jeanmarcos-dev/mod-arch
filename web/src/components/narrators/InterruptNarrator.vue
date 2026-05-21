@@ -362,12 +362,12 @@ function vecLabel(v: number): string {
 .int-narrator__arc--enter {
   stroke: var(--amber);
   color: var(--amber);
-  filter: drop-shadow(0 0 5px rgba(255, 179, 71, 0.6));
+  filter: drop-shadow(0 0 5px rgba(var(--accent-rgb), 0.6));
 }
 
 .int-narrator__arc--iret {
-  stroke: #7fffaa;
-  color: #7fffaa;
+  stroke: var(--green);
+  color: var(--green);
   filter: drop-shadow(0 0 5px rgba(127, 255, 170, 0.6));
 }
 
@@ -398,7 +398,7 @@ function vecLabel(v: number): string {
 }
 
 .int-narrator__card--iret {
-  color: #7fffaa;
+  color: var(--green);
   box-shadow: 0 0 12px rgba(127, 255, 170, 0.45);
 }
 
@@ -469,8 +469,8 @@ function vecLabel(v: number): string {
    the three reads as a sequence. */
 .int-narrator__mini {
   fill: none;
-  stroke: #7fffaa;
-  color: #7fffaa;
+  stroke: var(--green);
+  color: var(--green);
   stroke-width: 1.5;
   stroke-dasharray: 4 3;
   opacity: 0;
@@ -480,7 +480,7 @@ function vecLabel(v: number): string {
 }
 
 .int-narrator__mini-label {
-  fill: #7fffaa;
+  fill: var(--green);
   font-family: 'JetBrains Mono', monospace;
   font-size: 9px;
   font-weight: 700;

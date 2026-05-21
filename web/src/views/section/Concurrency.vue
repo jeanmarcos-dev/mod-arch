@@ -215,10 +215,10 @@ function pidShort(pid: number) {
   color: var(--text-dim);
   border-left: 3px solid var(--amber);
   padding: var(--space-2) var(--space-3);
-  background: rgba(255, 179, 71, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
 }
 .conc__hint code {
-  background: rgba(255, 179, 71, 0.1);
+  background: rgba(var(--accent-rgb), 0.1);
   padding: 0 4px;
   border-radius: var(--radius-sm);
   color: var(--amber);
@@ -290,7 +290,7 @@ function pidShort(pid: number) {
   font-family: 'Major Mono Display', monospace;
 }
 .lock-block p.empty { font-size: 11px; color: var(--text-muted); margin: 0; }
-.lock-block code { background: rgba(255, 179, 71, 0.1); padding: 0 4px; border-radius: var(--radius-sm); }
+.lock-block code { background: rgba(var(--accent-rgb), 0.1); padding: 0 4px; border-radius: var(--radius-sm); }
 
 .lock-block table {
   width: 100%;

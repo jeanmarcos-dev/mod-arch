@@ -29,3 +29,6 @@ coverage.out
 
 # Site-specific deploy automation (homelab hostnames, IPs, runbooks).
 /deploy.local/
+
+# Personal defense notes (kept out of the public repo).
+/docs/reporte-defensa.md

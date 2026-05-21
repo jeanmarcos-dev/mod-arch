@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Card from '../../components/ui/Card.vue';
-import { usePreferencesStore, type PresentationMode, type Density } from '../../stores/preferences';
+import { usePreferencesStore, type PresentationMode, type Density, type Theme } from '../../stores/preferences';
 
 const prefs = usePreferencesStore();
 
@@ -32,10 +32,63 @@ const densities: { id: Density; label: string; desc: string }[] = [
   { id: 'comfortable', label: 'Cómoda', desc: 'Espaciado generoso entre filas y paneles.' },
   { id: 'compact', label: 'Compacta', desc: 'Más información a la vez, espaciado mínimo.' },
 ];
+
+interface ThemeOption {
+  id: Theme;
+  label: string;
+  desc: string;
+  swatch: string; // hex of the accent color, used to paint the mini preview
+}
+
+const themes: ThemeOption[] = [
+  {
+    id: 'amber',
+    label: 'CRT ámbar',
+    desc: 'Fósforo ámbar clásico. El tema por defecto, evocando las terminales VT220.',
+    swatch: '#ffb547',
+  },
+  {
+    id: 'green',
+    label: 'CRT verde',
+    desc: 'Fósforo verde estilo VT100. Misma estética CRT, paleta más fría.',
+    swatch: '#7fff95',
+  },
+  {
+    id: 'modern',
+    label: 'Oscuro moderno',
+    desc: 'Paleta azul-gris plana y tipografía sans-serif. Pensado para proyección diurna en aulas claras.',
+    swatch: '#7fa4ff',
+  },
+];
 </script>
 
 <template>
   <div class="prefs">
+    <Card title="Tema visual" :elevation="1" class="prefs__card">
+      <p class="prefs__hint">
+        El tema cambia la paleta del simulador completo: paneles, narradores,
+        gráficos y la SimBar. Los dos temas CRT mantienen las tipografías
+        retro; el oscuro moderno usa sans-serif para proyectar en clases con
+        luz fuerte.
+      </p>
+      <div class="prefs__options">
+        <button
+          v-for="t in themes"
+          :key="t.id"
+          type="button"
+          class="prefs__option prefs__option--theme"
+          :class="{ 'prefs__option--on': prefs.theme === t.id }"
+          @click="prefs.setTheme(t.id)"
+        >
+          <span class="prefs__theme-row">
+            <span class="prefs__theme-swatch" :style="{ background: t.swatch }" aria-hidden="true"></span>
+            <span class="prefs__option-label">{{ t.label }}</span>
+          </span>
+          <span class="prefs__option-desc">{{ t.desc }}</span>
+        </button>
+      </div>
+    </Card>
+
     <Card title="Modo de presentación" :elevation="1" class="prefs__card">
       <p class="prefs__hint">
         Cambie el modo según el contexto en el que usa la herramienta. Los tres
@@ -154,28 +207,43 @@ const densities: { id: Density; label: string; desc: string }[] = [
 }
 
 .prefs__option:hover {
-  background: rgba(255, 179, 71, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
   border-color: var(--border-strong);
   transform: translateY(-1px);
 }
 
 .prefs__option--on {
-  background: rgba(255, 179, 71, 0.14);
-  border-color: var(--amber);
+  background: rgba(var(--accent-rgb), 0.14);
+  border-color: var(--accent);
   box-shadow: var(--shadow-glow-amber);
 }
 
 .prefs__option-label {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 12px;
   letter-spacing: 2px;
-  color: var(--amber);
+  color: var(--accent);
 }
 
 .prefs__option-desc {
   font-size: 12px;
   color: var(--text-dim);
   line-height: 1.5;
+}
+
+.prefs__theme-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.prefs__theme-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.45);
+  flex-shrink: 0;
 }
 
 .prefs__toggle {
@@ -190,6 +258,6 @@ const densities: { id: Density; label: string; desc: string }[] = [
 .prefs__toggle input {
   width: 16px;
   height: 16px;
-  accent-color: var(--amber);
+  accent-color: var(--accent);
 }
 </style>

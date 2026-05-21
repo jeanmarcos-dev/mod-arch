@@ -134,7 +134,7 @@ async function onLeave() {
 
 .viewer-bar__btn {
   font-family: inherit;
-  background: rgba(255, 179, 71, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
   border: 1px solid var(--border);
   color: var(--text-dim);
   font-size: 10px;
@@ -152,7 +152,7 @@ async function onLeave() {
   white-space: nowrap;
 }
 .viewer-bar__btn:hover {
-  background: rgba(255, 179, 71, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   color: var(--amber);
   border-color: var(--border-strong);
 }
@@ -173,10 +173,10 @@ async function onLeave() {
   /* Mano levantada con un acento ámbar suave, distinto del autofollow para
      que cada acción tenga su propia identidad visual. */
   color: var(--amber);
-  border-color: rgba(255, 179, 71, 0.4);
+  border-color: rgba(var(--accent-rgb), 0.4);
 }
 .viewer-bar__btn--hand:hover {
-  background: rgba(255, 179, 71, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
   border-color: var(--amber);
 }
 .viewer-bar__btn--pulse {
@@ -216,8 +216,8 @@ async function onLeave() {
 }
 
 @keyframes viewer-bar-pulse {
-  0%   { box-shadow: 0 0 0 0 rgba(255, 179, 71, 0.5); }
-  100% { box-shadow: 0 0 0 12px rgba(255, 179, 71, 0); }
+  0%   { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.5); }
+  100% { box-shadow: 0 0 0 12px rgba(var(--accent-rgb), 0); }
 }
 
 @media (max-width: 900px) {

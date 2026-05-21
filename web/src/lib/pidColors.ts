@@ -6,7 +6,7 @@
 const PALETTE = [
   '#ffb347', // amber  — P1
   '#7fc7ff', // cyan   — P2
-  '#7fffaa', // green  — P3
+  'var(--green)', // green  — P3
   '#ffd24f', // yellow — P4
   '#ff7a9c', // rose   — P5
   '#b591ff', // violet — P6

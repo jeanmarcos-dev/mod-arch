@@ -121,7 +121,7 @@ onBeforeUnmount(() => {
 .term--inline.term--interactive:focus-visible {
   color: var(--amber);
   border-bottom-color: var(--amber);
-  text-shadow: 0 0 6px rgba(255, 179, 71, 0.35);
+  text-shadow: 0 0 6px rgba(var(--accent-rgb), 0.35);
 }
 
 /* Label: invisible dashed outline that lights up on hover. Mirrors the

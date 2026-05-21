@@ -26,7 +26,7 @@ const route = useRoute();
   place-items: center;
   padding: 24px;
   background:
-    radial-gradient(ellipse at center, rgba(255, 179, 71, 0.05), transparent 60%),
+    radial-gradient(ellipse at center, rgba(var(--accent-rgb), 0.05), transparent 60%),
     var(--bg, #0a0a0a);
 }
 
@@ -45,14 +45,14 @@ h1 {
   color: var(--amber, #ffb347);
   letter-spacing: 12px;
   margin: 0 0 16px;
-  text-shadow: 0 0 14px rgba(255, 179, 71, 0.35);
+  text-shadow: 0 0 14px rgba(var(--accent-rgb), 0.35);
 }
 
 .path {
   font-size: 13px;
   color: var(--text, #e0e0e0);
-  background: rgba(255, 179, 71, 0.06);
-  border: 1px solid rgba(255, 179, 71, 0.15);
+  background: rgba(var(--accent-rgb), 0.06);
+  border: 1px solid rgba(var(--accent-rgb), 0.15);
   padding: 6px 10px;
   word-break: break-all;
   margin: 0 0 14px;

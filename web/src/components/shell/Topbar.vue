@@ -107,7 +107,7 @@ async function doLogout() { await auth.logout(); }
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba(255, 179, 71, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0 6px 0 8px;
@@ -129,7 +129,7 @@ async function doLogout() { await auth.logout(); }
   border-radius: var(--radius-sm);
   padding: 0;
 }
-.mini-bar__ghost-btn:hover { background: rgba(255, 179, 71, 0.10); color: var(--amber); }
+.mini-bar__ghost-btn:hover { background: rgba(var(--accent-rgb), 0.10); color: var(--amber); }
 .mini-bar__alias-input {
   background: transparent;
   border: none;
@@ -143,7 +143,7 @@ async function doLogout() { await auth.logout(); }
 
 .mini-bar__share {
   font-family: inherit;
-  background: rgba(255, 179, 71, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
   border: 1px solid var(--border);
   color: var(--text-dim);
   font-size: 10px;
@@ -160,7 +160,7 @@ async function doLogout() { await auth.logout(); }
   transition: background var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
   white-space: nowrap;
 }
-.mini-bar__share:hover { background: rgba(255, 179, 71, 0.12); color: var(--amber); border-color: var(--border-strong); }
+.mini-bar__share:hover { background: rgba(var(--accent-rgb), 0.12); color: var(--amber); border-color: var(--border-strong); }
 .mini-bar__share--on {
   background: rgba(127, 255, 170, 0.10);
   color: var(--green);

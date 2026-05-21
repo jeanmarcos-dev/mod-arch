@@ -286,7 +286,7 @@ function tipAge(t0: number): string {
 .minimap__region:last-child { border-right: none; }
 
 .minimap__region:hover {
-  background: rgba(255, 179, 71, 0.10);
+  background: rgba(var(--accent-rgb), 0.10);
   color: var(--amber);
 }
 

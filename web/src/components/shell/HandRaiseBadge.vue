@@ -44,7 +44,7 @@ function onClick() {
 <style scoped>
 .hand-badge {
   font-family: inherit;
-  background: rgba(255, 179, 71, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
   border: 1px solid var(--amber);
   color: var(--amber);
   font-size: 10px;
@@ -62,7 +62,7 @@ function onClick() {
   animation: hand-badge-attention 1.6s ease-in-out infinite;
 }
 .hand-badge:hover {
-  background: rgba(255, 179, 71, 0.22);
+  background: rgba(var(--accent-rgb), 0.22);
 }
 .hand-badge__count {
   font-variant-numeric: tabular-nums;

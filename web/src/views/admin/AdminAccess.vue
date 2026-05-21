@@ -168,7 +168,7 @@ async function clearViewerPassword() {
 }
 
 .access-check code {
-  background: rgba(255, 179, 71, 0.10);
+  background: rgba(var(--accent-rgb), 0.10);
   color: var(--amber);
   padding: 1px 6px;
   font-size: 11px;
@@ -200,14 +200,14 @@ async function clearViewerPassword() {
 .seg__btn:last-child { border-right: none; }
 
 .seg__btn:hover {
-  background: rgba(255, 179, 71, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
   color: var(--amber);
 }
 
 .seg__btn--on {
-  background: rgba(255, 179, 71, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
   color: var(--amber);
-  box-shadow: inset 0 0 8px rgba(255, 179, 71, 0.25);
+  box-shadow: inset 0 0 8px rgba(var(--accent-rgb), 0.25);
 }
 
 .access-pw {

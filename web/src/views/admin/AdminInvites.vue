@@ -133,7 +133,7 @@ async function revokeInvite(token: string) {
   font-weight: 500;
 }
 
-.grid tbody tr:hover { background: rgba(255, 179, 71, 0.04); }
+.grid tbody tr:hover { background: rgba(var(--accent-rgb), 0.04); }
 
 .mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; }
 .dim { color: var(--text-dim); }

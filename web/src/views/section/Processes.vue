@@ -463,7 +463,7 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
 .pcb-card--current {
   border-color: var(--amber);
   box-shadow: var(--shadow-glow-amber);
-  background: rgba(255, 179, 71, 0.04);
+  background: rgba(var(--accent-rgb), 0.04);
 }
 
 .pcb-card--flash {
@@ -471,11 +471,11 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
 }
 
 @keyframes pcb-card-flash {
-  0%   { background: rgba(255, 179, 71, 0.22); }
-  100% { background: rgba(255, 179, 71, 0.04); }
+  0%   { background: rgba(var(--accent-rgb), 0.22); }
+  100% { background: rgba(var(--accent-rgb), 0.04); }
 }
 
-.pcb-card.state-run    { color: #7fffaa; }
+.pcb-card.state-run    { color: var(--green); }
 .pcb-card.state-ready  { color: #ffd24f; }
 .pcb-card.state-blocked { color: #ff7a7a; }
 .pcb-card.state-zombie { color: var(--text-dim); }
@@ -540,7 +540,7 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
   content: '·live';
   margin-left: 4px;
   font-size: 9px;
-  color: #7fffaa;
+  color: var(--green);
   font-style: normal;
 }
 
@@ -663,7 +663,7 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   padding: 3px var(--space-2);
-  border-bottom: 1px dashed rgba(255, 179, 71, 0.06);
+  border-bottom: 1px dashed rgba(var(--accent-rgb), 0.06);
 }
 
 .ctx-feed__pid {

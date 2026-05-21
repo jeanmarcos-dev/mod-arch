@@ -9,11 +9,17 @@ export type PresentationMode = 'compact' | 'pedagogic' | 'projector';
 
 export type Density = 'comfortable' | 'compact';
 
+// Theme controls the color palette + font family of the whole shell. The
+// active theme is reflected on <html data-theme="..."> so it reaches portals
+// and modals mounted outside the shell root.
+export type Theme = 'amber' | 'green' | 'modern';
+
 interface PrefsState {
   sidebarCollapsed: boolean;
   mode: PresentationMode;
   density: Density;
   narratorsEnabled: boolean;
+  theme: Theme;
 }
 
 const STORAGE_KEY = 'modos-cpu:prefs:v1';
@@ -28,7 +34,29 @@ const DEFAULTS: PrefsState = {
   mode: 'pedagogic',
   density: 'comfortable',
   narratorsEnabled: false,
+  theme: 'amber',
 };
+
+// applyTheme writes the active theme to <html data-theme="..."> so the
+// :root[data-theme] rules in style.css take effect. Exposed at module scope
+// so main.ts can call it before Vue mounts, avoiding a brief flash of the
+// default amber palette on top of a saved non-amber pick.
+export function applyTheme(theme: Theme) {
+  if (typeof document === 'undefined') return;
+  document.documentElement.setAttribute('data-theme', theme);
+}
+
+export function readStoredTheme(): Theme {
+  if (typeof window === 'undefined') return DEFAULTS.theme;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULTS.theme;
+    const parsed = JSON.parse(raw) as Partial<PrefsState>;
+    const t = parsed.theme;
+    if (t === 'amber' || t === 'green' || t === 'modern') return t;
+  } catch { /* corrupt entry → default */ }
+  return DEFAULTS.theme;
+}
 
 function loadFromStorage(): PrefsState {
   if (typeof window === 'undefined') return DEFAULTS;
@@ -47,10 +75,17 @@ export const usePreferencesStore = defineStore('preferences', () => {
   const mode = ref<PresentationMode>(initial.mode);
   const density = ref<Density>(initial.density);
   const narratorsEnabled = ref(initial.narratorsEnabled);
+  const theme = ref<Theme>(initial.theme);
+
+  // Keep the document attribute in sync with the store. main.ts already calls
+  // applyTheme() before mount to avoid a flash, but if the theme changes at
+  // runtime this watcher handles the swap without each component having to
+  // observe the store itself.
+  watch(theme, (t) => applyTheme(t), { immediate: false });
 
   watch(
-    [sidebarCollapsed, mode, density, narratorsEnabled],
-    ([sc, m, d, n]) => {
+    [sidebarCollapsed, mode, density, narratorsEnabled, theme],
+    ([sc, m, d, n, t]) => {
       try {
         window.localStorage.setItem(
           STORAGE_KEY,
@@ -59,6 +94,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
             mode: m,
             density: d,
             narratorsEnabled: n,
+            theme: t,
           }),
         );
       } catch {
@@ -88,15 +124,21 @@ export const usePreferencesStore = defineStore('preferences', () => {
     if (m !== 'compact') narratorsEnabled.value = true;
   }
 
+  function setTheme(t: Theme) {
+    theme.value = t;
+  }
+
   return {
     sidebarCollapsed,
     mode,
     density,
     narratorsEnabled,
+    theme,
     rowDensity,
     animationsEnabled,
     animationSpeed,
     toggleSidebar,
     setMode,
+    setTheme,
   };
 });

@@ -98,7 +98,7 @@ void GLOSSARY_ENTRIES;
   height: min(720px, 85vh);
   background: var(--bg-1);
   border: 2px solid var(--amber);
-  box-shadow: 0 0 40px rgba(255, 179, 71, 0.25);
+  box-shadow: 0 0 40px rgba(var(--accent-rgb), 0.25);
   display: flex;
   flex-direction: column;
 }
@@ -109,7 +109,7 @@ void GLOSSARY_ENTRIES;
   gap: 14px;
   padding: 14px 18px;
   border-bottom: 1px solid var(--border-strong);
-  background: rgba(255, 179, 71, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
 }
 
 .modal-head h2 {
@@ -137,7 +137,7 @@ void GLOSSARY_ENTRIES;
 
 .search:focus {
   border-color: var(--amber);
-  box-shadow: 0 0 6px rgba(255, 179, 71, 0.3);
+  box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.3);
 }
 
 .close-btn {
@@ -178,16 +178,16 @@ void GLOSSARY_ENTRIES;
 .entry {
   padding: 8px 10px;
   cursor: pointer;
-  border-bottom: 1px dashed rgba(255, 179, 71, 0.08);
+  border-bottom: 1px dashed rgba(var(--accent-rgb), 0.08);
   transition: background 0.15s ease;
 }
 
 .entry:hover {
-  background: rgba(255, 179, 71, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
 }
 
 .entry.expanded {
-  background: rgba(255, 179, 71, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 
 .entry-row {

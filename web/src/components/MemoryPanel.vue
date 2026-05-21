@@ -187,7 +187,7 @@ const currentESP = computed(() => cpu.regs.ESP >>> 0);
 }
 
 .view-tabs button.active {
-  background: rgba(255, 179, 71, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
   color: var(--amber);
   border-color: var(--amber);
 }
@@ -237,7 +237,7 @@ const currentESP = computed(() => cpu.regs.ESP >>> 0);
 }
 
 .hex-byte.eip {
-  background: rgba(255, 179, 71, 0.4);
+  background: rgba(var(--accent-rgb), 0.4);
   color: #000;
   font-weight: 700;
 }
@@ -277,7 +277,7 @@ const currentESP = computed(() => cpu.regs.ESP >>> 0);
 .leg-kernel { color: var(--red-soft); border-color: var(--red-soft); }
 .leg-user_code { color: var(--green); border-color: var(--green); }
 .leg-user_stack { color: var(--yellow); border-color: var(--yellow); }
-.leg-eip { color: #000; background: rgba(255, 179, 71, 0.4); border-color: var(--amber); }
+.leg-eip { color: #000; background: rgba(var(--accent-rgb), 0.4); border-color: var(--amber); }
 .leg-esp { color: var(--green); background: rgba(127, 255, 170, 0.25); border-color: var(--green); }
 
 .leg-sep {

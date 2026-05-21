@@ -191,11 +191,11 @@ onUnmounted(() => { trips.value = []; });
 
 .pcb-copy__trail--save {
   stroke: var(--amber);
-  filter: drop-shadow(0 0 5px rgba(255, 179, 71, 0.6));
+  filter: drop-shadow(0 0 5px rgba(var(--accent-rgb), 0.6));
 }
 
 .pcb-copy__trail--restore {
-  stroke: #7fffaa;
+  stroke: var(--green);
   filter: drop-shadow(0 0 5px rgba(127, 255, 170, 0.6));
 }
 
@@ -226,7 +226,7 @@ onUnmounted(() => { trips.value = []; });
 }
 
 .pcb-copy__card--restore {
-  color: #7fffaa;
+  color: var(--green);
   box-shadow: 0 0 12px rgba(127, 255, 170, 0.4);
 }
 

@@ -111,9 +111,9 @@ function label(m: 'user' | 'kernel') {
 
 .mode-flip--kernel .mode-flip__tint {
   background:
-    radial-gradient(circle at top right, rgba(255, 179, 71, 0.12), transparent 55%),
-    radial-gradient(circle at bottom left, rgba(255, 179, 71, 0.07), transparent 60%);
-  box-shadow: inset 0 0 0 1px rgba(255, 179, 71, 0.22), inset 0 0 38px rgba(255, 179, 71, 0.14);
+    radial-gradient(circle at top right, rgba(var(--accent-rgb), 0.12), transparent 55%),
+    radial-gradient(circle at bottom left, rgba(var(--accent-rgb), 0.07), transparent 60%);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.22), inset 0 0 38px rgba(var(--accent-rgb), 0.14);
 }
 
 .mode-flip--pulse .mode-flip__tint {
@@ -160,7 +160,7 @@ function label(m: 'user' | 'kernel') {
   letter-spacing: 1px;
   padding: 1px 5px;
   border-radius: var(--radius-sm);
-  background: rgba(255, 179, 71, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
   color: var(--amber);
   border: 1px solid var(--amber);
   margin-right: 2px;

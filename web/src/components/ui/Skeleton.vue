@@ -52,7 +52,7 @@ const _ROW_INDEXES = computed(() => Array.from({ length: 16 }, (_, i) => i));
 .skeleton__char {
   flex: 1;
   height: 10px;
-  background: rgba(255, 179, 71, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
   border-radius: 1px;
   animation: skel-blink 1.4s infinite ease-in-out;
 }

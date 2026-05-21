@@ -132,7 +132,7 @@ async function togglePublic(id: string, makePublic: boolean) {
 .pill--share {
   color: var(--amber);
   border-color: var(--amber);
-  background: rgba(255, 179, 71, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 
 .pill--private {

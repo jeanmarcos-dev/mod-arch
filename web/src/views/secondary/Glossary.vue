@@ -202,7 +202,7 @@ const totalEntries = GLOSSARY_ENTRIES.length;
 
 .gloss-page__search:focus-within {
   border-color: var(--amber);
-  box-shadow: 0 0 8px rgba(255, 179, 71, 0.3);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.3);
 }
 
 .gloss-page__search-icon {
@@ -241,7 +241,7 @@ const totalEntries = GLOSSARY_ENTRIES.length;
 
 .gloss-page__btn:hover {
   color: var(--amber);
-  background: rgba(255, 179, 71, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
 }
 
 .gloss-page__layout {
@@ -306,7 +306,7 @@ const totalEntries = GLOSSARY_ENTRIES.length;
 
 .gloss-page__toc a:hover {
   color: var(--amber);
-  background: rgba(255, 179, 71, 0.06);
+  background: rgba(var(--accent-rgb), 0.06);
 }
 
 .gloss-page__toc-count {
@@ -345,16 +345,16 @@ const totalEntries = GLOSSARY_ENTRIES.length;
 }
 
 .gloss-entry {
-  border-bottom: 1px dashed rgba(255, 179, 71, 0.08);
+  border-bottom: 1px dashed rgba(var(--accent-rgb), 0.08);
   padding: var(--space-2) var(--space-3);
   cursor: pointer;
   border-radius: var(--radius-sm);
   transition: background var(--transition-fast);
 }
 
-.gloss-entry:hover { background: rgba(255, 179, 71, 0.04); }
+.gloss-entry:hover { background: rgba(var(--accent-rgb), 0.04); }
 
-.gloss-entry--open { background: rgba(255, 179, 71, 0.06); }
+.gloss-entry--open { background: rgba(var(--accent-rgb), 0.06); }
 
 .gloss-entry__row {
   display: grid;

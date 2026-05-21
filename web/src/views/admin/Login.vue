@@ -86,7 +86,7 @@ async function submit() {
   place-items: center;
   padding: var(--space-4);
   background:
-    radial-gradient(ellipse at center, rgba(255, 179, 71, 0.06), transparent 60%),
+    radial-gradient(ellipse at center, rgba(var(--accent-rgb), 0.06), transparent 60%),
     var(--surface-0);
 }
 

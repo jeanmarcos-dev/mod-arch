@@ -109,7 +109,7 @@ function deactivate() {
 .modal {
   background: var(--bg-1);
   border: 1px solid var(--border-strong);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.8), 0 0 24px rgba(255, 179, 71, 0.15);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.8), 0 0 24px rgba(var(--accent-rgb), 0.15);
   width: 100%;
   max-width: 520px;
   font-family: 'JetBrains Mono', monospace;
@@ -121,7 +121,7 @@ function deactivate() {
   align-items: center;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  background: rgba(255, 179, 71, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
 }
 
 .modal-title {
@@ -224,7 +224,7 @@ function deactivate() {
 }
 
 .cta {
-  background: rgba(255, 179, 71, 0.1);
+  background: rgba(var(--accent-rgb), 0.1);
   border: 1px solid var(--amber);
   color: var(--amber);
   padding: 12px 24px;
@@ -242,8 +242,8 @@ function deactivate() {
 }
 
 .cta:hover {
-  background: rgba(255, 179, 71, 0.2);
-  box-shadow: 0 0 8px rgba(255, 179, 71, 0.3);
+  background: rgba(var(--accent-rgb), 0.2);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.3);
 }
 
 .cta.danger {
