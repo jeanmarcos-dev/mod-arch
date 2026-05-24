@@ -1,37 +1,8 @@
 <script setup lang="ts">
 import Card from '../../components/ui/Card.vue';
-import { usePreferencesStore, type PresentationMode, type Density, type Theme } from '../../stores/preferences';
+import { usePreferencesStore, type Theme } from '../../stores/preferences';
 
 const prefs = usePreferencesStore();
-
-interface ModeOption {
-  id: PresentationMode;
-  label: string;
-  desc: string;
-}
-
-const modes: ModeOption[] = [
-  {
-    id: 'compact',
-    label: 'Compacto',
-    desc: 'Densidad alta, paneles densos, sin animaciones extra. Recomendado para uso diario en una pantalla normal.',
-  },
-  {
-    id: 'pedagogic',
-    label: 'Pedagógico',
-    desc: 'Paneles más grandes, narradores visuales activos, tooltips explicativos. Ideal para que el alumno entienda cada paso.',
-  },
-  {
-    id: 'projector',
-    label: 'Demo / Proyector',
-    desc: 'Texto extra grande, animaciones lentas, pausa entre eventos. Para mostrar la simulación en clase con un cañón.',
-  },
-];
-
-const densities: { id: Density; label: string; desc: string }[] = [
-  { id: 'comfortable', label: 'Cómoda', desc: 'Espaciado generoso entre filas y paneles.' },
-  { id: 'compact', label: 'Compacta', desc: 'Más información a la vez, espaciado mínimo.' },
-];
 
 interface ThemeOption {
   id: Theme;
@@ -85,43 +56,6 @@ const themes: ThemeOption[] = [
             <span class="prefs__option-label">{{ t.label }}</span>
           </span>
           <span class="prefs__option-desc">{{ t.desc }}</span>
-        </button>
-      </div>
-    </Card>
-
-    <Card title="Modo de presentación" :elevation="1" class="prefs__card">
-      <p class="prefs__hint">
-        Cambie el modo según el contexto en el que usa la herramienta. Los tres
-        presets afectan tamaño de texto, densidad y animaciones de un solo
-        golpe.
-      </p>
-      <div class="prefs__options">
-        <button
-          v-for="m in modes"
-          :key="m.id"
-          type="button"
-          class="prefs__option"
-          :class="{ 'prefs__option--on': prefs.mode === m.id }"
-          @click="prefs.setMode(m.id)"
-        >
-          <span class="prefs__option-label">{{ m.label }}</span>
-          <span class="prefs__option-desc">{{ m.desc }}</span>
-        </button>
-      </div>
-    </Card>
-
-    <Card title="Densidad de las tablas" :elevation="1" class="prefs__card">
-      <div class="prefs__options prefs__options--row">
-        <button
-          v-for="d in densities"
-          :key="d.id"
-          type="button"
-          class="prefs__option"
-          :class="{ 'prefs__option--on': prefs.density === d.id }"
-          @click="prefs.density = d.id"
-        >
-          <span class="prefs__option-label">{{ d.label }}</span>
-          <span class="prefs__option-desc">{{ d.desc }}</span>
         </button>
       </div>
     </Card>

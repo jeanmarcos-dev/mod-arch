@@ -26,14 +26,15 @@ const STORAGE_KEY = 'modos-cpu:prefs:v1';
 
 // Pedagogic is the default preset so a fresh visitor sees the animated
 // transitions out of the box (animationsEnabled is derived from mode in
-// the computed below). Narrators stay off until the user opts in or until
-// a host broadcasts them via presence — they pull attention and are
-// genuinely a teaching aid, not a default-on chrome.
+// the computed below). Narrators default on too: the simulator is built
+// around explaining what the CPU is doing, and the animated overlays are
+// the most direct way to surface that — a first-time visitor should see
+// them straight away rather than having to discover the toggle.
 const DEFAULTS: PrefsState = {
   sidebarCollapsed: false,
   mode: 'pedagogic',
   density: 'comfortable',
-  narratorsEnabled: false,
+  narratorsEnabled: true,
   theme: 'amber',
 };
 
