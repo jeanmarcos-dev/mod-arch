@@ -214,6 +214,11 @@ export const useCpuStore = defineStore('cpu', () => {
   const selectedProgram = ref<string | null>(null);
   const log = ref<LogEntry[]>([]);
   const connected = ref(false);
+  // True after the first successful onopen of this tab session. Lets the UI
+  // tell apart "still trying to connect for the first time" (cold start) from
+  // "had a live connection that dropped" — the two warrant very different
+  // affordances in ConnectionBanner.
+  const hasEverConnected = ref(false);
   const lastError = ref<string | null>(null);
 
   // ─── Procesos ───────────────────────────────────────────────────────────
@@ -511,6 +516,7 @@ export const useCpuStore = defineStore('cpu', () => {
     ws = new WebSocket(url);
     ws.onopen = () => {
       connected.value = true;
+      hasEverConnected.value = true;
       reconnectAttempts.value = 0;
       clearRetryTimer();
       pushLog('▸ conectado al backend', 'amber');
@@ -1083,7 +1089,7 @@ export const useCpuStore = defineStore('cpu', () => {
   return {
     regs, segments, mode, halted, running, tick, stepHz, timerQuantum,
     changedRegs,
-    programs, selectedProgram, log, connected, lastError,
+    programs, selectedProgram, log, connected, hasEverConnected, lastError,
     reconnectAttempts, nextRetryAt, reconnectNow,
     procs, currentPID, readyQueue, waitQueue, flashingPIDs, procSources, procSourceMaps,
     cores, numCores, selectedCoreId, selectedCoreIds, isCoreVisible,
