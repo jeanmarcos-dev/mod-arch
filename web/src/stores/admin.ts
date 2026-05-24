@@ -245,6 +245,35 @@ export const useAdminStore = defineStore('admin', () => {
     await refresh();
   }
 
+  // Identity CRUD. The PATCH body uses field-as-optional semantics: only
+  // properties explicitly present are touched, so callers can update just the
+  // fields the form dirty-tracked.
+  async function createUser(args: {
+    name: string;
+    email: string;
+    student_id: string;
+    role: UserRole;
+  }) {
+    await send<UserRow>('POST', '/admin/api/users', args);
+    await refresh();
+  }
+
+  async function updateUser(
+    id: string,
+    args: { name?: string; email?: string; student_id?: string },
+  ) {
+    await send<UserRow>('PATCH', `/admin/api/users/${id}`, args);
+    await refresh();
+  }
+
+  async function deleteUser(id: string) {
+    await send<{ ok: boolean; sessions_killed: number }>(
+      'DELETE',
+      `/admin/api/users/${id}`,
+    );
+    await refresh();
+  }
+
   return {
     user,
     userId,
@@ -275,5 +304,8 @@ export const useAdminStore = defineStore('admin', () => {
     setSetting,
     kickUser,
     setUserRole,
+    createUser,
+    updateUser,
+    deleteUser,
   };
 });

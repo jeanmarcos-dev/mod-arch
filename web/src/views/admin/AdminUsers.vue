@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { Users, ShieldCheck, ShieldUser, GraduationCap } from '@lucide/vue';
+import { Users, ShieldCheck, ShieldUser, GraduationCap, UserPlus, Pencil, Trash2, Lock } from '@lucide/vue';
 import { useAdminStore, type UserRow, type UserRole, ENV_ADMIN_USER_ID } from '../../stores/admin';
 import { useToastStore } from '../../stores/toast';
 import Card from '../../components/ui/Card.vue';
 import Btn from '../../components/ui/Btn.vue';
 import DataTable, { type Column } from '../../components/ui/DataTable.vue';
+import UserFormModal from '../../components/admin/UserFormModal.vue';
 import { formatTimestamp } from './util';
 
 const admin = useAdminStore();
@@ -76,10 +77,87 @@ async function changeRole(row: UserRow, next: UserRole) {
     toast.err(e instanceof Error ? e.message : 'Error');
   }
 }
+
+// Identity CRUD wiring. The form modal handles its own validation; errors
+// surfaced by the server (duplicates, mostly) are forwarded back to the modal
+// via the exposed showError helper so the dialog stays open with the message.
+const createOpen = ref(false);
+const editTarget = ref<UserRow | null>(null);
+const createModalRef = ref<InstanceType<typeof UserFormModal> | null>(null);
+const editModalRef = ref<InstanceType<typeof UserFormModal> | null>(null);
+
+// canEdit / canDelete encode the env-admin protection plus the self-delete
+// guard. Editing your own row is allowed; deleting it is not (server enforces
+// this anyway, but the disabled button avoids a roundtrip).
+function canEdit(row: UserRow): boolean {
+  if (!admin.canChangeRoles) return false;
+  if (row.id === ENV_ADMIN_USER_ID) return false;
+  return true;
+}
+
+function canDelete(row: UserRow): boolean {
+  if (!admin.canChangeRoles) return false;
+  if (row.id === ENV_ADMIN_USER_ID) return false;
+  if (row.id === admin.userId) return false;
+  return true;
+}
+
+async function onCreateSubmit(payload: { name: string; email: string; student_id: string; role: UserRole }) {
+  try {
+    await admin.createUser(payload);
+    toast.ok('Usuario creado');
+    createOpen.value = false;
+  } catch (e) {
+    createModalRef.value?.showError(e instanceof Error ? e.message : 'Error al crear');
+  }
+}
+
+async function onEditSubmit(payload: { name: string; email: string; student_id: string }) {
+  const target = editTarget.value;
+  if (!target) return;
+  try {
+    // Send only the fields that actually changed so the audit log records
+    // the minimal diff instead of every field on every save.
+    const patch: Record<string, string> = {};
+    if (payload.name !== target.name) patch.name = payload.name;
+    if (payload.email !== (target.email ?? '')) patch.email = payload.email;
+    if (payload.student_id !== (target.student_id ?? '')) patch.student_id = payload.student_id;
+    if (Object.keys(patch).length === 0) {
+      editTarget.value = null;
+      return;
+    }
+    await admin.updateUser(target.id, patch);
+    toast.ok('Usuario actualizado');
+    editTarget.value = null;
+  } catch (e) {
+    editModalRef.value?.showError(e instanceof Error ? e.message : 'Error al actualizar');
+  }
+}
+
+async function deleteUser(row: UserRow) {
+  const sessionsNote = row.sessions.length
+    ? `\n\nSus ${row.sessions.length} sesión(es) activa(s) se cerrarán.`
+    : '';
+  if (!confirm(`¿Eliminar al usuario ${row.name}?${sessionsNote}\n\nEsta acción libera su correo e ID de estudiante para reuso.`)) {
+    return;
+  }
+  try {
+    await admin.deleteUser(row.id);
+    toast.ok('Usuario eliminado');
+  } catch (e) {
+    toast.err(e instanceof Error ? e.message : 'Error al eliminar');
+  }
+}
 </script>
 
 <template>
   <Card title="Usuarios identificados">
+    <template v-if="admin.canChangeRoles" #header>
+      <Btn variant="primary" size="sm" @click="createOpen = true">
+        <UserPlus :size="12" :stroke-width="2" />
+        <span>Nuevo usuario</span>
+      </Btn>
+    </template>
     <DataTable
       :columns="columns"
       :rows="admin.users"
@@ -89,6 +167,19 @@ async function changeRole(row: UserRow, next: UserRole) {
       empty-title="Sin usuarios identificados"
       empty-message="Cuando un alumno se identifique con su nombre y correo aparecerá aquí."
     >
+      <template #[`cell:name`]="{ row }">
+        <span class="name-cell">
+          <span>{{ row.name }}</span>
+          <span
+            v-if="row.id === ENV_ADMIN_USER_ID"
+            class="env-badge"
+            title="Administrador configurado por variables de entorno (irrevocable)"
+          >
+            <Lock :size="10" :stroke-width="2" />
+            <span>env</span>
+          </span>
+        </span>
+      </template>
       <template #[`cell:email`]="{ value }">
         <span class="dim">{{ value || '—' }}</span>
       </template>
@@ -134,15 +225,50 @@ async function changeRole(row: UserRow, next: UserRole) {
             </ul>
           </div>
           <Btn
+            variant="ghost"
+            size="sm"
+            :disabled="!canEdit(row)"
+            title="Editar nombre, correo o ID de estudiante"
+            @click="editTarget = row"
+          >
+            <Pencil :size="12" :stroke-width="2" />
+            <span>editar</span>
+          </Btn>
+          <Btn
             variant="danger"
             size="sm"
             :disabled="!row.sessions.length"
             @click="kickUser(row.id, row.name)"
           >expulsar</Btn>
+          <Btn
+            variant="danger"
+            size="sm"
+            :disabled="!canDelete(row)"
+            title="Eliminar usuario (soft delete)"
+            @click="deleteUser(row)"
+          >
+            <Trash2 :size="12" :stroke-width="2" />
+          </Btn>
         </div>
       </template>
     </DataTable>
   </Card>
+
+  <UserFormModal
+    ref="createModalRef"
+    :open="createOpen"
+    mode="create"
+    @close="createOpen = false"
+    @submit="onCreateSubmit"
+  />
+  <UserFormModal
+    ref="editModalRef"
+    :open="editTarget !== null"
+    mode="edit"
+    :initial="editTarget"
+    @close="editTarget = null"
+    @submit="onEditSubmit"
+  />
 </template>
 
 <style scoped>
@@ -228,4 +354,27 @@ async function changeRole(row: UserRow, next: UserRole) {
   cursor: default;
 }
 .role-menu__item:disabled { cursor: not-allowed; }
+
+/* Visual cue for the synthetic env-admin row: a small inline badge next to
+   the name so the operator can tell at a glance which entry is the
+   irrevocable env-configured account. */
+.name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.env-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--amber);
+  border: 1px solid var(--amber);
+  background: rgba(var(--accent-rgb), 0.08);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+}
 </style>

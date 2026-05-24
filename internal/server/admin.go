@@ -180,6 +180,13 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("POST /admin/api/users/{id}/role", s.requireAdminAPI(s.requireCSRF(s.handleAdminSetUserRole)))
 
+	// Identity CRUD: create/edit/delete users from the admin panel. Role
+	// transitions stay on the dedicated endpoint above so audit entries
+	// distinguish identity edits from privilege changes.
+	mux.HandleFunc("POST /admin/api/users", s.requireAdminAPI(s.requireCSRF(s.handleAdminCreateUser)))
+	mux.HandleFunc("PATCH /admin/api/users/{id}", s.requireAdminAPI(s.requireCSRF(s.handleAdminUpdateUser)))
+	mux.HandleFunc("DELETE /admin/api/users/{id}", s.requireAdminAPI(s.requireCSRF(s.handleAdminDeleteUser)))
+
 	mux.HandleFunc("GET /admin", s.handleAdminSPA)
 	mux.HandleFunc("GET /admin/", s.handleAdminSPA)
 }

@@ -141,7 +141,10 @@ type userSessionBrief struct {
 
 // handleAdminListUsers joins every persisted user with their currently live
 // sessions (in-memory). Users with no active session still appear with an
-// empty sessions array.
+// empty sessions array. When the caller authenticated via the env admin
+// cookie, a synthetic row representing the configured ADMIN_USER is prepended
+// so the env admin can see itself in the dashboard. The row is read-only
+// (id == EnvAdminUserID) — the SPA already disables every action for that id.
 func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 	st := s.manager.Store()
 	if st == nil {
@@ -166,7 +169,16 @@ func (s *Server) handleAdminListUsers(w http.ResponseWriter, r *http.Request) {
 			LastActive: sess.LastActiveAt().Unix(),
 		})
 	}
-	out := make([]userResponse, 0, len(users))
+	out := make([]userResponse, 0, len(users)+1)
+	if callerID, _ := s.userRoleForRequest(r); callerID == EnvAdminUserID {
+		out = append(out, userResponse{
+			ID:          EnvAdminUserID,
+			Name:        s.admin.user,
+			Role:        store.RoleAdmin,
+			LastLoginAt: 0,
+			Sessions:    []userSessionBrief{},
+		})
+	}
 	for _, u := range users {
 		sess := sessionsByUser[u.ID]
 		if sess == nil {
@@ -239,6 +251,213 @@ func (s *Server) handleAdminListAudit(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handleAdminCreateUser inserts a fresh user row from admin input. At least
+// one identifier (email or student_id) is required so a future magic-link
+// login can dedupe onto this row; without one the entry would be unreachable.
+// last_login_at = 0 marks it as never-logged-in for the UI.
+func (s *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name      string `json:"name"`
+		Email     string `json:"email"`
+		StudentID string `json:"student_id"`
+		Role      string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "body inválido"})
+		return
+	}
+	name, err := cleanName(body.Name)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	email, err := cleanEmail(body.Email)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	sid, err := cleanStudentID(body.StudentID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	if email == "" && sid == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "debe indicar correo o ID de estudiante"})
+		return
+	}
+	if !store.ValidRole(body.Role) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "role inválido"})
+		return
+	}
+	st := s.manager.Store()
+	if st == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "persistencia deshabilitada"})
+		return
+	}
+	row := store.UserRow{
+		ID:        newAuthID(),
+		Name:      name,
+		Email:     email,
+		StudentID: sid,
+		Role:      body.Role,
+		CreatedAt: time.Now().Unix(),
+		// LastLoginAt stays at 0 until the user actually logs in.
+	}
+	if err := st.CreateUser(r.Context(), row); err != nil {
+		switch {
+		case errors.Is(err, store.ErrEmailTaken):
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "ya existe un usuario activo con ese correo"})
+		case errors.Is(err, store.ErrStudentIDTaken):
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "ya existe un usuario activo con ese ID de estudiante"})
+		default:
+			s.logger.Warn("admin: create user failed", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "no se pudo crear el usuario"})
+		}
+		return
+	}
+	meta, _ := json.Marshal(map[string]any{"role": body.Role, "email": email, "student_id": sid})
+	s.audit(r, "user.create", row.ID, string(meta))
+	writeJSON(w, http.StatusCreated, userResponse{
+		ID:          row.ID,
+		Name:        row.Name,
+		Email:       row.Email,
+		StudentID:   row.StudentID,
+		Role:        row.Role,
+		LastLoginAt: row.LastLoginAt,
+		Sessions:    []userSessionBrief{},
+	})
+}
+
+// handleAdminUpdateUser patches the identity columns. Role changes still go
+// through handleAdminSetUserRole so the two surfaces remain independently
+// auditable. Body fields are pointers: missing/null = leave alone; explicit
+// empty string = clear the column.
+func (s *Server) handleAdminUpdateUser(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == EnvAdminUserID {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "el admin por env no se puede editar"})
+		return
+	}
+	var body struct {
+		Name      *string `json:"name"`
+		Email     *string `json:"email"`
+		StudentID *string `json:"student_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "body inválido"})
+		return
+	}
+	args := store.UpdateUserFieldsArgs{}
+	changed := make([]string, 0, 3)
+	if body.Name != nil {
+		name, err := cleanName(*body.Name)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		args.Name = &name
+		changed = append(changed, "name")
+	}
+	if body.Email != nil {
+		email, err := cleanEmail(*body.Email)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		args.Email = &email
+		changed = append(changed, "email")
+	}
+	if body.StudentID != nil {
+		sid, err := cleanStudentID(*body.StudentID)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		args.StudentID = &sid
+		changed = append(changed, "student_id")
+	}
+	if len(changed) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "nada que actualizar"})
+		return
+	}
+	st := s.manager.Store()
+	if st == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "persistencia deshabilitada"})
+		return
+	}
+	if err := st.UpdateUserFields(r.Context(), id, args); err != nil {
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "usuario no encontrado"})
+		case errors.Is(err, store.ErrEmailTaken):
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "ya existe un usuario activo con ese correo"})
+		case errors.Is(err, store.ErrStudentIDTaken):
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "ya existe un usuario activo con ese ID de estudiante"})
+		default:
+			s.logger.Warn("admin: update user failed", "id", id, "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "no se pudo actualizar"})
+		}
+		return
+	}
+	updated, err := st.GetUser(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "no se pudo leer el usuario"})
+		return
+	}
+	meta, _ := json.Marshal(map[string]any{"changed": changed})
+	s.audit(r, "user.update", id, string(meta))
+	writeJSON(w, http.StatusOK, userResponse{
+		ID:          updated.ID,
+		Name:        updated.Name,
+		Email:       updated.Email,
+		StudentID:   updated.StudentID,
+		Role:        updated.Role,
+		LastLoginAt: updated.LastLoginAt,
+		Sessions:    []userSessionBrief{},
+	})
+}
+
+// handleAdminDeleteUser kills the user's active sessions and marks the row as
+// soft-deleted. Soft deletion preserves audit lineage (actors stay
+// resolvable) while freeing email/student_id for reuse via the partial
+// indexes. The env admin and the caller itself are off limits.
+func (s *Server) handleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == EnvAdminUserID {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "el admin por env no se puede eliminar"})
+		return
+	}
+	callerID, _ := s.userRoleForRequest(r)
+	if callerID == id {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "no puede eliminarse a sí mismo"})
+		return
+	}
+	st := s.manager.Store()
+	if st == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "persistencia deshabilitada"})
+		return
+	}
+	killed := 0
+	for _, sess := range s.manager.All() {
+		if sess.UserID() == id {
+			s.manager.Kill(sess.ID)
+			killed++
+		}
+	}
+	if err := st.DeleteUser(r.Context(), id, time.Now().Unix()); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "usuario no encontrado"})
+			return
+		}
+		s.logger.Warn("admin: delete user failed", "id", id, "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "no se pudo eliminar"})
+		return
+	}
+	meta, _ := json.Marshal(map[string]any{"sessions_killed": killed})
+	s.audit(r, "user.delete", id, string(meta))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "sessions_killed": killed})
 }
 
 // handleAdminSetUserRole promotes or demotes a user. The env admin id
