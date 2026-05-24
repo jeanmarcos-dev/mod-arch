@@ -422,9 +422,11 @@ const narratorHint = computed(() =>
   min-height: 0;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 768px) {
   .ints-page__hero { flex-direction: column; align-items: flex-start; }
   .ints-page__grid { grid-template-columns: 1fr; }
+  .ints-feed__row { grid-template-columns: auto 1fr; row-gap: 2px; }
+  .ints-feed--multi .ints-feed__row { grid-template-columns: auto 1fr; }
 }
 
 .ints-page__panel {

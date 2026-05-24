@@ -255,4 +255,33 @@ const filtered = computed<T[]>(() => {
 .dtable__td--actions { white-space: nowrap; }
 
 tbody tr:hover { background: rgba(var(--accent-rgb), 0.04); }
+
+@media (max-width: 768px) {
+  /* Force horizontal scroll so admin tables stay tabular instead of
+     collapsing into an unreadable wrap. The first <th>/<td> sticks to the
+     left edge as an anchor while the rest pans. */
+  .dtable__scroll {
+    -webkit-overflow-scrolling: touch;
+  }
+  .dtable__table {
+    border-collapse: separate;
+    border-spacing: 0;
+    min-width: 600px;
+  }
+  .dtable__th,
+  .dtable__td {
+    border-bottom: 1px solid var(--border);
+  }
+  .dtable__th:first-child,
+  .dtable__td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--surface-1);
+    box-shadow: 2px 0 0 var(--border);
+  }
+  .dtable__scroll--sticky thead .dtable__th:first-child {
+    z-index: calc(var(--z-sticky) + 1);
+  }
+}
 </style>

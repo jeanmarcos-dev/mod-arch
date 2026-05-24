@@ -14,7 +14,6 @@ import {
   Share2,
   Square,
   UserRound,
-  LogIn,
   LogOut,
   GripHorizontal,
   Crosshair,
@@ -24,6 +23,7 @@ import { useAuthStore } from '../../stores/auth';
 import { useSimBarStore } from '../../stores/simBar';
 import { useWhiteboardStore } from '../../stores/whiteboard';
 import { useDraggable } from '../../composables/useDraggable';
+import { useBreakpoint } from '../../composables/useBreakpoint';
 import ProgramPicker from '../ProgramPicker.vue';
 import ShareModal from '../ShareModal.vue';
 import Term from '../glossary/Term.vue';
@@ -35,18 +35,11 @@ const auth = useAuthStore();
 const bar = useSimBarStore();
 const whiteboard = useWhiteboardStore();
 const router = useRouter();
+const { isMobile } = useBreakpoint();
 
 const panelRef = ref<HTMLElement | null>(null);
 const settingsOpen = ref(false);
 const settingsRoot = ref<HTMLElement | null>(null);
-
-const aliasInput = ref(cpu.sessionInfo.label);
-watch(() => cpu.sessionInfo.label, (lab) => { aliasInput.value = lab; });
-
-function commitAlias() {
-  const v = aliasInput.value.trim().slice(0, 32);
-  if (v !== cpu.sessionInfo.label) cpu.setAlias(v);
-}
 
 const loggedIn = computed(() => Boolean(cpu.sessionInfo.user_name));
 const viewer = computed(() => cpu.isViewer());
@@ -143,6 +136,14 @@ watch(() => bar.mode, async (m) => {
     drag.setPosition({ x: bar.x, y: bar.y });
   }
 });
+
+// Mobile viewports cannot host a draggable floating toolbar without crowding
+// the content. Force docked mode while isMobile is true and restore the
+// user's choice automatically when the viewport widens (the store mode ref
+// stays at whatever it was last set to via float()).
+watch(isMobile, (mobile) => {
+  if (mobile && bar.mode === 'floating') bar.dock();
+}, { immediate: true });
 
 function dockHeaderDblClick() {
   bar.dock();
@@ -302,24 +303,16 @@ function dockHeaderDblClick() {
               <LogOut :size="14" :stroke-width="2" />
             </button>
           </div>
-          <label v-else-if="!viewer" class="sim-bar__alias" title="Identifíquese con un alias o inicie sesión con su correo.">
-            <UserRound :size="14" :stroke-width="2" class="sim-bar__user-icon" />
-            <input
-              v-model="aliasInput"
-              class="sim-bar__alias-input"
-              type="text"
-              name="alias"
-              maxlength="32"
-              placeholder="su alias…"
-              autocomplete="off"
-              aria-label="Alias visible para los espectadores"
-              @blur="commitAlias"
-              @keydown.enter="commitAlias"
-            />
-            <button type="button" class="icon-btn icon-btn--ghost" title="Iniciar sesión con correo" @click="goLogin">
-              <LogIn :size="14" :stroke-width="2" />
-            </button>
-          </label>
+          <button
+            v-else-if="!viewer"
+            type="button"
+            class="sim-bar__login"
+            title="Identifíquese para que su nombre aparezca en sesiones compartidas"
+            @click="goLogin"
+          >
+            <UserRound :size="14" :stroke-width="2" />
+            <span>Identificarse</span>
+          </button>
 
           <HandRaiseBadge v-if="canShare && isShared" />
 
@@ -346,9 +339,9 @@ function dockHeaderDblClick() {
           </button>
 
           <button
-            v-if="bar.mode === 'docked'"
+            v-if="bar.mode === 'docked' && !isMobile"
             type="button"
-            class="icon-btn"
+            class="icon-btn sim-bar__float-btn"
             title="Desacoplar a ventana flotante"
             @click="bar.float()"
           ><PinOff :size="16" :stroke-width="2" /></button>
@@ -441,26 +434,34 @@ function dockHeaderDblClick() {
 }
 
 .sim-bar__row--controls {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /* Flex with wrap instead of a 3-col grid: when the combined width of left
+     + center + right exceeds the row, the right cluster (alias / pizarra /
+     compartir) wraps to a second line instead of overlapping the center
+     control buttons. The center still earns the middle visually because the
+     left and right are pushed apart via flex auto margins. */
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-2) var(--space-3);
   min-height: 48px;
 }
 
 .sim-bar__left {
-  justify-self: start;
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+  flex: 0 0 auto;
 }
 
 .sim-bar__center {
-  justify-self: center;
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  flex: 1 1 auto;
+  justify-content: center;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .sim-bar__row--status {
@@ -485,6 +486,48 @@ function dockHeaderDblClick() {
   display: flex;
   gap: var(--space-1);
   flex-wrap: nowrap;
+}
+
+@media (max-width: 768px) {
+  .sim-bar__row--controls {
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    min-height: 0;
+  }
+  .sim-bar__left,
+  .sim-bar__center,
+  .sim-bar__right {
+    flex: 1 1 100%;
+    justify-content: center;
+    margin-left: 0;
+  }
+  .sim-bar__btns {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  /* Floating mode would conflict with the mobile drawer and tight viewport
+     — pin the bar back into the layout flow at any phone/tablet width. */
+  .sim-bar--floating {
+    position: static;
+    max-width: none;
+    border-radius: 0;
+    box-shadow: none;
+    border: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 600px) {
+  .sim-bar__picker {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+  .sim-bar__brand { display: none; }
+}
+
+@media (max-width: 480px) {
+  /* Leave room for the floating hamburger button. */
+  .sim-bar__row--controls { padding-left: 52px; }
 }
 
 .sim-btn {
@@ -639,13 +682,16 @@ function dockHeaderDblClick() {
 .sim-bar__core-pick:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .sim-bar__right {
-  justify-self: end;
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  flex: 0 0 auto;
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
-.sim-bar__user, .sim-bar__alias {
+.sim-bar__user {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -659,16 +705,33 @@ function dockHeaderDblClick() {
 }
 .sim-bar__user-icon { color: var(--amber); }
 .sim-bar__user-name { font-size: 11px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sim-bar__alias-input {
-  background: transparent;
-  border: none;
-  color: var(--text);
+
+/* "Identificarse" entry point — matches the share/whiteboard buttons so the
+   bar reads as a single row of equally-weighted actions. */
+.sim-bar__login {
   font-family: inherit;
-  font-size: 11px;
-  width: 110px;
-  outline: none;
+  background: rgba(var(--accent-rgb), 0.05);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  height: 32px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+  white-space: nowrap;
 }
-.sim-bar__alias-input::placeholder { color: var(--text-muted); }
+.sim-bar__login:hover {
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--amber);
+  border-color: var(--border-strong);
+}
 
 .sim-bar__share {
   font-family: inherit;
@@ -713,6 +776,8 @@ function dockHeaderDblClick() {
 }
 @media (max-width: 900px) {
   .sim-bar__picker { display: none; }
-  .sim-bar__user-name, .sim-bar__alias-input { display: none; }
+  .sim-bar__user-name,
+  .sim-bar__login span { display: none; }
+  .sim-bar__login { padding: 0 8px; }
 }
 </style>

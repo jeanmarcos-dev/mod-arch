@@ -141,7 +141,10 @@ function popoverStyleVars() {
   const rect = popoverAnchorRect.value;
   const container = containerRef.value?.getBoundingClientRect();
   if (!rect || !container) return {};
-  const left = Math.min(container.right - 240, Math.max(container.left + 4, rect.left));
+  const popoverWidth = Math.min(240, window.innerWidth - 24);
+  const leftMin = 8;
+  const leftMax = window.innerWidth - popoverWidth - 8;
+  const left = Math.max(leftMin, Math.min(leftMax, rect.left));
   const top = rect.bottom + 6;
   return { left: `${left}px`, top: `${top}px` };
 }
@@ -460,7 +463,8 @@ function ensureTicker() {
 .hexgrid__popover {
   position: fixed;
   z-index: var(--z-floating-toolbar);
-  width: 240px;
+  width: min(240px, calc(100vw - var(--space-4) * 2));
+  max-width: 90vw;
   background: var(--surface-3);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
@@ -551,5 +555,32 @@ function ensureTicker() {
   .hexgrid__heat--read { animation: none; opacity: 0; }
   .digit-fade-enter-active,
   .digit-fade-leave-active { transition: none; }
+}
+
+/* Mobile sub-grid that lets the 16-column layout scroll horizontally while
+   the address column stays anchored to the left edge. Placed at the end of
+   the file so the breakpoint rules override the base grid-template-columns
+   declarations above. */
+@media (max-width: 768px) {
+  .hexgrid {
+    font-size: 12px;
+    padding: var(--space-2);
+  }
+  .hexgrid__head,
+  .hexgrid__row {
+    min-width: 540px;
+    grid-template-columns: 64px repeat(16, minmax(22px, 1fr));
+  }
+  .hexgrid__addr,
+  .hexgrid__addr-h {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--surface-1);
+    box-shadow: 2px 0 0 var(--border);
+    padding-right: 4px;
+    font-size: 10px;
+  }
+  .hexgrid__cell { font-size: 10px; }
 }
 </style>

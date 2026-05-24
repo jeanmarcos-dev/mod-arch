@@ -205,9 +205,17 @@ async function onLeave() {
   border-radius: var(--radius-sm);
   padding: 0 10px;
   height: 28px;
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
 }
-.viewer-bar__host-icon { color: var(--yellow); }
-.viewer-bar__host-label { white-space: nowrap; }
+.viewer-bar__host-icon { color: var(--yellow); flex-shrink: 0; }
+.viewer-bar__host-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
 .viewer-bar__host-label strong {
   color: var(--amber);
   font-weight: 600;
@@ -220,11 +228,25 @@ async function onLeave() {
   100% { box-shadow: 0 0 0 12px rgba(var(--accent-rgb), 0); }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
+  .viewer-bar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 44px;
+    padding: var(--space-2) var(--space-3);
+    gap: var(--space-2);
+  }
+  .viewer-bar__spacer { display: none; }
   .viewer-bar__btn > span:not(.viewer-bar__host-label) { display: none; }
+  .viewer-bar__host { margin-left: auto; }
   .viewer-bar__host-label { display: none; }
 }
 @media (max-width: 700px) {
   .viewer-bar__brand { display: none; }
+}
+@media (max-width: 480px) {
+  /* Make room for the floating hamburger at the top-left. */
+  .viewer-bar { padding-left: 52px; }
+  .viewer-bar__host { max-width: none; flex: 1 1 auto; }
 }
 </style>

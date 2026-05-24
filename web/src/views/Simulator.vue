@@ -178,10 +178,14 @@ onUnmounted(() => {
 .middle-tabs {
   display: flex;
   gap: 4px;
+  /* Container query anchor so the tabs collapse to icon-only when their own
+     width gets cramped — without introducing a new viewport breakpoint. */
+  container-type: inline-size;
 }
 
 .tab {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   font-size: 12px;
   letter-spacing: 1px;
   padding: 6px 10px;
@@ -194,6 +198,20 @@ onUnmounted(() => {
   gap: 6px;
 }
 .tab > svg { flex-shrink: 0; }
+.tab > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Below this container width the labels do not fit comfortably next to the
+   icons. Hide the text and let the title attribute carry meaning — the
+   accent on the active tab still signals which view is open. */
+@container (max-width: 360px) {
+  .tab > span { display: none; }
+  .tab { padding: 6px 8px; }
+}
 
 .tab.active {
   color: var(--amber);

@@ -326,7 +326,7 @@ function pidShort(pid: number) {
 .state-blocked { color: var(--yellow, #ffd54f); border-color: var(--yellow, #ffd54f); }
 .state-zombie { color: var(--text-muted); }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .conc__body { grid-template-columns: 1fr; }
 }
 </style>

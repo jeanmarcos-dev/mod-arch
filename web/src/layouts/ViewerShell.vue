@@ -17,6 +17,7 @@ import Sidebar from '../components/shell/Sidebar.vue';
 import ViewerTopBar from '../components/shell/ViewerTopBar.vue';
 import SimStatusRow from '../components/shell/SimStatusRow.vue';
 import ConnectionBanner from '../components/shell/ConnectionBanner.vue';
+import { useConnectionBanner } from '../composables/useConnectionBanner';
 import MobileMenuButton from '../components/shell/MobileMenuButton.vue';
 import GlossaryModal from '../components/GlossaryModal.vue';
 import WhiteboardCursor from '../components/whiteboard/WhiteboardCursor.vue';
@@ -29,6 +30,7 @@ const prefs = usePreferencesStore();
 const toast = useToastStore();
 const route = useRoute();
 const router = useRouter();
+const { visible: bannerVisible } = useConnectionBanner();
 
 // Sidebar items reflect the section routes the viewer can navigate to.
 // Tool-only routes (preferencias, perfil, sesiones) are hidden — they have no
@@ -153,7 +155,7 @@ watch(() => cpu.glossaryOpenSignal, (n, prev) => {
 </script>
 
 <template>
-  <div :class="['shell', `shell--mode-${prefs.mode}`, { 'shell--disconnected': !cpu.connected }]">
+  <div :class="['shell', `shell--mode-${prefs.mode}`, { 'shell--disconnected': bannerVisible }]">
     <ConnectionBanner />
     <MobileMenuButton />
     <Sidebar :items="items" />

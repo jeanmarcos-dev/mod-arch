@@ -48,6 +48,11 @@ h1 {
   text-shadow: 0 0 14px rgba(var(--accent-rgb), 0.35);
 }
 
+@media (max-width: 480px) {
+  h1 { font-size: 44px; letter-spacing: 8px; }
+  .card { padding: 24px 18px; }
+}
+
 .path {
   font-size: 13px;
   color: var(--text, #e0e0e0);

@@ -69,13 +69,33 @@ const style = computed(() => {
 // the consumer; removing the WhiteboardCursor component cleans up the
 // subscription automatically.
 let unsubscribe: () => void = () => { /* placeholder */ };
+let bumpRaf = 0;
+let resizeObserver: ResizeObserver | null = null;
+
+function scheduleBump() {
+  if (bumpRaf !== 0) return;
+  bumpRaf = window.requestAnimationFrame(() => {
+    bumpRaf = 0;
+    bumpAnchorTick();
+  });
+}
 
 onMounted(() => {
-  window.addEventListener('resize', bumpAnchorTick);
+  window.addEventListener('resize', scheduleBump);
+  // orientationchange fires on phone rotation. Modern browsers also emit
+  // resize but the two come at slightly different times, so listening to
+  // both keeps the cursor pinned during the in-between frames.
+  window.addEventListener('orientationchange', scheduleBump);
   // Scroll inside any internal panel can move an anchor; capturing is needed
   // because individual panels scroll, not the window. The listener is cheap
   // (only bumps a counter) so the overhead is negligible.
   window.addEventListener('scroll', bumpAnchorTick, true);
+  // ResizeObserver covers viewport size changes that don't fire `resize`,
+  // such as the iOS Safari toolbar collapsing as the user scrolls.
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(scheduleBump);
+    resizeObserver.observe(document.documentElement);
+  }
   unsubscribe = cpu.subscribe((ev: CpuEvent) => {
     if (ev.type === 'owner_pointer') {
       whiteboard.setOwnerPointer(ev);
@@ -84,8 +104,17 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', bumpAnchorTick);
+  window.removeEventListener('resize', scheduleBump);
+  window.removeEventListener('orientationchange', scheduleBump);
   window.removeEventListener('scroll', bumpAnchorTick, true);
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
+  if (bumpRaf !== 0) {
+    window.cancelAnimationFrame(bumpRaf);
+    bumpRaf = 0;
+  }
   unsubscribe();
   whiteboard.reset();
 });

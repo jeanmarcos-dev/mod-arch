@@ -20,6 +20,7 @@ import Sidebar from '../components/shell/Sidebar.vue';
 import Topbar from '../components/shell/Topbar.vue';
 import SimBar from '../components/shell/SimBar.vue';
 import ConnectionBanner from '../components/shell/ConnectionBanner.vue';
+import { useConnectionBanner } from '../composables/useConnectionBanner';
 import MobileMenuButton from '../components/shell/MobileMenuButton.vue';
 import GlossaryModal from '../components/GlossaryModal.vue';
 import WhiteboardCursor from '../components/whiteboard/WhiteboardCursor.vue';
@@ -33,6 +34,7 @@ const prefs = usePreferencesStore();
 const auth = useAuthStore();
 const whiteboard = useWhiteboardStore();
 const route = useRoute();
+const { visible: bannerVisible } = useConnectionBanner();
 
 // Any cpu.openGlossary('EIP') call from a panel opens the popup right where
 // the student clicked. The full /glosario page is still reachable from the
@@ -235,7 +237,7 @@ onBeforeUnmount(detachPointer);
        sim-relevant items, presence-driven autofollow). Owners keep the host
        shell below. The role flips on session_info events from the WS. -->
   <ViewerShell v-if="cpu.isViewer()" />
-  <div v-else :class="['shell', `shell--mode-${prefs.mode}`, { 'shell--disconnected': !cpu.connected }]">
+  <div v-else :class="['shell', `shell--mode-${prefs.mode}`, { 'shell--disconnected': bannerVisible }]">
     <ConnectionBanner />
     <MobileMenuButton />
     <Sidebar :items="items" />

@@ -502,6 +502,13 @@ select option:checked {
   background: rgba(0, 0, 0, 0.4);
 }
 
+/* ─── BREAKPOINT CONVENTION ────────────────────────────────────────────────
+   Two breakpoints are allowed app-wide:
+     • 768px — tablet portrait / phone landscape (primary responsive cut)
+     • 480px — phone portrait (drawer, fullscreen modals, ultra-compact)
+   Anything else (900px, 960px, 1100px, …) is legacy and should be migrated.
+   The matching JS-side detector lives in composables/useBreakpoint.ts. */
+
 /* ─── MOBILE GLOBALS (≤ 768px) ────────────────────────────────────────────
    Bumps tipográficos y de touch target para celular/tablet portrait. El
    layout responsive vive en App.vue y los componentes; acá sólo los

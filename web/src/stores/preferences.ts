@@ -77,6 +77,11 @@ export const usePreferencesStore = defineStore('preferences', () => {
   const narratorsEnabled = ref(initial.narratorsEnabled);
   const theme = ref<Theme>(initial.theme);
 
+  // Mobile drawer state is volatile by design: always starts closed so a
+  // fresh reload doesn't reveal the sidebar over the content. Kept separate
+  // from sidebarCollapsed (desktop, persisted) so the two never fight.
+  const sidebarMobileOpen = ref(false);
+
   // Keep the document attribute in sync with the store. main.ts already calls
   // applyTheme() before mount to avoid a flash, but if the theme changes at
   // runtime this watcher handles the swap without each component having to
@@ -117,6 +122,18 @@ export const usePreferencesStore = defineStore('preferences', () => {
     sidebarCollapsed.value = !sidebarCollapsed.value;
   }
 
+  function openSidebarMobile() {
+    sidebarMobileOpen.value = true;
+  }
+
+  function closeSidebarMobile() {
+    sidebarMobileOpen.value = false;
+  }
+
+  function toggleSidebarMobile() {
+    sidebarMobileOpen.value = !sidebarMobileOpen.value;
+  }
+
   function setMode(m: PresentationMode) {
     mode.value = m;
     // Pedagogic / projector default to narrators on for first-time users; they
@@ -130,6 +147,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
 
   return {
     sidebarCollapsed,
+    sidebarMobileOpen,
     mode,
     density,
     narratorsEnabled,
@@ -138,6 +156,9 @@ export const usePreferencesStore = defineStore('preferences', () => {
     animationsEnabled,
     animationSpeed,
     toggleSidebar,
+    openSidebarMobile,
+    closeSidebarMobile,
+    toggleSidebarMobile,
     setMode,
     setTheme,
   };

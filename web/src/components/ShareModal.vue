@@ -270,4 +270,17 @@ function deactivate() {
   padding-top: 12px;
   border-top: 1px dashed var(--border);
 }
+
+@media (max-width: 768px) {
+  .modal-overlay { padding: 0; align-items: flex-start; }
+  .modal {
+    max-width: none;
+    min-height: 100vh;
+    border: none;
+    border-top: 2px solid var(--amber);
+  }
+  .modal-body { padding: var(--space-3); }
+  .link-row { flex-wrap: wrap; }
+  .copy-btn { flex: 1 1 100%; justify-content: center; }
+}
 </style>

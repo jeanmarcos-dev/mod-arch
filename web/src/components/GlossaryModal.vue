@@ -233,4 +233,20 @@ void GLOSSARY_ENTRIES;
   text-align: center;
   padding: 32px;
 }
+
+@media (max-width: 768px) {
+  .modal {
+    width: 100vw;
+    height: 100vh;
+    max-width: none;
+    max-height: none;
+    border: none;
+    border-top: 2px solid var(--amber);
+  }
+  .modal-head {
+    padding: var(--space-2) var(--space-3);
+    gap: var(--space-2);
+  }
+  .modal-head h2 { font-size: 14px; letter-spacing: 2px; }
+}
 </style>

@@ -13,7 +13,7 @@ interface NavItem {
   soon?: boolean;
 }
 
-defineProps<{
+const props = defineProps<{
   /** Items to render. Sections precede tools; both share the same shape. */
   items: NavItem[];
 }>();
@@ -23,15 +23,50 @@ const auth = useAuthStore();
 const route = useRoute();
 
 const collapsed = computed(() => prefs.sidebarCollapsed);
+const mobileOpen = computed(() => prefs.sidebarMobileOpen);
+
+// activeTo picks the most specific item whose `to` matches the current path.
+// Without this, items whose `to` is a prefix of another (e.g. `/admin` vs
+// `/admin/usuarios`) would both light up — the root item would always look
+// active even when standing on a child route.
+const activeTo = computed<string | null>(() => {
+  const path = route.path;
+  if (path === '/') return props.items.some((i) => i.to === '/') ? '/' : null;
+  let best: NavItem | null = null;
+  for (const item of props.items) {
+    if (item.to === '/') continue;
+    const matches = path === item.to || path.startsWith(item.to + '/');
+    if (!matches) continue;
+    if (!best || item.to.length > best.to.length) best = item;
+  }
+  return best?.to ?? null;
+});
 
 function isActive(to: string): boolean {
-  if (to === '/') return route.path === '/';
-  return route.path === to || route.path.startsWith(to + '/');
+  return activeTo.value === to;
+}
+
+function onLinkClick(item: NavItem, e: MouseEvent) {
+  if (item.soon) {
+    e.preventDefault();
+    return;
+  }
+  if (prefs.sidebarMobileOpen) prefs.closeSidebarMobile();
 }
 </script>
 
 <template>
-  <aside class="sidebar" :class="{ 'sidebar--collapsed': collapsed }" data-pizarra-anchor="sidebar">
+  <div
+    v-if="mobileOpen"
+    class="sidebar__backdrop"
+    aria-hidden="true"
+    @click="prefs.closeSidebarMobile()"
+  />
+  <aside
+    class="sidebar"
+    :class="{ 'sidebar--collapsed': collapsed, 'sidebar--mobile-open': mobileOpen }"
+    data-pizarra-anchor="sidebar"
+  >
     <nav class="sidebar__nav" aria-label="Navegación principal">
       <template v-for="(item, idx) in items" :key="item.to">
         <div
@@ -50,7 +85,7 @@ function isActive(to: string): boolean {
           }"
           :title="collapsed ? item.label : undefined"
           :aria-disabled="item.soon ? 'true' : undefined"
-          @click="(e) => item.soon && e.preventDefault()"
+          @click="(e) => onLinkClick(item, e)"
         >
           <span class="sidebar__icon" aria-hidden="true">
             <component :is="item.icon" :size="collapsed ? 20 : 16" :stroke-width="2" />
@@ -351,5 +386,40 @@ function isActive(to: string): boolean {
   /* On mobile the rail always behaves like the collapsed state — the
      transition animation still runs identically when toggling. */
   .sidebar { width: 56px; }
+}
+
+/* Phone portrait: the icon-rail becomes an off-canvas drawer that the
+   hamburger in the topbar opens. The expanded width returns so labels are
+   readable while the drawer is open. */
+@media (max-width: 480px) {
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 220px;
+    transform: translateX(-100%);
+    transition: transform var(--transition-base);
+    z-index: var(--z-overlay);
+    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.45);
+  }
+
+  .sidebar--mobile-open {
+    transform: translateX(0);
+  }
+
+  /* The desktop collapse handle has no meaning in drawer mode. */
+  .sidebar__toggle { display: none; }
+}
+
+.sidebar__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: calc(var(--z-overlay) - 1);
+  animation: sidebar-backdrop-in var(--transition-fast) ease-out;
+}
+
+@keyframes sidebar-backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 </style>

@@ -191,7 +191,8 @@ const totalEntries = GLOSSARY_ENTRIES.length;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-width: 280px;
+  min-width: 0;
+  width: 100%;
   max-width: 460px;
   background: var(--surface-2);
   border: 1px solid var(--border-strong);
@@ -361,6 +362,13 @@ const totalEntries = GLOSSARY_ENTRIES.length;
   grid-template-columns: minmax(160px, 200px) 1fr auto;
   gap: var(--space-3);
   align-items: baseline;
+}
+
+@media (max-width: 768px) {
+  .gloss-entry__row {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
 }
 
 .gloss-entry__term {

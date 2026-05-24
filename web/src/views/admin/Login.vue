@@ -94,6 +94,11 @@ async function submit() {
   width: min(100%, 380px);
 }
 
+@media (max-width: 480px) {
+  .admin-login { padding: var(--space-3); }
+  .admin-login__header { margin-bottom: var(--space-3); }
+}
+
 .admin-login__header {
   display: flex;
   flex-direction: column;
