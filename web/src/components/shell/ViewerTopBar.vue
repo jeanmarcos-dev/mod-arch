@@ -122,7 +122,7 @@ async function onLeave() {
 }
 
 .viewer-bar__brand {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   letter-spacing: 3px;
   color: var(--amber);
   text-shadow: var(--shadow-glow-amber);

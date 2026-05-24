@@ -313,7 +313,7 @@ function fmtHex(n: number): string {
   color: var(--text-dim);
   border-color: var(--border);
   cursor: pointer;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--surface-overlay);
 }
 .proc-tab:hover { border-color: var(--text-dim); color: var(--text); }
 .proc-tab.current { border-color: var(--green); color: var(--green); }
@@ -369,7 +369,7 @@ function fmtHex(n: number): string {
 .pane {
   display: flex;
   flex-direction: column;
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--surface-overlay);
   border: 1px solid var(--border);
   min-height: 0;
 }
@@ -381,7 +381,7 @@ function fmtHex(n: number): string {
   padding: 4px 10px;
   border-bottom: 1px dashed var(--border);
   background: rgba(var(--accent-rgb), 0.04);
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 10px;
   letter-spacing: 2px;
   text-transform: uppercase;

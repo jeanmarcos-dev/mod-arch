@@ -114,7 +114,7 @@ const attemptsLine = computed(() => {
 }
 
 .conn-banner__title {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   letter-spacing: 2px;
   text-transform: uppercase;
   font-size: 11px;

@@ -7,7 +7,6 @@ import {
   MemoryStick,
   Zap,
   Layers,
-  FolderClock,
   BookOpen,
   Settings,
   UserRound,
@@ -23,6 +22,7 @@ import ConnectionBanner from '../components/shell/ConnectionBanner.vue';
 import { useConnectionBanner } from '../composables/useConnectionBanner';
 import MobileMenuButton from '../components/shell/MobileMenuButton.vue';
 import GlossaryModal from '../components/GlossaryModal.vue';
+import TutorLauncher from '../components/tutor/TutorLauncher.vue';
 import WhiteboardCursor from '../components/whiteboard/WhiteboardCursor.vue';
 import WhiteboardClickRipple from '../components/whiteboard/WhiteboardClickRipple.vue';
 import WhiteboardFocusPill from '../components/whiteboard/WhiteboardFocusPill.vue';
@@ -86,7 +86,6 @@ const items = computed(() => {
     { to: '/memoria', label: 'Memoria', icon: MemoryStick, group: 'SIMULACIÓN' },
     { to: '/interrupciones', label: 'Interrupciones', icon: Zap, group: 'SIMULACIÓN' },
     { to: '/concurrencia', label: 'Concurrencia', icon: Layers, group: 'SIMULACIÓN' },
-    { to: '/sesiones', label: 'Mis sesiones', icon: FolderClock, group: 'HERRAMIENTAS' },
     { to: '/glosario', label: 'Glosario', icon: BookOpen, group: 'HERRAMIENTAS' },
     { to: '/preferencias', label: 'Preferencias', icon: Settings, group: 'HERRAMIENTAS' },
     { to: '/perfil', label: 'Perfil', icon: UserRound, group: 'HERRAMIENTAS' },
@@ -264,6 +263,11 @@ onBeforeUnmount(detachPointer);
     <WhiteboardCursor />
     <WhiteboardClickRipple />
     <WhiteboardFocusPill />
+
+    <!-- Tutor chat: floating FAB plus a slide-in panel. Backend reports
+         tutor disabled via an error message when the API keys are missing,
+         so this stays mounted at all times. -->
+    <TutorLauncher />
   </div>
 </template>
 

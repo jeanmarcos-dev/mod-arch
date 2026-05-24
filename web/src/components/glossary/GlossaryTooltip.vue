@@ -127,7 +127,7 @@ function displayTerm(t: string): string {
 }
 
 .g-tip__term {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 12px;
   color: var(--amber);
   letter-spacing: 2px;

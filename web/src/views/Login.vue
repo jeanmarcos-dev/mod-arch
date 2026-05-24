@@ -1,40 +1,52 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { Copy, Check } from '@lucide/vue';
+import VueTurnstile from 'vue-turnstile';
 import { useAuthStore } from '../stores/auth';
+import { useAppConfigStore } from '../stores/appConfig';
 import Btn from '../components/ui/Btn.vue';
 import Card from '../components/ui/Card.vue';
 import Field from '../components/ui/Field.vue';
 
 const auth = useAuthStore();
+const appCfg = useAppConfigStore();
 const router = useRouter();
 
 const name = ref('');
 const email = ref('');
 const studentId = ref('');
 const busy = ref(false);
-const copied = ref(false);
+const turnstileToken = ref('');
 
-// Two terminal states after submit:
-//  - hasFallbackLink: SMTP off/failed — show the URL inline so the student
-//    can open it directly. No automatic redirect.
-//  - magicSent:       SMTP delivered the email — show "check your inbox".
-const hasFallbackLink = computed(() => Boolean(auth.magicLink));
-const showSent = computed(() => auth.magicSent && !hasFallbackLink.value);
+onMounted(() => { appCfg.load(); });
+
+const turnstileEnabled = computed(() => Boolean(appCfg.turnstileSitekey));
+const canSubmit = computed(() => name.value.trim() !== '' && (!turnstileEnabled.value || turnstileToken.value !== ''));
+
+// The post-submit "check your inbox" screen is shown only when SMTP is on
+// and the server returned a pending state. With SMTP off the login is
+// completed in-band and we redirect straight to the simulator.
+const showSent = computed(() => auth.pendingEmail !== null);
 
 async function submit() {
   if (busy.value) return;
   busy.value = true;
   try {
-    const ok = await auth.login({
+    const outcome = await auth.login({
       name: name.value.trim(),
       email: email.value.trim() || undefined,
       student_id: studentId.value.trim() || undefined,
+      turnstile_token: turnstileEnabled.value ? turnstileToken.value : undefined,
     });
-    if (ok && !auth.magicSent && !hasFallbackLink.value) {
-      await router.replace('/');
+    if (outcome === 'direct') {
+      const next = (router.currentRoute.value.query.next as string) || '/';
+      await router.replace(next);
+    } else if (outcome === 'error') {
+      // A bad token taints the widget; force a refresh on next attempt.
+      turnstileToken.value = '';
     }
+    // outcome === 'pending' falls through: the template flips to showSent
+    // and the user waits for the magic link to land in their inbox.
   } finally {
     busy.value = false;
   }
@@ -42,24 +54,6 @@ async function submit() {
 
 function continueAnonymous() {
   router.replace('/');
-}
-
-async function copyLink() {
-  if (!auth.magicLink) return;
-  try {
-    await navigator.clipboard.writeText(auth.magicLink);
-    copied.value = true;
-    setTimeout(() => { copied.value = false; }, 1500);
-  } catch {
-    // Older browsers fall through to the textarea select trick.
-    const t = document.createElement('textarea');
-    t.value = auth.magicLink;
-    document.body.appendChild(t);
-    t.select();
-    try { document.execCommand('copy'); copied.value = true; } catch { /* ignore */ }
-    document.body.removeChild(t);
-    setTimeout(() => { copied.value = false; }, 1500);
-  }
 }
 </script>
 
@@ -75,7 +69,7 @@ async function copyLink() {
         </p>
       </header>
 
-      <form v-if="!auth.magicSent && !hasFallbackLink" class="login-page__form" @submit.prevent="submit">
+      <form v-if="!showSent" class="login-page__form" @submit.prevent="submit">
         <Field label="Nombre" required v-slot="{ id }">
           <input
             :id="id"
@@ -119,10 +113,18 @@ async function copyLink() {
           />
         </Field>
 
+        <div v-if="turnstileEnabled" class="login-page__turnstile">
+          <VueTurnstile
+            :site-key="appCfg.turnstileSitekey"
+            v-model="turnstileToken"
+            theme="dark"
+          />
+        </div>
+
         <Btn
           type="submit"
           :loading="busy"
-          :disabled="!name.trim()"
+          :disabled="!canSubmit"
           block
         >
           {{ busy ? 'Verificando…' : 'Ingresar' }}
@@ -131,31 +133,18 @@ async function copyLink() {
 
       <div v-else-if="showSent" class="login-page__magic">
         <p class="login-page__ok">
-          Le hemos enviado un enlace de acceso a <strong>{{ email.trim() }}</strong>.
+          Hemos enviado un enlace de acceso a <strong>{{ auth.pendingEmail }}</strong>.
         </p>
         <p class="login-page__hint">
-          El enlace caduca en 15 minutos. Mientras tanto, su sesión actual ya
-          está activa con el nombre <strong>{{ auth.user?.name }}</strong>.
+          Abra ese correo y haga clic en el enlace para entrar al simulador.
+          El enlace caduca en 15 minutos. Si no lo recibe en un par de minutos,
+          revise la carpeta de spam.
         </p>
-        <Btn block @click="continueAnonymous">Continuar al simulador →</Btn>
-      </div>
-
-      <div v-else class="login-page__magic">
-        <p class="login-page__warn">
-          El envío por correo no está disponible en este momento. Use el
-          siguiente enlace para entrar (vence en 15 minutos):
-        </p>
-        <div class="login-page__link-row">
-          <input class="login-page__link-input" readonly :value="auth.magicLink ?? ''" @click="($event.target as HTMLInputElement).select()" />
-          <button class="login-page__copy" type="button" :title="copied ? 'Copiado' : 'Copiar enlace'" @click="copyLink">
-            <component :is="copied ? Check : Copy" :size="14" :stroke-width="2" />
-            <span>{{ copied ? 'COPIADO' : 'COPIAR' }}</span>
-          </button>
-        </div>
         <p class="login-page__hint">
-          Su sesión actual ya está activa con el nombre <strong>{{ auth.user?.name }}</strong>.
+          Mientras tanto puede continuar como invitado y volver cuando reciba
+          el correo.
         </p>
-        <Btn block @click="continueAnonymous">Continuar al simulador →</Btn>
+        <Btn block variant="ghost" @click="continueAnonymous">Continuar como invitado →</Btn>
       </div>
 
       <footer class="login-page__footer">
@@ -194,7 +183,7 @@ async function copyLink() {
 }
 
 .login-page__header h1 {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 18px;
   letter-spacing: 6px;
   color: var(--amber);
@@ -219,51 +208,6 @@ async function copyLink() {
   color: var(--green);
   font-size: 13px;
 }
-
-.login-page__warn {
-  color: var(--amber);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.login-page__link-row {
-  display: flex;
-  gap: 6px;
-}
-
-.login-page__link-input {
-  flex: 1;
-  min-width: 0;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid var(--border);
-  color: var(--cyan);
-  padding: 8px 10px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  border-radius: var(--radius-sm);
-}
-.login-page__link-input:focus {
-  outline: none;
-  border-color: var(--cyan);
-}
-
-.login-page__copy {
-  background: rgba(106, 212, 255, 0.10);
-  border: 1px solid var(--cyan);
-  color: var(--cyan);
-  padding: 8px 12px;
-  font-family: inherit;
-  font-size: 10px;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-.login-page__copy:hover { background: rgba(106, 212, 255, 0.22); }
 
 .login-page__footer {
   margin-top: var(--space-5);

@@ -98,6 +98,11 @@ type Simulator struct {
 	stepHz   int
 	hzChange chan int
 
+	// events is a rolling history of the most recent CPU events. Consumed by
+	// the tutor's tools so the LLM can ask "what happened in the last second?"
+	// without us shipping the full event stream in the prompt.
+	events *EventRing
+
 	logger *slog.Logger
 }
 
@@ -122,9 +127,17 @@ func New(cfg Config) *Simulator {
 		kernel:   kernel.NewMulti(cpu.DefaultMemSize, cores),
 		programs: progs,
 		clients:  make(map[*Client]struct{}),
+		events:   NewEventRing(DefaultEventRingCapacity),
 		logger:   cfg.Logger,
 		stepHz:   4,
 	}
+}
+
+// RecentEvents returns the latest CPU events kept in the ring buffer,
+// optionally filtered by type (e.g. []string{"sched_decision", "mode_switch"}).
+// Newest-first ordering. Exposed for the tutor's get_recent_events tool.
+func (s *Simulator) RecentEvents(types []string, n int) []map[string]any {
+	return s.events.Recent(types, n)
 }
 
 // LoadProgram resets the kernel and loads a (potentially multi-process) demo.
@@ -194,6 +207,7 @@ func (s *Simulator) StepOnce() error {
 		return err
 	}
 	for _, e := range evs {
+		s.events.push(e, tick)
 		s.Broadcast(EventToWire(e))
 	}
 	s.Broadcast(map[string]any{"type": "tick", "value": tick})

@@ -16,10 +16,14 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/jeanmarcos/modos-cpu/internal/crypto"
+
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
+	"github.com/jeanmarcos/modos-cpu/internal/tutor"
 )
 
 const (
@@ -42,6 +46,17 @@ type Server struct {
 	admin      adminConfig
 	loginLimit *RateLimiter
 	authLimit  *RateLimiter
+
+	// tutorRegistry holds the active tutor service. Wrapping it in a
+	// registry lets the admin /reload endpoint swap the service in place
+	// without restarting the process.
+	tutorRegistry *tutor.Registry
+	tutorBuild    *tutor.BuildDeps // captured at startup so /reload can rebuild
+
+	// encKey is the at-rest cipher key used to seal/open secrets stored in
+	// the settings table (Turnstile secret, SMTP password, etc.). Derived
+	// once from SESSION_SECRET at boot.
+	encKey [32]byte
 }
 
 // Rate limit defaults for login surfaces. Tight enough to make brute force
@@ -54,9 +69,11 @@ const (
 
 // Config holds the Server construction parameters.
 type Config struct {
-	Manager  *sessions.Manager
-	Logger   *slog.Logger
-	StaticFS fs.FS
+	Manager       *sessions.Manager
+	Logger        *slog.Logger
+	StaticFS      fs.FS
+	TutorRegistry *tutor.Registry  // optional; empty registry disables the tutor surface
+	TutorBuild    *tutor.BuildDeps // optional; required by /admin/api/tutor/reload to rebuild on config changes
 }
 
 // New builds a Server around a *sessions.Manager.
@@ -72,6 +89,9 @@ func New(cfg Config) *Server {
 		admin:      loadAdminConfig(),
 		loginLimit: NewRateLimiter(context.Background(), loginLimitMax, loginLimitWindow, rateLimitCleanupTick),
 		authLimit:  NewRateLimiter(context.Background(), loginLimitMax, loginLimitWindow, rateLimitCleanupTick),
+		tutorRegistry: cfg.TutorRegistry,
+		tutorBuild:    cfg.TutorBuild,
+		encKey:        crypto.DeriveKey([]byte(os.Getenv("SESSION_SECRET"))),
 	}
 	if s.admin.enabled {
 		cfg.Logger.Info("admin enabled", "user", s.admin.user)

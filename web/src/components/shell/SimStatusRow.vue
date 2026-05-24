@@ -137,6 +137,7 @@ function onCoreAllClick() {
             'sim-bar__core-tab--idle': c.current_pid === 0,
             'sim-bar__core-tab--halted': c.halted,
           }]"
+          :style="{ '--core-tint': `var(--core-${c.id % 4})`, '--core-tint-fg': `var(--core-fg)` }"
           :disabled="readonly"
           :title="readonly
             ? `Núcleo C${c.id}${c.current_pid ? ' · ejecutando P' + c.current_pid : ' · ocioso'} (vista del anfitrión)`
@@ -257,6 +258,7 @@ function onCoreAllClick() {
             'sim-core-row--halted': c.halted,
             'sim-core-row--idle': c.current_pid === 0 && !c.halted,
           }]"
+          :style="{ '--core-tint': `var(--core-${c.id % 4})`, '--core-tint-fg': `var(--core-fg)` }"
           :title="`Estado del núcleo C${c.id}`"
         >
           <span class="sim-core-row__id">C{{ c.id }}</span>
@@ -332,19 +334,25 @@ function onCoreAllClick() {
 .sim-core-row--halted { opacity: 0.7; }
 .sim-core-row--idle { opacity: 0.85; }
 
+/* Per-core identity badge. Background + fg use the per-row --core-tint so
+   the sub-row reads as "this is the C0 line" at a glance, matching the
+   color used in the events log, narrators and console badges. */
 .sim-core-row__id {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
   letter-spacing: 1px;
-  color: var(--text-muted);
+  color: var(--core-tint-fg, var(--core-fg, #0e0e10));
+  background: var(--core-tint, var(--text-muted));
   min-width: 28px;
-  padding: 0 4px;
+  padding: 0 6px;
   text-align: center;
-  height: 22px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
 }
 
 .sim-bar__core-tabs {
@@ -373,18 +381,22 @@ function onCoreAllClick() {
   transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 .sim-bar__core-tab:hover:not(:disabled) {
-  color: var(--amber);
-  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--core-tint, var(--amber));
+  background: color-mix(in oklab, var(--core-tint, var(--amber)) 14%, transparent);
 }
 .sim-bar__core-tab:focus { outline: none; }
 .sim-bar__core-tab:focus-visible {
-  outline: 1px solid var(--amber);
+  outline: 1px solid var(--core-tint, var(--amber));
   outline-offset: -1px;
 }
+/* Active state uses the core-specific tint as background + fg color so each
+   active tab visibly carries its core identity. Falls back to --amber for
+   the legacy single-core path that does not set --core-tint. */
 .sim-bar__core-tab--active {
-  background: rgba(var(--accent-rgb), 0.18);
-  color: var(--amber);
-  border-color: var(--amber);
+  background: var(--core-tint, var(--amber));
+  color: var(--core-tint-fg, var(--core-fg, #0e0e10));
+  border-color: var(--core-tint, var(--amber));
+  font-weight: 600;
 }
 .sim-bar__core-tab--idle:not(.sim-bar__core-tab--active) {
   color: var(--text-dim);

@@ -191,7 +191,7 @@ onUnmounted(() => {
   padding: 6px 10px;
   color: var(--text-dim);
   border-color: var(--border);
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--surface-overlay);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -242,11 +242,11 @@ onUnmounted(() => {
 }
 
 .credit-tag {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 11px;
-  color: var(--amber);
+  color: var(--accent);
   letter-spacing: 3px;
-  text-shadow: 0 0 6px rgba(var(--accent-rgb), 0.3);
+  text-shadow: var(--shadow-glow-amber);
 }
 
 .credit-name {
@@ -294,7 +294,7 @@ onUnmounted(() => {
     grid-template-columns: repeat(6, 1fr);
     gap: 2px;
     padding: 6px;
-    background: rgba(0, 0, 0, 0.4);
+    background: var(--surface-overlay);
     border-bottom: 1px solid var(--border-strong);
     position: sticky;
     top: 0;
@@ -307,7 +307,7 @@ onUnmounted(() => {
     letter-spacing: 0.5px;
     color: var(--text-dim);
     border: 1px solid var(--border);
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--surface-overlay-strong);
     display: inline-flex;
     flex-direction: column;
     align-items: center;

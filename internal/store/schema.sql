@@ -75,3 +75,68 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_at INTEGER NOT NULL,
     updated_by TEXT
 );
+
+-- RAG: corpus indexado (glosario, libro). Embeddings se guardan como BLOB
+-- little-endian []float32. corpus_version permite invalidar cachés sin
+-- borrar la tabla: el indexador inserta filas nuevas con un version mayor
+-- y la app filtra por la versión activa (settings: rag.corpus_version).
+CREATE TABLE IF NOT EXISTS rag_chunks (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    source         TEXT NOT NULL,
+    source_id      TEXT NOT NULL,
+    text           TEXT NOT NULL,
+    metadata       TEXT NOT NULL DEFAULT '{}',
+    embedding      BLOB NOT NULL,
+    corpus_version INTEGER NOT NULL,
+    created_at     INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rag_chunks_version ON rag_chunks(corpus_version);
+CREATE INDEX IF NOT EXISTS idx_rag_chunks_source  ON rag_chunks(source, corpus_version);
+
+-- Caché determinístico de embeddings de queries. Reduce llamadas al embedder
+-- cuando varios estudiantes preguntan lo mismo. Sin TTL: los embeddings son
+-- estables para un texto dado.
+CREATE TABLE IF NOT EXISTS rag_query_cache (
+    query_hash TEXT PRIMARY KEY,
+    embedding  BLOB NOT NULL,
+    hits_count INTEGER NOT NULL DEFAULT 1,
+    last_used  INTEGER NOT NULL
+);
+
+-- Caché de respuestas exact-match. La clave incluye el snapshot del simulador
+-- para que la misma pregunta en estados distintos no choque. corpus_version
+-- en la clave invalida toda la caché cuando se reindexa.
+CREATE TABLE IF NOT EXISTS rag_answer_cache (
+    cache_key   TEXT PRIMARY KEY,
+    answer      TEXT NOT NULL,
+    citations   TEXT NOT NULL DEFAULT '[]',
+    created_at  INTEGER NOT NULL,
+    last_used   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rag_answer_cache_last_used ON rag_answer_cache(last_used);
+
+-- Per-question metrics persisted by the tutor. One row per Ask() call. The
+-- admin dashboard aggregates over these to show query volume, latency,
+-- cache hit-rate and tool usage. We deliberately keep `question` itself out
+-- of the row to avoid storing potentially personal text; the digest lets us
+-- correlate repeated questions without keeping the content.
+CREATE TABLE IF NOT EXISTS tutor_metrics (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              INTEGER NOT NULL,
+    session_id      TEXT,
+    user_id         TEXT,
+    question_digest TEXT NOT NULL,
+    question_chars  INTEGER NOT NULL,
+    latency_ms      INTEGER NOT NULL,
+    cache_hit       INTEGER NOT NULL DEFAULT 0,
+    degraded        INTEGER NOT NULL DEFAULT 0,
+    tools_used      TEXT NOT NULL DEFAULT '[]',
+    tokens_total    INTEGER NOT NULL DEFAULT 0,
+    citations_count INTEGER NOT NULL DEFAULT 0,
+    error           TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_tutor_metrics_ts ON tutor_metrics(ts DESC);
+CREATE INDEX IF NOT EXISTS idx_tutor_metrics_session ON tutor_metrics(session_id, ts DESC);

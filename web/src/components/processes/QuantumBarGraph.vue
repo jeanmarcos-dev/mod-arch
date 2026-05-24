@@ -113,7 +113,7 @@ function widthPct(n: number): string {
 }
 
 .quantum-bars__pid {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 12px;
   letter-spacing: 2px;
   text-align: right;

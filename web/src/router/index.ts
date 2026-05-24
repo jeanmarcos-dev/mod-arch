@@ -8,7 +8,6 @@ const Memory = () => import('../views/section/Memory.vue');
 const Interrupts = () => import('../views/section/Interrupts.vue');
 const Concurrency = () => import('../views/section/Concurrency.vue');
 const X86Real = () => import('../views/section/X86Real.vue');
-const MySessions = () => import('../views/secondary/MySessions.vue');
 const GlossaryPage = () => import('../views/secondary/Glossary.vue');
 const Preferences = () => import('../views/secondary/Preferences.vue');
 const Profile = () => import('../views/secondary/Profile.vue');
@@ -24,6 +23,9 @@ const AdminAccess = () => import('../views/admin/AdminAccess.vue');
 const AdminUsers = () => import('../views/admin/AdminUsers.vue');
 const AdminAudit = () => import('../views/admin/AdminAudit.vue');
 const AdminSmtp = () => import('../views/admin/AdminSmtp.vue');
+const AdminTutorMetrics = () => import('../views/admin/AdminTutorMetrics.vue');
+const AdminTutorConfig = () => import('../views/admin/AdminTutorConfig.vue');
+const AdminSecurity = () => import('../views/admin/AdminSecurity.vue');
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -38,7 +40,11 @@ export const router = createRouter({
         { path: 'interrupciones', name: 'interrupts', component: Interrupts, meta: { title: 'Interrupciones', section: true } },
         { path: 'concurrencia', name: 'concurrency', component: Concurrency, meta: { title: 'Concurrencia', section: true, category: 'concurrencia' } },
         { path: 'x86', name: 'x86-real', component: X86Real, meta: { title: 'x86 real', section: true } },
-        { path: 'sesiones', name: 'my-sessions', component: MySessions, meta: { title: 'Mis sesiones', section: false } },
+        // Legacy URL: /sesiones used to host a list of sessions, but with
+        // the "one session per user" policy the list collapses to a single
+        // row. Profile now carries the session info inline, so this path
+        // redirects to /perfil instead of 404'ing for existing bookmarks.
+        { path: 'sesiones', redirect: '/perfil' },
         { path: 'glosario', name: 'glossary', component: GlossaryPage, meta: { title: 'Glosario', section: false } },
         { path: 'preferencias', name: 'preferences', component: Preferences, meta: { title: 'Preferencias', section: false } },
         { path: 'perfil', name: 'profile', component: Profile, meta: { title: 'Perfil', section: false } },
@@ -69,6 +75,9 @@ export const router = createRouter({
         { path: 'accesos', name: 'admin-access', component: AdminAccess, meta: { title: 'Accesos' } },
         { path: 'smtp', name: 'admin-smtp', component: AdminSmtp, meta: { title: 'Correo' } },
         { path: 'auditoria', name: 'admin-audit', component: AdminAudit, meta: { title: 'Auditoría' } },
+        { path: 'tutor', name: 'admin-tutor-metrics', component: AdminTutorMetrics, meta: { title: 'Tutor — métricas' } },
+        { path: 'tutor/config', name: 'admin-tutor-config', component: AdminTutorConfig, meta: { title: 'Tutor — configuración' } },
+        { path: 'seguridad', name: 'admin-security', component: AdminSecurity, meta: { title: 'Seguridad' } },
       ],
     },
     {

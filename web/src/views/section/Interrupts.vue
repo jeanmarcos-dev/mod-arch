@@ -346,7 +346,7 @@ const narratorHint = computed(() =>
   border: 2px solid currentColor;
   border-radius: var(--radius-md);
   background: var(--surface-2);
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   letter-spacing: 4px;
   transition: color var(--transition-base), box-shadow var(--transition-base);
 }
@@ -379,7 +379,7 @@ const narratorHint = computed(() =>
 }
 
 .ints-page__title {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 18px;
   letter-spacing: 5px;
   color: var(--amber);
@@ -451,7 +451,7 @@ const narratorHint = computed(() =>
 }
 
 .ints-page__panel-head h3 {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 12px;
   letter-spacing: 3px;
   color: var(--amber);
@@ -483,7 +483,7 @@ const narratorHint = computed(() =>
 
 .ints-table thead th {
   text-align: left;
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 10px;
   letter-spacing: 2px;
   color: var(--text-dim);

@@ -107,7 +107,7 @@ async function submit() {
 }
 
 .admin-login__header h1 {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 16px;
   letter-spacing: 4px;
   color: var(--amber);

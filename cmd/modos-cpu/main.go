@@ -24,6 +24,7 @@ import (
 	"github.com/jeanmarcos/modos-cpu/internal/sim"
 	"github.com/jeanmarcos/modos-cpu/internal/staticui"
 	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos/modos-cpu/internal/tutor"
 	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
 	"github.com/jeanmarcos/modos-cpu/pkg/kernel"
 )
@@ -127,10 +128,28 @@ func runServer(args []string) {
 	})
 	logger.Info("cpu cores configured", "num_cores", numCores)
 
+	// Tutor: load persisted config, overlay env vars, build the service.
+	// The registry lets the admin reload the tutor in-place from the UI.
+	tutorRegistry := tutor.NewRegistry()
+	defer tutorRegistry.Close()
+	tutorBuild := &tutor.BuildDeps{
+		Store:        st,
+		Logger:       logger,
+		EncKey:       tutor.EncKeyFromSecret(os.Getenv("SESSION_SECRET")),
+		TopK:         envInt("RAG_TOP_K", 5),
+		MaxAnswerTok: envInt("TUTOR_MAX_TOKENS", 600),
+		RateLimitMax: envInt("TUTOR_RATE_LIMIT", 20),
+	}
+	if err := reloadTutor(context.Background(), tutorBuild, tutorRegistry); err != nil {
+		logger.Info("tutor disabled at boot", "reason", err)
+	}
+
 	s := server.New(server.Config{
-		Manager:  manager,
-		Logger:   logger,
-		StaticFS: files,
+		Manager:       manager,
+		Logger:        logger,
+		StaticFS:      files,
+		TutorRegistry: tutorRegistry,
+		TutorBuild:    tutorBuild,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -275,6 +294,25 @@ func modeName(m uint8) string {
 	}
 	return "user"
 }
+
+// reloadTutor loads the persisted config (overlaid with env vars), builds a
+// fresh tutor service and swaps it into the registry. Called once at boot
+// and again from the admin /reload endpoint after a config change.
+func reloadTutor(ctx context.Context, deps *tutor.BuildDeps, reg *tutor.Registry) error {
+	cfg, err := tutor.LoadConfig(ctx, deps.Store, deps.EncKey)
+	if err != nil {
+		return err
+	}
+	cfg = tutor.MergeEnv(cfg, os.Getenv)
+	svc, err := tutor.Build(ctx, *deps, cfg)
+	if err != nil {
+		reg.Set(nil) // make absolutely sure the old service is gone on failure
+		return err
+	}
+	reg.Set(svc)
+	return nil
+}
+
 
 // envInt reads an env var as int or returns the default. Logs to stderr when
 // the value is set but unparseable so deploys do not fail silently.

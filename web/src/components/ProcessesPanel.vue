@@ -321,7 +321,7 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
 }
 
 .pcb-section-title {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 11px;
   color: var(--amber);
   letter-spacing: 2px;

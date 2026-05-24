@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jeanmarcos/modos-cpu/internal/crypto"
 	"github.com/jeanmarcos/modos-cpu/internal/programs"
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
 	"github.com/jeanmarcos/modos-cpu/internal/sim"
@@ -112,10 +114,10 @@ func TestAuth_LoginCreatesUserAndSession(t *testing.T) {
 		t.Fatalf("login status=%d body=%s", status, body)
 	}
 	var got struct {
-		OK        bool   `json:"ok"`
-		MagicSent bool   `json:"magic_sent"`
-		MagicLink string `json:"magic_link"`
-		User      struct {
+		OK      bool   `json:"ok"`
+		SMTP    string `json:"smtp"`
+		Pending bool   `json:"pending"`
+		User    struct {
 			ID    string `json:"id"`
 			Name  string `json:"name"`
 			Email string `json:"email"`
@@ -125,13 +127,13 @@ func TestAuth_LoginCreatesUserAndSession(t *testing.T) {
 	if !got.OK || got.User.ID == "" || got.User.Email != "ada@ucv.ve" {
 		t.Errorf("login response = %+v", got)
 	}
-	// Test server runs without SMTP configured. The login flow must surface
-	// the link inline so a student can recover without an external mailer.
-	if got.MagicSent {
-		t.Error("magic_sent should be false when SMTP is disabled")
+	// Test server has no SMTP configured: the verify-on-login degrades to
+	// trust-on-first-use so the caller is attached immediately.
+	if got.SMTP != "off" {
+		t.Errorf("smtp = %q, want \"off\"", got.SMTP)
 	}
-	if got.MagicLink == "" {
-		t.Error("magic_link fallback should be present when SMTP is disabled")
+	if got.Pending {
+		t.Error("pending should be false when SMTP is off (direct login)")
 	}
 
 	users, _ := st.ListUsers(t.Context())
@@ -147,6 +149,120 @@ func TestAuth_LoginCreatesUserAndSession(t *testing.T) {
 		t.Errorf("me status = %d", resp.StatusCode)
 	}
 	_ = resp.Body.Close()
+}
+
+// TestAuth_LoginWithSMTPRequiresVerification checks the "verify-on-login"
+// flow: when SMTP is configured the POST /api/auth/login response does NOT
+// attach the session — the caller has to consume the magic link first.
+func TestAuth_LoginWithSMTPRequiresVerification(t *testing.T) {
+	ts, st := startAuthTestServer(t)
+	enableMockSMTP(t, st)
+
+	// Stub the actual delivery so the test does not need a real SMTP server.
+	var capturedTo, capturedURL string
+	sendMagicLinkEmailHook = func(ctx context.Context, to, url string) error {
+		capturedTo, capturedURL = to, url
+		return nil
+	}
+	t.Cleanup(func() { sendMagicLinkEmailHook = nil })
+
+	c := newJarClient()
+	status, body := postJSON(t, c, ts.URL+"/api/auth/login", map[string]string{
+		"name": "Ada", "email": "ada@ucv.ve",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", status, body)
+	}
+	var got struct {
+		OK      bool   `json:"ok"`
+		SMTP    string `json:"smtp"`
+		Pending bool   `json:"pending"`
+		User    *struct {
+			ID string `json:"id"`
+		} `json:"user"`
+	}
+	_ = json.Unmarshal(body, &got)
+	if got.SMTP != "on" {
+		t.Errorf("smtp = %q, want \"on\"", got.SMTP)
+	}
+	if !got.Pending {
+		t.Error("pending should be true while waiting for the magic-link click")
+	}
+	if got.User != nil {
+		t.Errorf("user must NOT be returned before verification, got %+v", got.User)
+	}
+
+	// The session is still anonymous — /me must reject until the link is
+	// consumed.
+	resp, _ := c.Get(ts.URL + "/api/auth/me")
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("/me after pending login = %d, want 401", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+
+	// The mail send hook must have observed the dispatch to the right
+	// recipient with a real magic-link URL.
+	if capturedTo != "ada@ucv.ve" {
+		t.Errorf("captured to = %q, want ada@ucv.ve", capturedTo)
+	}
+	if !strings.Contains(capturedURL, "/auth/magic?t=") {
+		t.Errorf("captured url = %q, want a magic-link path", capturedURL)
+	}
+}
+
+// TestAuth_LoginSMTPSendFailureBlocks asserts that a configured-but-broken
+// SMTP backend returns 503 instead of degrading to direct login. Falling back
+// silently would let an attacker DoS the mailer to bypass verification.
+func TestAuth_LoginSMTPSendFailureBlocks(t *testing.T) {
+	ts, st := startAuthTestServer(t)
+	// "Enabled" with a bogus host so loadSMTPSender returns a non-nil sender
+	// whose Dial will fail. This simulates configured-but-broken SMTP.
+	enableMockSMTP(t, st)
+	if err := st.SetSetting(t.Context(), "smtp_host", "127.0.0.1:1", "test", time.Now().Unix()); err != nil {
+		t.Fatalf("seed bad host: %v", err)
+	}
+	if err := st.SetSetting(t.Context(), "smtp_port", "1", "test", time.Now().Unix()); err != nil {
+		t.Fatalf("seed bad port: %v", err)
+	}
+
+	c := newJarClient()
+	status, body := postJSON(t, c, ts.URL+"/api/auth/login", map[string]string{
+		"name": "Ada", "email": "ada@ucv.ve",
+	})
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("login status=%d body=%s, want 503", status, body)
+	}
+	if !strings.Contains(string(body), "smtp_send_failed") {
+		t.Errorf("body should carry the smtp_send_failed code: %s", body)
+	}
+
+	// Session must still be anonymous.
+	resp, _ := c.Get(ts.URL + "/api/auth/me")
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("/me after blocked login = %d, want 401", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
+}
+
+// enableMockSMTP writes the minimum set of SMTP settings to make
+// loadSMTPSender return a non-nil sender. The actual delivery target is
+// chosen by the caller (good or bad host) — this helper only flips the
+// "enabled + minimal config" switch.
+func enableMockSMTP(t *testing.T, st *store.Store) {
+	t.Helper()
+	now := time.Now().Unix()
+	rows := map[string]string{
+		"smtp_enabled":    "true",
+		"smtp_host":       "mock.invalid",
+		"smtp_port":       "25",
+		"smtp_from_email": "noreply@modos-cpu.test",
+		"smtp_from_name":  "MODOS-CPU Test",
+	}
+	for k, v := range rows {
+		if err := st.SetSetting(t.Context(), k, v, "test", now); err != nil {
+			t.Fatalf("seed %s: %v", k, err)
+		}
+	}
 }
 
 func TestAuth_LoginDeduplicatesByEmail(t *testing.T) {
@@ -267,4 +383,116 @@ func getStatusBody(t *testing.T, c *http.Client, url string) (int, []byte) {
 	defer func() { _ = r.Body.Close() }()
 	b, _ := io.ReadAll(r.Body)
 	return r.StatusCode, b
+}
+
+// startTurnstileStub starts a httptest server impersonating Cloudflare's
+// siteverify endpoint. acceptToken makes the stub return success for that
+// exact token and reject everything else.
+func startTurnstileStub(t *testing.T, acceptToken string) *httptest.Server {
+	t.Helper()
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		ok := r.FormValue("response") == acceptToken
+		w.Header().Set("Content-Type", "application/json")
+		if ok {
+			_, _ = w.Write([]byte(`{"success":true}`))
+		} else {
+			_, _ = w.Write([]byte(`{"success":false,"error-codes":["invalid-input-response"]}`))
+		}
+	}))
+	t.Cleanup(stub.Close)
+	prev := turnstileVerifyURL
+	turnstileVerifyURL = stub.URL
+	t.Cleanup(func() { turnstileVerifyURL = prev })
+	return stub
+}
+
+func TestAuth_LoginTurnstileDisabledByDefault(t *testing.T) {
+	ts, _ := startAuthTestServer(t)
+	c := newJarClient()
+	status, body := postJSON(t, c, ts.URL+"/api/auth/login", map[string]string{
+		"name": "Ada", "email": "ada@ucv.ve",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("login without turnstile = %d body=%s", status, body)
+	}
+}
+
+func TestAuth_LoginTurnstileEnforced(t *testing.T) {
+	ts, st := startAuthTestServer(t)
+	startTurnstileStub(t, "GOOD-TOKEN")
+	// Persist the secret so verification is enforced.
+	if err := st.SetSetting(t.Context(), settingTurnstileSecret, mustSeal(t, "secret-key"), "test", time.Now().Unix()); err != nil {
+		t.Fatalf("seed secret: %v", err)
+	}
+
+	// Missing token → 403.
+	c := newJarClient()
+	status, _ := postJSON(t, c, ts.URL+"/api/auth/login", map[string]string{
+		"name": "Ada", "email": "ada@ucv.ve",
+	})
+	if status != http.StatusForbidden {
+		t.Fatalf("missing token: status=%d want 403", status)
+	}
+
+	// Wrong token → 403.
+	c = newJarClient()
+	status, _ = postJSON(t, c, ts.URL+"/api/auth/login", map[string]string{
+		"name": "Ada", "email": "ada@ucv.ve", "turnstile_token": "WRONG",
+	})
+	if status != http.StatusForbidden {
+		t.Fatalf("wrong token: status=%d want 403", status)
+	}
+
+	// Good token → 200.
+	c = newJarClient()
+	status, _ = postJSON(t, c, ts.URL+"/api/auth/login", map[string]string{
+		"name": "Ada", "email": "ada@ucv.ve", "turnstile_token": "GOOD-TOKEN",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("good token: status=%d want 200", status)
+	}
+}
+
+func TestPublicConfigExposesSitekeyOnlyWhenSecretIsSet(t *testing.T) {
+	ts, st := startAuthTestServer(t)
+
+	// Sitekey alone (no secret) must NOT be exposed — otherwise the SPA
+	// renders a non-functional Turnstile widget on /login.
+	if err := st.SetSetting(t.Context(), settingTurnstileSitekey, "0xPUBLIC", "test", time.Now().Unix()); err != nil {
+		t.Fatalf("seed sitekey: %v", err)
+	}
+	c := newJarClient()
+	status, body := getStatusBody(t, c, ts.URL+"/api/config")
+	if status != http.StatusOK {
+		t.Fatalf("/api/config status=%d", status)
+	}
+	if !strings.Contains(string(body), `"turnstile_sitekey":""`) {
+		t.Errorf("sitekey leaked without secret: body=%s", body)
+	}
+
+	// Adding the secret completes the pair → sitekey now shows up.
+	if err := st.SetSetting(t.Context(), settingTurnstileSecret, mustSeal(t, "shh"), "test", time.Now().Unix()); err != nil {
+		t.Fatalf("seed secret: %v", err)
+	}
+	c = newJarClient()
+	status, body = getStatusBody(t, c, ts.URL+"/api/config")
+	if status != http.StatusOK {
+		t.Fatalf("/api/config status=%d", status)
+	}
+	if !strings.Contains(string(body), `"turnstile_sitekey":"0xPUBLIC"`) {
+		t.Errorf("body=%s missing sitekey after secret was set", body)
+	}
+}
+
+// mustSeal encrypts plaintext with the same SESSION_SECRET-derived key the
+// server uses (empty env → sha256("") derived key).
+func mustSeal(t *testing.T, plain string) string {
+	t.Helper()
+	key := crypto.DeriveKey([]byte{})
+	sealed, err := crypto.Seal(plain, key)
+	if err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	return sealed
 }

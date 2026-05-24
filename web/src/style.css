@@ -88,8 +88,8 @@
 
   /* Text ramp. */
   --text:       #e8e3d4;
-  --text-dim:   #aaa491;
-  --text-muted: #7d7868;
+  --text-dim:   #c8bca6;
+  --text-muted: #a09885;
 
   /* Borders are derived from the accent so they retint with the theme. */
   --border:        rgba(255, 179, 71, 0.18);
@@ -107,6 +107,9 @@
   --core-1: #6ad4ff;
   --core-2: #7fffaa;
   --core-3: #c9a0ff;
+  /* Foreground meant to sit ON TOP of --core-* fills (badges, chips). Dark
+     text reads better against these light, saturated CRT hues. */
+  --core-fg: #0e0e10;
   --shadow-glow-core-0: 0 0 12px rgba(255, 181, 71,  0.45);
   --shadow-glow-core-1: 0 0 12px rgba(106, 212, 255, 0.45);
   --shadow-glow-core-2: 0 0 12px rgba(127, 255, 170, 0.45);
@@ -126,6 +129,21 @@
     var(--bg-0);
   --scanline-color: rgba(255, 179, 71, 0.025);
   --selection-bg:   rgba(255, 179, 71, 0.35);
+
+  /* Overlays for inputs, code blocks and inner panels. Darken-on-dark in CRT
+     themes, invert to a faint darken-on-light in accesible. */
+  --surface-overlay:        rgba(0, 0, 0, 0.35);
+  --surface-overlay-strong: rgba(0, 0, 0, 0.55);
+  /* Background of .panel — dark themes use a darkening overlay, light theme
+     overrides to a solid white so saturated text stays sharp. */
+  --panel-bg: rgba(0, 0, 0, 0.30);
+
+  /* The console (sys_write) and keyboard input render as an in-app
+     terminal. CRT/dark themes use classic phosphor-on-black; the light
+     theme flips it to text-on-surface so it does not look out of place. */
+  --terminal-bg: #050808;
+  --terminal-fg: var(--green);
+  --terminal-border: var(--border);
 
   /* Typography. Modern theme overrides --font-display + --font-body. */
   --font-display: 'Major Mono Display', monospace;
@@ -157,8 +175,8 @@
   --red-soft:   #ff8a8a;
 
   --text:       #d8f5e1;
-  --text-dim:   #8fc9a3;
-  --text-muted: #5e8f73;
+  --text-dim:   #aedabe;
+  --text-muted: #87b598;
 
   --border:        rgba(127, 255, 149, 0.18);
   --border-strong: rgba(127, 255, 149, 0.45);
@@ -173,6 +191,7 @@
   --core-1: #86e0c7;
   --core-2: #d8ff7f;
   --core-3: #b8c9ff;
+  --core-fg: #0e0e10;
   --shadow-glow-core-0: 0 0 12px rgba(127, 255, 149, 0.45);
   --shadow-glow-core-1: 0 0 12px rgba(134, 224, 199, 0.45);
   --shadow-glow-core-2: 0 0 12px rgba(216, 255, 127, 0.45);
@@ -190,69 +209,235 @@
   --scanline-color: rgba(127, 255, 149, 0.030);
   --selection-bg:   rgba(127, 255, 149, 0.30);
 
+  --surface-overlay:        rgba(0, 0, 0, 0.35);
+  --surface-overlay-strong: rgba(0, 0, 0, 0.55);
+  --panel-bg:               rgba(0, 0, 0, 0.30);
+
+  --terminal-bg: #030806;
+  --terminal-fg: var(--green);
+  --terminal-border: var(--border);
+
   --font-display: 'Major Mono Display', monospace;
   --font-body:    'JetBrains Mono', monospace;
   --font-code:    'JetBrains Mono', monospace;
 }
 
-/* ──────────────── Theme: modern (flat dark) ────────────────
- * Drops the CRT scanline color saturation and swaps display/body fonts to a
- * sans-serif system stack. JetBrains Mono is kept for actual code. */
-:root[data-theme="modern"] {
-  --bg-0: #0f1115;
-  --bg-1: #161a22;
-  --bg-2: #1e232e;
-  --surface-0: var(--bg-0);
-  --surface-1: var(--bg-1);
-  --surface-2: var(--bg-2);
-  --surface-3: #262c39;
+/* ──────────────── Theme: accesible (light, high contrast) ────────────────
+ * Light mode aimed at instructors and older users: white background, very
+ * dark text, AAA-contrast blue accent, Atkinson Hyperlegible (designed for
+ * low vision). No scanlines, no CRT glow — drop shadows replace it. */
+:root[data-theme="accesible"] {
+  /* All surfaces are pure white. Separation between panels is done with
+     borders and soft drop shadows — gray fills washed out the saturated
+     semantic colors (event log, syntax) and the user could not parse them. */
+  --bg-0: #f4f6f8;          /* page background: very subtle cool tint so white panels stand out */
+  --bg-1: #ffffff;
+  --bg-2: #ffffff;
+  --surface-0: #ffffff;
+  --surface-1: #ffffff;
+  --surface-2: #ffffff;
+  --surface-3: #ffffff;
 
-  --accent:        #7fa4ff;
-  --accent-dim:    #5c81d4;
-  --accent-rgb:    127, 164, 255;
+  --accent:        #0049b0;     /* ~7.5:1 on white — WCAG AAA */
+  --accent-dim:    #003583;
+  --accent-rgb:    0, 73, 176;
   --amber:         var(--accent);
   --amber-dim:     var(--accent-dim);
 
-  --green:      #86d8a0;
-  --green-glow: rgba(134, 216, 160, 0.30);
-  --cyan:       #86b8ff;
-  --yellow:     #ffd86a;
-  --red:        #ef4444;
-  --red-soft:   #f87171;
+  --green:      #006d2c;        /* 6.9:1 on white */
+  --green-glow: rgba(0, 109, 44, 0.18);
+  --cyan:       #00567a;
+  --yellow:     #8a6500;        /* darker mustard, readable on white */
+  --red:        #b3261e;        /* WCAG AAA on white */
+  --red-soft:   #8a1e1e;
 
-  --text:       #e1e5ec;
-  --text-dim:   #9aa3b3;
-  --text-muted: #6b7383;
+  --text:       #0e0e10;        /* near-black for body copy */
+  --text-dim:   #3a3a3d;
+  --text-muted: #5d5d62;
 
-  --border:        rgba(127, 164, 255, 0.16);
-  --border-strong: rgba(127, 164, 255, 0.36);
+  --border:        rgba(14, 14, 16, 0.14);
+  --border-strong: rgba(14, 14, 16, 0.32);
 
-  --shadow-glow-amber:         0 0 10px rgba(127, 164, 255, 0.20);
-  --shadow-glow-amber-strong:  0 0 14px rgba(127, 164, 255, 0.42);
-  --shadow-glow-green:         0 0 10px rgba(134, 216, 160, 0.25);
-  --shadow-glow-red:           0 0 10px rgba(239,  68, 68, 0.30);
-  --shadow-elevation-floating: 0 12px 36px rgba(0, 0, 0, 0.70), 0 0 0 1px rgba(127, 164, 255, 0.20);
+  /* Soft drop shadows replace the CRT glow — they survive on white without
+     overwhelming the layout. */
+  --shadow-glow-amber:         0 1px 2px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.04);
+  --shadow-glow-amber-strong:  0 2px 4px rgba(0, 0, 0, 0.10), 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-glow-green:         0 1px 2px rgba(0, 109, 44, 0.10), 0 0 0 1px rgba(0, 109, 44, 0.18);
+  --shadow-glow-red:           0 1px 2px rgba(179, 38, 30, 0.12), 0 0 0 1px rgba(179, 38, 30, 0.30);
+  --shadow-elevation-floating: 0 4px 16px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.08);
 
-  --core-0: #7fa4ff;
-  --core-1: #86b8ff;
-  --core-2: #86d8a0;
-  --core-3: #c9a0ff;
-  --shadow-glow-core-0: 0 0 12px rgba(127, 164, 255, 0.45);
-  --shadow-glow-core-1: 0 0 12px rgba(134, 184, 255, 0.45);
-  --shadow-glow-core-2: 0 0 12px rgba(134, 216, 160, 0.45);
-  --shadow-glow-core-3: 0 0 12px rgba(201, 160, 255, 0.45);
+  --core-0: #0049b0;
+  --core-1: #006d2c;
+  --core-2: #8a6500;
+  --core-3: #6b21a8;
+  /* Accesible theme has dark, saturated cores — pair them with white text. */
+  --core-fg: #ffffff;
+  --shadow-glow-core-0: 0 0 0 1px rgba(0,  73, 176, 0.40);
+  --shadow-glow-core-1: 0 0 0 1px rgba(0, 109,  44, 0.40);
+  --shadow-glow-core-2: 0 0 0 1px rgba(138,101,   0, 0.40);
+  --shadow-glow-core-3: 0 0 0 1px rgba(107, 33, 168, 0.40);
 
-  --focus-ring-inner: 0 0 0 1px var(--accent);
-  --focus-ring-outer: 0 0 0 3px rgba(127, 164, 255, 0.30);
+  --focus-ring-inner: 0 0 0 2px var(--accent);
+  --focus-ring-outer: 0 0 0 4px rgba(0, 73, 176, 0.25);
   --focus-ring: var(--focus-ring-inner), var(--focus-ring-outer);
 
-  --body-gradient:
-    radial-gradient(ellipse 80% 50% at 50%   0%, rgba(127, 164, 255, 0.05) 0%, transparent 70%),
-    radial-gradient(ellipse 60% 60% at 80% 100%, rgba(134, 216, 160, 0.03) 0%, transparent 70%),
-    var(--bg-0);
-  /* No scanline in modern: transparent renders nothing. */
+  --body-gradient: var(--bg-0);
   --scanline-color: transparent;
-  --selection-bg:   rgba(127, 164, 255, 0.30);
+  --selection-bg:   rgba(0, 73, 176, 0.20);
+
+  /* Surface overlays (inputs, code blocks, inner cards) stay transparent in
+     light mode. The white panel itself reads as the "card" and the page
+     background provides separation. Adding gray overlays only fights the
+     saturated semantic colors used in the event log. */
+  --surface-overlay:        transparent;
+  --surface-overlay-strong: rgba(14, 14, 16, 0.025);
+  /* Panel background flips to solid white in light mode — the darkening
+     overlay used in CRT themes turns into a muddy gray on a white page. */
+  --panel-bg: #ffffff;
+
+  /* In light mode the terminal drops the "phosphor on black" metaphor — a
+     dark terminal slab inside a white panel reads as broken styling, not
+     intentional skeuomorphism. Console output and the kbd input flip to
+     ink-on-paper so they match the rest of the layout. */
+  --terminal-bg: #ffffff;
+  --terminal-fg: #0e0e10;
+  --terminal-border: var(--border);
+
+  --font-display: 'Atkinson Hyperlegible', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body:    'Atkinson Hyperlegible', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-code:    'JetBrains Mono', monospace;
+}
+
+/* In the accessible theme we drop CRT-style typography tics (tight tracking,
+   uppercase) on prominent labels — they are antipatterns for low-vision
+   readers in sans-serif. */
+:root[data-theme="accesible"] .panel-title,
+:root[data-theme="accesible"] .pill {
+  letter-spacing: 0.25px;
+  text-transform: none;
+}
+:root[data-theme="accesible"] button {
+  letter-spacing: 0.25px;
+  text-transform: none;
+}
+
+/* The tutor FAB carries multiple CRT-style halos (radial gradient blur,
+   accent box-shadow, idle-pulse animation). On a white page they read as
+   blurry blue clouds, not as a floating action button — flatten them. */
+:root[data-theme="accesible"] .fab-glow {
+  display: none;
+}
+:root[data-theme="accesible"] .fab {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent-dim);
+  backdrop-filter: none;
+  box-shadow:
+    0 1px 2px rgba(14, 14, 16, 0.10),
+    0 4px 12px rgba(14, 14, 16, 0.16);
+  animation: none;
+}
+:root[data-theme="accesible"] .fab:hover {
+  box-shadow:
+    0 2px 4px rgba(14, 14, 16, 0.14),
+    0 6px 18px rgba(14, 14, 16, 0.22);
+}
+
+/* Inside the open tutor panel: the header avatar, empty-state avatar and
+   send button all use radial-gradient + accent box-shadow. On white those
+   read as blue clouds rather than icons — flatten them to solid fills. */
+:root[data-theme="accesible"] .title-icon,
+:root[data-theme="accesible"] .empty-avatar {
+  background: rgba(var(--accent-rgb), 0.10);
+  border-color: rgba(var(--accent-rgb), 0.35);
+  box-shadow: none;
+}
+:root[data-theme="accesible"] .title-main {
+  text-shadow: none;
+}
+:root[data-theme="accesible"] .status-led {
+  box-shadow: none;
+}
+:root[data-theme="accesible"] .send-btn {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent-dim);
+}
+:root[data-theme="accesible"] .send-btn:hover:not(:disabled) {
+  background: var(--accent-dim);
+  box-shadow: 0 2px 6px rgba(14, 14, 16, 0.18);
+}
+
+/* ──────────────── Theme: dark (neutral professional) ────────────────
+ * Production-grade dark mode (GitHub/VSCode flavor): neutral grays, blue
+ * accent, no CRT scanlines or glow, Inter sans-serif body. For users who
+ * want a "real" dark mode rather than the CRT aesthetic. */
+:root[data-theme="dark"] {
+  --bg-0: #0d1117;
+  --bg-1: #161b22;
+  --bg-2: #1f242b;
+  --surface-0: var(--bg-0);
+  --surface-1: var(--bg-1);
+  --surface-2: var(--bg-2);
+  --surface-3: #2a3038;
+
+  --accent:        #58a6ff;
+  --accent-dim:    #3d7fd9;
+  --accent-rgb:    88, 166, 255;
+  --amber:         var(--accent);
+  --amber-dim:     var(--accent-dim);
+
+  --green:      #56d364;
+  --green-glow: rgba(86, 211, 100, 0.30);
+  /* VSCode-flavored semantic palette: cyan is teal-ish so it does not
+     collide with the blue accent, yellow is a neutral wheat (Identifiers
+     in the VSCode default theme) for legibility on dark gray. */
+  --cyan:       #4ec9b0;
+  --yellow:     #dcdcaa;
+  --red:        #f85149;
+  --red-soft:   #ff8a80;
+
+  --text:       #e6edf3;
+  --text-dim:   #bcc2cb;
+  --text-muted: #8e95a0;
+
+  --border:        rgba(240, 246, 252, 0.10);
+  --border-strong: rgba(240, 246, 252, 0.28);
+
+  /* Very subtle ring-style "glows" — no neon, no aura. */
+  --shadow-glow-amber:         0 0 0 1px rgba(88, 166, 255, 0.18);
+  --shadow-glow-amber-strong:  0 0 0 1px rgba(88, 166, 255, 0.36), 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-glow-green:         0 0 0 1px rgba(86, 211, 100, 0.30);
+  --shadow-glow-red:           0 0 0 1px rgba(248, 81,  73, 0.30);
+  --shadow-elevation-floating: 0 8px 24px rgba(0, 0, 0, 0.40), 0 0 0 1px rgba(240, 246, 252, 0.08);
+
+  --core-0: #58a6ff;
+  --core-1: #56d364;
+  --core-2: #d29922;
+  --core-3: #c084fc;
+  --core-fg: #0d1117;
+  --shadow-glow-core-0: 0 0 0 1px rgba(88,  166, 255, 0.45);
+  --shadow-glow-core-1: 0 0 0 1px rgba(86,  211, 100, 0.45);
+  --shadow-glow-core-2: 0 0 0 1px rgba(210, 153,  34, 0.45);
+  --shadow-glow-core-3: 0 0 0 1px rgba(192, 132, 252, 0.45);
+
+  --focus-ring-inner: 0 0 0 1px var(--accent);
+  --focus-ring-outer: 0 0 0 3px rgba(88, 166, 255, 0.30);
+  --focus-ring: var(--focus-ring-inner), var(--focus-ring-outer);
+
+  --body-gradient: linear-gradient(180deg, #0d1117 0%, #0a0d12 100%);
+  --scanline-color: transparent;
+  --selection-bg:   rgba(88, 166, 255, 0.30);
+
+  --surface-overlay:        rgba(0, 0, 0, 0.30);
+  --surface-overlay-strong: rgba(0, 0, 0, 0.50);
+  --panel-bg:               rgba(0, 0, 0, 0.25);
+
+  /* Sober dark terminal: deeper than bg-0 (so it stands apart) with off-white
+     monospace text — no phosphor, in line with the rest of the IDE feel. */
+  --terminal-bg: #05080c;
+  --terminal-fg: #e6edf3;
+  --terminal-border: var(--border-strong);
 
   --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-body:    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -355,9 +540,9 @@ button {
   font-size: 14px;
   letter-spacing: 1px;
   text-transform: uppercase;
-  background: rgba(255, 179, 71, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
   border: 1px solid var(--border-strong);
-  color: var(--amber);
+  color: var(--accent);
   padding: 6px 12px;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -366,8 +551,8 @@ button {
 }
 
 button:hover {
-  background: rgba(255, 179, 71, 0.15);
-  box-shadow: 0 0 12px rgba(255, 179, 71, 0.25);
+  background: rgba(var(--accent-rgb), 0.15);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.25);
 }
 
 button:disabled {
@@ -378,15 +563,15 @@ button:disabled {
 select {
   font-family: inherit;
   font-size: 14px;
-  background: rgba(255, 179, 71, 0.05);
-  color: var(--amber);
+  background: rgba(var(--accent-rgb), 0.05);
+  color: var(--accent);
   border: 1px solid var(--border-strong);
   padding: 5px 8px;
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
-  background-image: linear-gradient(45deg, transparent 50%, var(--amber) 50%),
-                    linear-gradient(135deg, var(--amber) 50%, transparent 50%);
+  background-image: linear-gradient(45deg, transparent 50%, var(--accent) 50%),
+                    linear-gradient(135deg, var(--accent) 50%, transparent 50%);
   background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
@@ -394,13 +579,13 @@ select {
 }
 
 select:hover {
-  background-color: rgba(255, 179, 71, 0.12);
-  border-color: var(--amber);
+  background-color: rgba(var(--accent-rgb), 0.12);
+  border-color: var(--accent);
 }
 
 select:focus {
   outline: none;
-  box-shadow: 0 0 8px rgba(255, 179, 71, 0.4);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.4);
 }
 
 /* Las options del dropdown nativo. La mayoría de browsers permiten estilarlas. */
@@ -408,26 +593,26 @@ select option {
   background: var(--bg-1);
   color: var(--text);
   padding: 6px 8px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-code);
 }
 
 select option:checked {
-  background: rgba(255, 179, 71, 0.2);
-  color: var(--amber);
+  background: rgba(var(--accent-rgb), 0.2);
+  color: var(--accent);
   font-weight: 700;
 }
 
 .panel {
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--panel-bg);
   border: 1px solid var(--border);
   padding: 10px;
   overflow: hidden;
 }
 
 .panel-title {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 11px;
-  color: var(--amber);
+  color: var(--accent);
   letter-spacing: 2px;
   border-bottom: 1px dashed var(--border-strong);
   padding-bottom: 5px;
@@ -437,7 +622,7 @@ select option:checked {
 .pill {
   border: 1px solid var(--border-strong);
   padding: 3px 9px;
-  color: var(--amber);
+  color: var(--accent);
   font-size: 13px;
   letter-spacing: 1px;
   text-transform: uppercase;
@@ -475,7 +660,7 @@ select option:checked {
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 179, 71, 0.35) rgba(0, 0, 0, 0.4);
+  scrollbar-color: rgba(var(--accent-rgb), 0.35) rgba(0, 0, 0, 0.4);
 }
 
 *::-webkit-scrollbar {
@@ -485,17 +670,17 @@ select option:checked {
 
 *::-webkit-scrollbar-track {
   background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 179, 71, 0.08);
+  border: 1px solid rgba(var(--accent-rgb), 0.08);
 }
 
 *::-webkit-scrollbar-thumb {
-  background: rgba(255, 179, 71, 0.3);
-  border: 1px solid rgba(255, 179, 71, 0.5);
+  background: rgba(var(--accent-rgb), 0.3);
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
   border-radius: 0;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 179, 71, 0.5);
+  background: rgba(var(--accent-rgb), 0.5);
 }
 
 *::-webkit-scrollbar-corner {

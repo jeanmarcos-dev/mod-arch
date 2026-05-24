@@ -23,12 +23,15 @@ func (s *Server) registerAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/auth/sessions", s.handleAuthMySessions)
 	mux.HandleFunc("POST /api/auth/logout", s.requireCSRF(s.handleAuthLogout))
 	mux.HandleFunc("GET /auth/magic", s.handleAuthMagic)
+	// Public bootstrap config (only fields safe for anonymous callers).
+	mux.HandleFunc("GET /api/config", s.handlePublicConfig)
 }
 
 type loginRequest struct {
-	Name      string `json:"name"`
-	Email     string `json:"email"`
-	StudentID string `json:"student_id"`
+	Name           string `json:"name"`
+	Email          string `json:"email"`
+	StudentID      string `json:"student_id"`
+	TurnstileToken string `json:"turnstile_token"`
 }
 
 type userPublic struct {
@@ -38,9 +41,17 @@ type userPublic struct {
 	Role  string `json:"role,omitempty"`
 }
 
-// handleAuthLogin creates or reuses a user identity and attaches it to the
-// caller's session. When an email is supplied it also issues a magic link
-// (logged to stderr) so the student can re-attach from another browser.
+// handleAuthLogin reacts in one of three ways depending on SMTP availability:
+//
+//   - SMTP off (no host/from configured): trust-on-first-use. The session is
+//     attached to the user immediately so the student can keep working in
+//     dev or in an aula where mail is not set up.
+//   - SMTP on and the magic link was delivered: the session stays anonymous;
+//     the caller has to click the link in their inbox to actually log in.
+//     This is the path that prevents impersonation when SMTP works.
+//   - SMTP on but the send failed: 503. We do NOT fall back to direct login,
+//     since that would let a deliberate SMTP outage downgrade the security
+//     model.
 func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -69,6 +80,23 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Turnstile is enforced only when a secret is persisted. Cloudflare
+	// network errors fail closed (503) so misconfiguration cannot bypass
+	// the check by accident.
+	secCfg, secErr := loadSecurityConfig(r.Context(), st, s.encKey)
+	if secErr != nil {
+		s.logger.Warn("auth: load security config failed", "err", secErr)
+	}
+	if err := verifyTurnstile(r.Context(), secCfg.TurnstileSecret, req.TurnstileToken, r.RemoteAddr); err != nil {
+		if errors.Is(err, errTurnstileFailed) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "verificación antibot falló", "code": "turnstile_failed"})
+			return
+		}
+		s.logger.Warn("auth: turnstile verify error", "err", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "no fue posible verificar el desafío antibot"})
+		return
+	}
+
 	user, err := s.upsertUser(r.Context(), st, name, email, sid)
 	if err != nil {
 		s.logger.Warn("auth: upsert user failed", "err", err)
@@ -81,38 +109,69 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "no hay cupo para sesiones nuevas"})
 		return
 	}
+
+	// Decide the flow based on SMTP availability. With no email the only
+	// path possible is direct attach (there is nowhere to send a link to).
+	if email == "" {
+		s.attachLoggedInSession(sess, user)
+		s.auditFromContext(r, "user:"+user.ID, "auth.login", sess.ID, "")
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":   true,
+			"user": publicUser(user),
+			"smtp": "off",
+		})
+		return
+	}
+
+	_, err = s.issueMagicLink(r, email)
+	switch {
+	case errors.Is(err, errSMTPNotConfigured):
+		// Graceful degradation: no mail backend means no way to verify, so
+		// the caller is trusted as before. This keeps the simulator usable
+		// in environments without SMTP (local dev, classroom without mail).
+		s.attachLoggedInSession(sess, user)
+		s.auditFromContext(r, "user:"+user.ID, "auth.login", sess.ID, "")
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":   true,
+			"user": publicUser(user),
+			"smtp": "off",
+		})
+
+	case err != nil:
+		// SMTP is configured but the send failed (transient network issue,
+		// bad credentials, etc.). Refuse the login outright — falling back
+		// would let an attacker DoS the mailer to bypass verification.
+		s.logger.Warn("auth: send magic link failed", "email", email, "err", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error": "no se pudo enviar el correo de verificación. Intente de nuevo en unos minutos o contacte al administrador.",
+			"code":  "smtp_send_failed",
+		})
+
+	default:
+		// Mail accepted. The session stays anonymous until the user clicks
+		// the link, which lands on handleAuthMagic and runs SetUserID there.
+		s.auditFromContext(r, "user:"+user.ID, "auth.login_pending", sess.ID, "")
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"smtp":    "on",
+			"pending": true,
+			"email":   email,
+		})
+	}
+}
+
+// attachLoggedInSession runs the side effects that complete a login: bind the
+// session to the user, set the visible alias, kill any other session the
+// user might have left running elsewhere, and broadcast the updated
+// session-info packet so any connected WebSocket sees the new identity.
+//
+// The "one session per user" policy is enforced here so it kicks in from
+// both entry points (direct login when SMTP is off, and magic-link consume).
+func (s *Server) attachLoggedInSession(sess *sessions.Session, user *store.UserRow) {
 	sess.SetUserID(user.ID)
 	sess.SetLabel(user.Name)
+	s.manager.KillOtherUserSessions(user.ID, sess.ID)
 	sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
-
-	magicSent := false
-	magicFallback := ""
-	if email != "" {
-		url, sent, err := s.issueMagicLink(r, email)
-		if err != nil {
-			s.logger.Warn("auth: issue magic link failed", "email", email, "err", err)
-		} else {
-			magicSent = sent
-			if !sent {
-				// SMTP was unavailable or off — expose the link so the
-				// frontend can show a toast with a copyable URL instead of
-				// leaving the user stuck.
-				magicFallback = url
-			}
-		}
-	}
-
-	s.auditFromContext(r, "user:"+user.ID, "auth.login", sess.ID, "")
-
-	resp := map[string]any{
-		"ok":         true,
-		"user":       publicUser(user),
-		"magic_sent": magicSent,
-	}
-	if magicFallback != "" {
-		resp["magic_link"] = magicFallback
-	}
-	writeJSON(w, http.StatusOK, resp)
 }
 
 // upsertUser dedupes by email, then by student_id, otherwise creates a fresh
@@ -161,19 +220,20 @@ func (s *Server) upsertUser(ctx context.Context, st *store.Store, name, email, s
 }
 
 // issueMagicLink mints a token, persists it, and attempts to deliver the
-// resulting URL by email. Returns:
+// resulting URL by email. The link is always logged to stderr so an operator
+// can recover it from journalctl even when SMTP, the UI and the network all
+// fail at once.
 //
-//   - url:  the magic-link URL (always populated when err is nil)
-//   - sent: true when SMTP accepted the message; false when SMTP is not
-//     configured or the send failed (caller surfaces the URL as fallback)
-//   - err:  only set when the token could not be persisted at all
-//
-// The link is always logged to stderr so a desperate operator can recover it
-// from journalctl even when SMTP, the UI and the network all fail at once.
-func (s *Server) issueMagicLink(r *http.Request, email string) (string, bool, error) {
+// Returns:
+//   - url: the magic-link URL (always populated when the token was persisted)
+//   - err: nil when the link was delivered by mail; errSMTPNotConfigured when
+//     no SMTP backend is set up; any other error means the link was minted
+//     but the send failed (configured-but-broken — caller should treat as a
+//     hard error rather than degrade silently).
+func (s *Server) issueMagicLink(r *http.Request, email string) (string, error) {
 	st := s.manager.Store()
 	if st == nil {
-		return "", false, errors.New("store unavailable")
+		return "", errors.New("store unavailable")
 	}
 	token := newAuthID() + newAuthID()
 	now := time.Now()
@@ -183,7 +243,7 @@ func (s *Server) issueMagicLink(r *http.Request, email string) (string, bool, er
 		CreatedAt: now.Unix(),
 		ExpiresAt: now.Add(magicLinkTTL).Unix(),
 	}); err != nil {
-		return "", false, err
+		return "", err
 	}
 	scheme := "http"
 	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
@@ -193,12 +253,9 @@ func (s *Server) issueMagicLink(r *http.Request, email string) (string, bool, er
 	s.logger.Info("magic link", "email", email, "url", url, "expires_in", magicLinkTTL.String())
 
 	if err := s.sendMagicLinkEmail(r.Context(), email, url); err != nil {
-		if !errors.Is(err, errSMTPNotConfigured) {
-			s.logger.Warn("smtp: send magic link failed", "email", email, "err", err)
-		}
-		return url, false, nil
+		return url, err
 	}
-	return url, true, nil
+	return url, nil
 }
 
 // handleAuthMe reports the user attached to the caller's session, if any.
@@ -313,9 +370,7 @@ func (s *Server) handleAuthMagic(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no hay cupo para sesiones nuevas", http.StatusServiceUnavailable)
 		return
 	}
-	sess.SetUserID(user.ID)
-	sess.SetLabel(user.Name)
-	sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
+	s.attachLoggedInSession(sess, user)
 	s.auditFromContext(r, "user:"+user.ID, "auth.magic", sess.ID, "")
 
 	http.Redirect(w, r, "/", http.StatusFound)

@@ -31,8 +31,8 @@ withDefaults(
   flex-direction: column;
 }
 
-.card--surface-1 { background: rgba(13, 18, 24, 0.65); }
-.card--surface-2 { background: rgba(19, 26, 34, 0.85); }
+.card--surface-1 { background: var(--surface-1); }
+.card--surface-2 { background: var(--surface-2); }
 .card--surface-3 { background: var(--surface-3); }
 
 .card--elev-1 { box-shadow: var(--shadow-elevation-1); }
@@ -51,7 +51,7 @@ withDefaults(
 }
 
 .card__title {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 12px;
   letter-spacing: 2px;
   text-transform: uppercase;

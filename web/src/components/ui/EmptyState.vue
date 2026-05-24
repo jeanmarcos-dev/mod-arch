@@ -41,7 +41,7 @@ defineProps<{
 }
 
 .empty__title {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 14px;
   letter-spacing: 2px;
   text-transform: uppercase;

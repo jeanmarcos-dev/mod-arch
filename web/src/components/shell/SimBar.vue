@@ -28,6 +28,7 @@ import ProgramPicker from '../ProgramPicker.vue';
 import ShareModal from '../ShareModal.vue';
 import Term from '../glossary/Term.vue';
 import SimStatusRow from './SimStatusRow.vue';
+import CoreLegend from './CoreLegend.vue';
 import HandRaiseBadge from './HandRaiseBadge.vue';
 
 const cpu = useCpuStore();
@@ -350,6 +351,7 @@ function dockHeaderDblClick() {
         </div>
       </div>
 
+      <CoreLegend class="sim-bar__row sim-bar__row--legend" :readonly="viewer" />
       <SimStatusRow class="sim-bar__row sim-bar__row--status" />
     </section>
   </Teleport>
@@ -395,7 +397,7 @@ function dockHeaderDblClick() {
 .sim-bar--dragging .sim-bar__handle { cursor: grabbing; }
 
 .sim-bar__title {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   letter-spacing: 3px;
   color: var(--amber);
   flex: 1;
@@ -468,8 +470,16 @@ function dockHeaderDblClick() {
   border-top: 1px dashed var(--border);
 }
 
+/* Core legend sits between controls and status. Its own component handles
+   the "only render with ≥2 cores" gate, so when hidden no border accumulates
+   here either — keep it borderless. */
+.sim-bar__row--legend {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
 .sim-bar__brand {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   letter-spacing: 3px;
   color: var(--amber);
   text-shadow: var(--shadow-glow-amber);

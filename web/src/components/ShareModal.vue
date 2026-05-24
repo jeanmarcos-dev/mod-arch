@@ -125,7 +125,7 @@ function deactivate() {
 }
 
 .modal-title {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 13px;
   letter-spacing: 3px;
   color: var(--amber);
@@ -190,7 +190,7 @@ function deactivate() {
 
 .link-input {
   flex: 1;
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--surface-overlay);
   border: 1px solid var(--border);
   color: var(--cyan);
   padding: 8px 10px;

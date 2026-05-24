@@ -53,7 +53,7 @@ onMounted(async () => {
   font-family: 'JetBrains Mono', monospace;
 }
 .viewer-entry__brand {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   letter-spacing: 4px;
   color: var(--amber);
   text-shadow: var(--shadow-glow-amber);

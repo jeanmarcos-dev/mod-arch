@@ -174,19 +174,29 @@ export interface LogEntry {
 }
 
 const CORES_FILTER_KEY = 'modos-cpu:cores-filter:v1';
+const CORES_FILTER_TOUCHED_KEY = 'modos-cpu:cores-filter-touched:v1';
 
+// Returns the persisted filter, or an empty Set when the user has never made
+// a manual choice. An empty initial Set is the signal for
+// reconcileFilterWithCores to auto-populate with every core present in the
+// first snapshot — so a fresh session with N cores shows N cores by default.
 function loadCoresFilter(): Set<number> {
-  if (typeof window === 'undefined') return new Set([0]);
+  if (typeof window === 'undefined') return new Set();
   try {
     const raw = window.localStorage.getItem(CORES_FILTER_KEY);
-    if (!raw) return new Set([0]);
+    if (!raw) return new Set();
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
       const ids = parsed.filter((x): x is number => typeof x === 'number' && x >= 0);
       if (ids.length > 0) return new Set(ids);
     }
-  } catch { /* corrupt entry, fall back to default */ }
-  return new Set([0]);
+  } catch { /* corrupt entry, fall back to empty */ }
+  return new Set();
+}
+
+function loadCoresFilterTouched(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem(CORES_FILTER_TOUCHED_KEY) === '1';
 }
 
 export const REGISTERS = [
@@ -245,6 +255,12 @@ export const useCpuStore = defineStore('cpu', () => {
   const cores = ref<CoreInfo[]>([]);
   const numCores = ref(1);
   const selectedCoreIds = ref<Set<number>>(loadCoresFilter());
+  // Tracks whether the user has explicitly chosen which cores to view. When
+  // false (fresh install or post-clear), reconcileFilterWithCores auto-adds
+  // every core present in the snapshot so multicore demos are visible without
+  // the user discovering the C0/C1/... toggles. Flips to true on the first
+  // call to toggle/selectAll/selectOnly/setVisibleCores.
+  const userTouchedCoresFilter = ref<boolean>(loadCoresFilterTouched());
   const mutexes = ref<MutexState[]>([]);
   const semaphores = ref<SemaphoreState[]>([]);
 
@@ -319,12 +335,29 @@ export const useCpuStore = defineStore('cpu', () => {
     } catch { /* quota / private mode → keep in memory only */ }
   }
 
-  function commitFilter(next: Set<number>) {
+  function persistFilterTouched() {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(CORES_FILTER_TOUCHED_KEY, '1');
+    } catch { /* ignore */ }
+  }
+
+  // Marks the filter as user-controlled so future snapshots stop auto-adding
+  // newly-discovered cores. Called from every entry point a user can trigger:
+  // toggle/selectAll/selectOnly/setVisibleCores.
+  function markUserTouchedFilter() {
+    if (userTouchedCoresFilter.value) return;
+    userTouchedCoresFilter.value = true;
+    persistFilterTouched();
+  }
+
+  function commitFilter(next: Set<number>, opts: { userInitiated?: boolean } = {}) {
     // Never accept an empty set — fall back to {focus} or {0}.
     if (next.size === 0) next = new Set([selectedCoreId.value || 0]);
     selectedCoreIds.value = next;
     mirrorFocus();
     persistCoresFilter();
+    if (opts.userInitiated) markUserTouchedFilter();
   }
 
   function toggleCoreSelection(id: number) {
@@ -335,16 +368,16 @@ export const useCpuStore = defineStore('cpu', () => {
     } else {
       next.add(id);
     }
-    commitFilter(next);
+    commitFilter(next, { userInitiated: true });
   }
 
   function selectAllCores() {
     const ids = cores.value.length > 0 ? cores.value.map(c => c.id) : [0];
-    commitFilter(new Set(ids));
+    commitFilter(new Set(ids), { userInitiated: true });
   }
 
   function selectOnlyCore(id: number) {
-    commitFilter(new Set([id]));
+    commitFilter(new Set([id]), { userInitiated: true });
   }
 
   // Replace the entire visible-cores set in one shot. Used by the viewer
@@ -352,9 +385,11 @@ export const useCpuStore = defineStore('cpu', () => {
   // transient empty state that clear()+add() would create, and so the
   // mutation goes through commitFilter exactly like every other path
   // (consistent reactivity, persistence, and mirrorFocus side effects).
+  // Presence-driven calls do not count as a user-initiated decision, so the
+  // host's filter stays in auto-populate mode if the viewer never touched it.
   function setVisibleCores(ids: number[]) {
     if (!Array.isArray(ids) || ids.length === 0) return;
-    commitFilter(new Set(ids));
+    commitFilter(new Set(ids), { userInitiated: true });
   }
 
   // Back-compat alias. Old code (and the alias kept on the public store
@@ -365,14 +400,21 @@ export const useCpuStore = defineStore('cpu', () => {
 
   // Reconcile the filter with the available cores after a snapshot. Removes
   // ids that no longer exist (e.g. user just shrank num_cores from 4 to 2)
-  // and, if that empties the set, repopulates it with everything visible so
-  // the UI never goes blank after a SetNumCores call.
+  // and, when the user has not yet made an explicit choice, ALSO adds every
+  // available core to the filter so multicore demos render fully on first
+  // load. If the user has touched the filter (userTouchedCoresFilter=true),
+  // their selection is preserved verbatim and only invalid ids are dropped.
   function reconcileFilterWithCores(available: number[]) {
     if (available.length === 0) return;
     const allowed = new Set(available);
     const next = new Set<number>();
     for (const id of selectedCoreIds.value) {
       if (allowed.has(id)) next.add(id);
+    }
+    if (!userTouchedCoresFilter.value) {
+      // Auto-populate: every available core becomes visible, regardless of
+      // what was persisted. This is what the user expects on a fresh install.
+      for (const id of allowed) next.add(id);
     }
     if (next.size === 0) for (const id of allowed) next.add(id);
     if (next.size !== selectedCoreIds.value.size
@@ -549,6 +591,17 @@ export const useCpuStore = defineStore('cpu', () => {
   }
 
   function applyEvent(ev: CpuEvent) {
+    // The tutor store listens via a window CustomEvent so cpu.ts does not
+    // grow a hard dependency on it. Any payload typed as 'tutor_answer' is
+    // forwarded verbatim; the tutor handler decides what to do with it.
+    if ((ev as { type?: string }).type === 'tutor_answer') {
+      window.dispatchEvent(new CustomEvent('modos:tutor-answer', { detail: ev }));
+      return;
+    }
+    if ((ev as { type?: string }).type === 'tutor_progress') {
+      window.dispatchEvent(new CustomEvent('modos:tutor-progress', { detail: ev }));
+      return;
+    }
     switch (ev.type) {
       case 'snapshot':
         if (ev.cores) cores.value = ev.cores;
@@ -615,8 +668,9 @@ export const useCpuStore = defineStore('cpu', () => {
         const nextEIP = ev.eip + ev.bytes.length;
         c.regs.EIP = nextEIP;
         markCoreActive(c, ev.core_id);
-        const prefix = numCores.value > 1 ? `[C${ev.core_id}] ` : '';
-        pushLog(`${prefix}[${ev.eip.toString(16).padStart(6, '0')}]  ${ev.mnemonic}`, 'amber', ev.core_id);
+        // EventsLog renders the per-core chip from coreId so the text itself
+        // stays clean and identical across single- and multi-core sessions.
+        pushLog(`[${ev.eip.toString(16).padStart(6, '0')}]  ${ev.mnemonic}`, 'amber', ev.core_id);
         if (isSelected(ev.core_id)) regs.EIP = nextEIP;
         break;
       }
@@ -626,8 +680,7 @@ export const useCpuStore = defineStore('cpu', () => {
       case 'mode_switch': {
         const c = ensureCoreSlot(ev.core_id);
         c.mode = ev.to;
-        const prefix = numCores.value > 1 ? `[C${ev.core_id}] ` : '';
-        pushLog(`${prefix}▸ mode ${ev.from === 3 ? 'USER' : 'KERNEL'} → ${ev.to === 3 ? 'USER' : 'KERNEL'} (${ev.cause})`, 'red', ev.core_id);
+        pushLog(`▸ mode ${ev.from === 3 ? 'USER' : 'KERNEL'} → ${ev.to === 3 ? 'USER' : 'KERNEL'} (${ev.cause})`, 'red', ev.core_id);
         if (isSelected(ev.core_id)) mode.value = ev.to;
         // IRET pops the interrupt frame; the panel needs to clear that core
         // so it goes back to "— sin handler activo —". Defer the mutation
@@ -645,8 +698,7 @@ export const useCpuStore = defineStore('cpu', () => {
         break;
       }
       case 'irq_fire': {
-        const prefix = numCores.value > 1 ? `[C${ev.core_id}] ` : '';
-        pushLog(`${prefix}◉ IRQ 0x${ev.vector.toString(16).padStart(2, '0')} (${ev.source})`, 'yellow', ev.core_id);
+        pushLog(`◉ IRQ 0x${ev.vector.toString(16).padStart(2, '0')} (${ev.source})`, 'yellow', ev.core_id);
         lastFiredHandlerByVector.value = {
           ...lastFiredHandlerByVector.value,
           [ev.vector]: {
@@ -675,8 +727,7 @@ export const useCpuStore = defineStore('cpu', () => {
         break;
       }
       case 'page_fault': {
-        const prefix = numCores.value > 1 ? `[C${ev.core_id}] ` : '';
-        pushLog(`${prefix}✗ PAGE FAULT @ 0x${ev.addr.toString(16)} (need ${ev.perm_needed} in PL${ev.mode})`, 'red', ev.core_id);
+        pushLog(`✗ PAGE FAULT @ 0x${ev.addr.toString(16)} (need ${ev.perm_needed} in PL${ev.mode})`, 'red', ev.core_id);
         faultShake.value = true;
         setTimeout(() => { faultShake.value = false; }, 500);
         break;
@@ -684,8 +735,7 @@ export const useCpuStore = defineStore('cpu', () => {
       case 'halt': {
         const c = ensureCoreSlot(ev.core_id);
         c.halted = true;
-        const prefix = numCores.value > 1 ? `[C${ev.core_id}] ` : '';
-        pushLog(`${prefix}▸ HALT`, 'red', ev.core_id);
+        pushLog(`▸ HALT`, 'red', ev.core_id);
         if (isSelected(ev.core_id)) halted.value = true;
         break;
       }
@@ -860,14 +910,14 @@ export const useCpuStore = defineStore('cpu', () => {
         const c = ensureCoreSlot(ev.core_id);
         c.current_pid = ev.pid;
         markCoreActive(c, ev.core_id);
-        pushLog(`◈ core ${ev.core_id} ← P${ev.pid}`, 'amber');
+        pushLog(`◈ core ${ev.core_id} ← P${ev.pid}`, 'amber', ev.core_id);
         if (isSelected(ev.core_id)) currentPID.value = ev.pid;
         break;
       }
       case 'core_release': {
         const c = ensureCoreSlot(ev.core_id);
         c.current_pid = 0;
-        pushLog(`◇ core ${ev.core_id} ↛ P${ev.pid}${ev.reason ? ' (' + ev.reason + ')' : ''}`, 'amber');
+        pushLog(`◇ core ${ev.core_id} ↛ P${ev.pid}${ev.reason ? ' (' + ev.reason + ')' : ''}`, 'amber', ev.core_id);
         if (isSelected(ev.core_id)) currentPID.value = 0;
         break;
       }
@@ -1103,6 +1153,9 @@ export const useCpuStore = defineStore('cpu', () => {
     lastPresence, handRaiseSignal, lastHandRaiseLabel, ownerGlossaryHover,
     connect, load, step, run, pause, reset, clearLog, setQuantum, setSpeed, pushKey, openGlossary,
     share, unshare, setAlias, setNumCores, sendPresence, sendFocus, raiseHand, sendPointer, sendPointerOff, sendClick, sendGlossaryHover, sendGlossaryHoverOff,
+    // Tutor: keep the wire shape private to this store so consumers do not
+    // have to know the WS command name.
+    sendTutorAsk: (question: string, requestId: string) => send({ cmd: 'ask', question, request_id: requestId }),
     // Test seam: vitest fakes the WebSocket by dispatching events directly
     // through this entry point. Production code uses the real ws.onmessage.
     __applyEvent: applyEvent,

@@ -177,7 +177,7 @@ const filtered = computed<T[]>(() => {
 
 .dtable__search {
   flex: 1;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--surface-overlay);
   border: 1px solid var(--border);
   color: var(--text);
   font-family: inherit;

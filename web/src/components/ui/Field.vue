@@ -62,7 +62,7 @@ const fieldId = props.id || autoId;
 .field :deep(select) {
   font-family: inherit;
   font-size: 14px;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--surface-overlay);
   color: var(--text);
   border: 1px solid var(--border);
   padding: 8px 10px;

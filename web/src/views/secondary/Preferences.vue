@@ -15,20 +15,26 @@ const themes: ThemeOption[] = [
   {
     id: 'amber',
     label: 'CRT ámbar',
-    desc: 'Fósforo ámbar clásico. El tema por defecto, evocando las terminales VT220.',
+    desc: 'Fósforo ámbar clásico estilo VT220.',
     swatch: '#ffb547',
   },
   {
     id: 'green',
     label: 'CRT verde',
-    desc: 'Fósforo verde estilo VT100. Misma estética CRT, paleta más fría.',
+    desc: 'Fósforo verde estilo VT100.',
     swatch: '#7fff95',
   },
   {
-    id: 'modern',
-    label: 'Oscuro moderno',
-    desc: 'Paleta azul-gris plana y tipografía sans-serif. Pensado para proyección diurna en aulas claras.',
-    swatch: '#7fa4ff',
+    id: 'dark',
+    label: 'Oscuro estándar',
+    desc: 'Paleta neutral estilo IDE para sesiones largas.',
+    swatch: '#58a6ff',
+  },
+  {
+    id: 'accesible',
+    label: 'Claro accesible',
+    desc: 'Alto contraste con tipografía Atkinson Hyperlegible.',
+    swatch: '#0049b0',
   },
 ];
 </script>
@@ -38,9 +44,9 @@ const themes: ThemeOption[] = [
     <Card title="Tema visual" :elevation="1" class="prefs__card">
       <p class="prefs__hint">
         El tema cambia la paleta del simulador completo: paneles, narradores,
-        gráficos y la SimBar. Los dos temas CRT mantienen las tipografías
-        retro; el oscuro moderno usa sans-serif para proyectar en clases con
-        luz fuerte.
+        gráficos y la SimBar. Los dos temas CRT conservan la tipografía retro;
+        el oscuro estándar usa sans-serif para sesiones largas y el claro
+        accesible está pensado para aulas con luz natural y baja visión.
       </p>
       <div class="prefs__options">
         <button
@@ -86,6 +92,7 @@ const themes: ThemeOption[] = [
         <span>Iniciar contraído (sólo íconos)</span>
       </label>
     </Card>
+
   </div>
 </template>
 

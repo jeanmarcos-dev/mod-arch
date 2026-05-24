@@ -34,13 +34,13 @@ const route = useRoute();
   width: min(100%, 480px);
   text-align: center;
   border: 1px solid var(--border, #3a3a3a);
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--surface-overlay-strong);
   padding: 36px 28px;
   font-family: 'JetBrains Mono', monospace;
 }
 
 h1 {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 64px;
   color: var(--amber, #ffb347);
   letter-spacing: 12px;

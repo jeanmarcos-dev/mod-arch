@@ -194,6 +194,17 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /admin/api/smtp", s.requireAdminAPI(s.requireCSRF(s.handleAdminSetSMTP)))
 	mux.HandleFunc("POST /admin/api/smtp/test", s.requireAdminAPI(s.requireCSRF(s.handleAdminTestSMTP)))
 
+	mux.HandleFunc("GET /admin/api/tutor/metrics", s.requireModRole(s.handleAdminTutorMetrics))
+
+	// Tutor config: admin-only (exposes API key presence).
+	mux.HandleFunc("GET /admin/api/tutor/config", s.requireAdminAPI(s.handleAdminTutorConfigGet))
+	mux.HandleFunc("PUT /admin/api/tutor/config", s.requireAdminAPI(s.requireCSRF(s.handleAdminTutorConfigPut)))
+	mux.HandleFunc("POST /admin/api/tutor/reload", s.requireAdminAPI(s.requireCSRF(s.handleAdminTutorReload)))
+
+	// Security config: admin-only (encrypted Turnstile secret).
+	mux.HandleFunc("GET /admin/api/security/config", s.requireAdminAPI(s.handleAdminSecurityGet))
+	mux.HandleFunc("PUT /admin/api/security/config", s.requireAdminAPI(s.requireCSRF(s.handleAdminSecurityPut)))
+
 	mux.HandleFunc("GET /admin", s.handleAdminSPA)
 	mux.HandleFunc("GET /admin/", s.handleAdminSPA)
 }

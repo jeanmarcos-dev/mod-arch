@@ -316,7 +316,7 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
 .procs-page__hero { display: flex; flex-direction: column; gap: var(--space-2); }
 
 .procs-page__title {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 18px;
   letter-spacing: 5px;
   color: var(--amber);
@@ -397,7 +397,7 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
 }
 
 .cpu-strip__label {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 11px;
   letter-spacing: 3px;
   color: var(--text-dim);
@@ -489,7 +489,7 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
 }
 
 .pcb-card__pid {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 14px;
   letter-spacing: 2px;
   color: var(--amber);
@@ -588,7 +588,7 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
 }
 
 .procs-page__panel-head h3 {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 12px;
   letter-spacing: 3px;
   color: var(--amber);

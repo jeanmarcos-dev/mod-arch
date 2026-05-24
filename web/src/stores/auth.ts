@@ -15,16 +15,23 @@ export interface LoginPayload {
   name: string;
   email?: string;
   student_id?: string;
+  turnstile_token?: string;
 }
+
+// LoginOutcome describes the server's response shape so the Login view can
+// pick the right next step. Three legitimate states:
+//   - "direct":  SMTP off, the session was attached immediately, user is set.
+//   - "pending": SMTP on, an email was sent; the caller must click the link.
+//   - "error":   server refused (turnstile, send failed, bad input).
+export type LoginOutcome = 'direct' | 'pending' | 'error';
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<AuthUser | null>(null);
   const lastError = ref<string | null>(null);
-  const magicSent = ref(false);
-  // magicLink is populated when the server could not deliver the link by
-  // email (SMTP off / failed). The login page surfaces it as a copyable URL
-  // so the student is not stranded.
-  const magicLink = ref<string | null>(null);
+  // pendingEmail holds the address the magic link was just sent to. The
+  // Login view uses it to render the "we sent you a link" screen with the
+  // recipient highlighted.
+  const pendingEmail = ref<string | null>(null);
 
   async function fetchMe(): Promise<boolean> {
     try {
@@ -42,23 +49,28 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function login(payload: LoginPayload): Promise<boolean> {
+  async function login(payload: LoginPayload): Promise<LoginOutcome> {
     lastError.value = null;
-    magicSent.value = false;
-    magicLink.value = null;
+    pendingEmail.value = null;
     try {
-      const data = await apiJSON<{ user: AuthUser; magic_sent: boolean; magic_link?: string }>(
-        'POST',
-        '/api/auth/login',
-        payload,
-      );
-      user.value = data.user;
-      magicSent.value = Boolean(data.magic_sent);
-      magicLink.value = data.magic_link ?? null;
-      return true;
+      const data = await apiJSON<{
+        ok: boolean;
+        smtp: 'on' | 'off';
+        pending?: boolean;
+        email?: string;
+        user?: AuthUser;
+      }>('POST', '/api/auth/login', payload);
+      if (data.smtp === 'on' && data.pending) {
+        pendingEmail.value = data.email ?? payload.email ?? null;
+        return 'pending';
+      }
+      if (data.user) {
+        user.value = data.user;
+      }
+      return 'direct';
     } catch (err) {
       lastError.value = (err as Error).message;
-      return false;
+      return 'error';
     }
   }
 
@@ -67,10 +79,9 @@ export const useAuthStore = defineStore('auth', () => {
       await apiFetch('/api/auth/logout', { method: 'POST' });
     } finally {
       user.value = null;
-      magicSent.value = false;
-      magicLink.value = null;
+      pendingEmail.value = null;
     }
   }
 
-  return { user, lastError, magicSent, magicLink, fetchMe, login, logout };
+  return { user, lastError, pendingEmail, fetchMe, login, logout };
 });

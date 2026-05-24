@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { Gauge, Monitor, Users, Mail, Lock, Send, ScrollText, ExternalLink, LogOut, ShieldUser } from '@lucide/vue';
+import { Gauge, Monitor, Users, Mail, Lock, Send, ScrollText, ExternalLink, LogOut, ShieldUser, BotMessageSquare, SlidersHorizontal, ShieldCheck } from '@lucide/vue';
 import { useAdminStore } from '../stores/admin';
 import { useToastStore } from '../stores/toast';
 import Sidebar from '../components/shell/Sidebar.vue';
 import Topbar from '../components/shell/Topbar.vue';
+import ThemeSwitcher from '../components/shell/ThemeSwitcher.vue';
 import Toast from '../components/ui/Toast.vue';
 
 const admin = useAdminStore();
@@ -24,12 +25,17 @@ const items = computed(() => {
     { to: '/admin/accesos', label: 'Accesos', icon: Lock, group: 'ADMINISTRACIÓN' },
     { to: '/admin/smtp', label: 'Correo', icon: Send, group: 'ADMINISTRACIÓN' },
     { to: '/admin/auditoria', label: 'Auditoría', icon: ScrollText, group: 'ADMINISTRACIÓN' },
+    { to: '/admin/tutor', label: 'Tutor', icon: BotMessageSquare, group: 'ADMINISTRACIÓN' },
+    { to: '/admin/tutor/config', label: 'Tutor (config)', icon: SlidersHorizontal, group: 'ADMINISTRACIÓN' },
+    { to: '/admin/seguridad', label: 'Seguridad', icon: ShieldCheck, group: 'ADMINISTRACIÓN' },
   ];
   if (admin.isModerator) {
     return baseAll.filter(item =>
       item.to !== '/admin/invitaciones' &&
       item.to !== '/admin/accesos' &&
-      item.to !== '/admin/smtp'
+      item.to !== '/admin/smtp' &&
+      item.to !== '/admin/tutor/config' &&
+      item.to !== '/admin/seguridad'
     );
   }
   return baseAll;
@@ -66,6 +72,7 @@ onUnmounted(() => {
     <div class="admin-shell__main">
       <Topbar>
         <template #actions>
+          <ThemeSwitcher />
           <RouterLink to="/" class="admin-shell__link" title="Volver al simulador">
             <ExternalLink :size="14" :stroke-width="2" />
             <span>Simulador</span>

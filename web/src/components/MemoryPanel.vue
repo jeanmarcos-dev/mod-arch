@@ -193,7 +193,7 @@ const currentESP = computed(() => cpu.regs.ESP >>> 0);
 }
 
 .addr-input {
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--surface-overlay);
   border: 1px solid var(--border);
   color: var(--amber);
   padding: 4px 8px;
@@ -208,7 +208,7 @@ const currentESP = computed(() => cpu.regs.ESP >>> 0);
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   line-height: 1.4;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--surface-overlay);
   border: 1px solid var(--border);
   padding: 8px 10px;
   margin: 0;

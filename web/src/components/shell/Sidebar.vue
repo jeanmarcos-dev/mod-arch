@@ -413,7 +413,7 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
 .sidebar__backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--surface-overlay-strong);
   z-index: calc(var(--z-overlay) - 1);
   animation: sidebar-backdrop-in var(--transition-fast) ease-out;
 }

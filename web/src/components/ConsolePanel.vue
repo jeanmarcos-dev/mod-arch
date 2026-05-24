@@ -137,13 +137,13 @@ function focusInput() {
   flex: 1;
   min-height: 110px;
   overflow-y: auto;
-  background: #050808;
-  border: 1px solid var(--border);
+  background: var(--terminal-bg);
+  border: 1px solid var(--terminal-border);
   padding: 8px 10px;
   font-family: 'VT323', monospace;
   font-size: 20px;
   line-height: 1.2;
-  color: var(--green);
+  color: var(--terminal-fg);
   white-space: pre-wrap;
   word-break: break-all;
   margin: 0;
@@ -189,9 +189,9 @@ function focusInput() {
 }
 
 .key-input {
-  background: #050808;
-  border: 1px solid var(--border);
-  color: var(--green);
+  background: var(--terminal-bg);
+  border: 1px solid var(--terminal-border);
+  color: var(--terminal-fg);
   padding: 6px 10px;
   font-family: 'VT323', monospace;
   font-size: 18px;

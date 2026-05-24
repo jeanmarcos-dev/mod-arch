@@ -106,6 +106,16 @@ type Command struct {
 	// tooltip; multiple matches all light up, which doubles as a "this concept
 	// appears here, here and here" pedagogical hint.
 	Term string `json:"term,omitempty"`
+
+	// Tutor (cmd="ask"). Question is the student's free-form question; the
+	// server merges it with retrieved passages and the simulator snapshot
+	// before calling the LLM. RequestID is echoed back in the response so
+	// the UI can pair the answer with the pending input. TutorMode is
+	// "direct" (default) or "socratic" — the orchestrator swaps the system
+	// prompt to a question-driven variant in socratic mode.
+	Question  string `json:"question,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
+	TutorMode string `json:"tutor_mode,omitempty"`
 }
 
 // FocusInput mirrors the wire shape the owner sends inside a presence
@@ -283,9 +293,12 @@ func (s *Server) wsWriteLoop(ctx context.Context, conn *websocket.Conn, c *sim.C
 // viewerSafeCommands lists the read-only commands a viewer can issue. Anything
 // else triggers an error and is not executed. hand_raise is viewer-only by
 // design: the owner has no need to "raise the hand" to themselves.
+// "ask" is allowed for viewers too: a student watching another's session can
+// still ask the tutor questions without taking control.
 var viewerSafeCommands = map[string]bool{
 	"snapshot":   true,
 	"hand_raise": true,
+	"ask":        true,
 }
 
 // ownerOnlyCommands lists commands that only the owner may issue. presence is
@@ -374,6 +387,8 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 		s.handleOwnerGlossaryHover(cmd, sess)
 	case "glossary_hover_off":
 		s.handleOwnerGlossaryHoverOff(sess)
+	case "ask":
+		s.handleTutorAsk(cmd, sess, c)
 	default:
 		c.Send <- map[string]any{"type": "error", "message": "comando desconocido: " + cmd.Cmd}
 	}

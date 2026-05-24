@@ -113,7 +113,7 @@ void GLOSSARY_ENTRIES;
 }
 
 .modal-head h2 {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 18px;
   color: var(--amber);
   letter-spacing: 4px;
@@ -126,7 +126,7 @@ void GLOSSARY_ENTRIES;
 
 .search {
   flex: 1;
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--surface-overlay);
   border: 1px solid var(--border-strong);
   color: var(--text);
   padding: 8px 12px;
@@ -160,7 +160,7 @@ void GLOSSARY_ENTRIES;
 }
 
 .cat-title {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 13px;
   color: var(--cyan);
   letter-spacing: 3px;
@@ -219,7 +219,7 @@ void GLOSSARY_ENTRIES;
 .entry-detail {
   margin-top: 8px;
   padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--surface-overlay);
   border-left: 2px solid var(--cyan);
   color: var(--text);
   font-size: 13px;

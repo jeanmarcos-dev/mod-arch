@@ -565,6 +565,39 @@ func (m *Manager) DeactivateShare(sess *Session) {
 	}
 }
 
+// KillOtherUserSessions implements the "one session per logged-in user"
+// policy: when a user logs in and lands on session keepID, any other live
+// session attached to that same userID is terminated. This avoids a user
+// accidentally running two simulators in parallel from two browsers and
+// keeps the mental model "one student, one OS".
+//
+// userID must be non-empty (anonymous sessions are not collapsed). Returns
+// the IDs that were killed for audit purposes.
+func (m *Manager) KillOtherUserSessions(userID, keepID string) []string {
+	if userID == "" {
+		return nil
+	}
+	m.mu.RLock()
+	victims := make([]string, 0)
+	for id, sess := range m.sessions {
+		if id == keepID {
+			continue
+		}
+		if sess.UserID() == userID {
+			victims = append(victims, id)
+		}
+	}
+	m.mu.RUnlock()
+	for _, id := range victims {
+		m.Kill(id)
+	}
+	if len(victims) > 0 {
+		m.logger.Info("user session policy",
+			"user", userID, "kept", keepID, "killed", len(victims))
+	}
+	return victims
+}
+
 // Kill removes a Session and stops its Simulator.
 func (m *Manager) Kill(id string) {
 	m.mu.Lock()

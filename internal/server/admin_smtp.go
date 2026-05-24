@@ -355,9 +355,13 @@ func (s *Server) handleAdminTestSMTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // sendMagicLinkEmail wraps loadSMTPSender + Send with the canonical magic-link
-// copy. Returns nil on success and (sender==nil, err==nil) when SMTP is not
-// configured — callers fall back to inline link delivery in that case.
+// copy. Returns errSMTPNotConfigured when no mail backend is set up so callers
+// can degrade gracefully, and any other error when SMTP is configured but the
+// delivery failed (treated as a hard failure by handleAuthLogin).
 func (s *Server) sendMagicLinkEmail(ctx context.Context, to, url string) error {
+	if sendMagicLinkEmailHook != nil {
+		return sendMagicLinkEmailHook(ctx, to, url)
+	}
 	sender, err := s.loadSMTPSender(ctx)
 	if err != nil {
 		return err
@@ -371,5 +375,10 @@ func (s *Server) sendMagicLinkEmail(ctx context.Context, to, url string) error {
 		"<p><a href=\"" + url + "\">" + url + "</a></p>"
 	return sender.Send(ctx, to, subject, htmlBody, textBody)
 }
+
+// sendMagicLinkEmailHook lets tests bypass real SMTP. Production never sets
+// it; the auth_test suite swaps it in to exercise the success path without
+// standing up a real mail server.
+var sendMagicLinkEmailHook func(ctx context.Context, to, url string) error
 
 var errSMTPNotConfigured = errors.New("smtp not configured")

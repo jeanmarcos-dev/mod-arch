@@ -21,7 +21,12 @@ var schemaSQL string
 // v3: users.role column ('student' | 'moderator' | 'admin').
 // v4: users.deleted_at column + email/student_id uniqueness via partial
 //     indexes (so a soft-deleted row releases its identifiers).
-const SchemaVersion = 4
+// v5: rag_chunks, rag_query_cache, rag_answer_cache for the tutor's RAG
+//     pipeline. All three are additive; no programmatic step needed beyond
+//     bumping user_version.
+// v6: tutor_metrics — one row per Ask() with latency, tools used, cache
+//     hits. Drives the admin dashboard.
+const SchemaVersion = 6
 
 // Store is the database handle. Methods on Store are safe for concurrent use:
 // SQLite serializes writes internally and the connection pool handles reads.

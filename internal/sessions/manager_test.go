@@ -386,3 +386,47 @@ func TestSession_PresenceKeepsExplicitTimestamp(t *testing.T) {
 		t.Errorf("UpdatedAt = %v, want %v", got, stamp)
 	}
 }
+
+func TestManager_KillOtherUserSessions(t *testing.T) {
+	m := NewManager(Config{MaxPublic: 10})
+
+	// Two sessions belong to user A; one to user B; one anonymous. After
+	// enforcement of A → keep=a2, only a2, b1 and anon survive. The policy
+	// must never touch sessions belonging to another user or anonymous ones.
+	a1, _ := m.Create(ModeFull)
+	a2, _ := m.Create(ModeFull)
+	b1, _ := m.Create(ModeFull)
+	anon, _ := m.Create(ModeFull)
+	a1.SetUserID("user-A")
+	a2.SetUserID("user-A")
+	b1.SetUserID("user-B")
+
+	killed := m.KillOtherUserSessions("user-A", a2.ID)
+	if len(killed) != 1 || killed[0] != a1.ID {
+		t.Fatalf("killed = %v, want [%s]", killed, a1.ID)
+	}
+	if m.Get(a1.ID) != nil {
+		t.Error("a1 should have been killed")
+	}
+	if m.Get(a2.ID) == nil {
+		t.Error("a2 (keepID) must survive")
+	}
+	if m.Get(b1.ID) == nil {
+		t.Error("b1 belongs to another user — must survive")
+	}
+	if m.Get(anon.ID) == nil {
+		t.Error("anonymous session must survive — policy applies to logged users only")
+	}
+}
+
+func TestManager_KillOtherUserSessions_NoOpOnAnonymous(t *testing.T) {
+	m := NewManager(Config{MaxPublic: 4})
+	a, _ := m.Create(ModeFull)
+	b, _ := m.Create(ModeFull)
+	if killed := m.KillOtherUserSessions("", a.ID); len(killed) != 0 {
+		t.Errorf("anonymous enforcement should be a no-op, killed=%v", killed)
+	}
+	if m.Get(a.ID) == nil || m.Get(b.ID) == nil {
+		t.Error("no session should have been touched")
+	}
+}

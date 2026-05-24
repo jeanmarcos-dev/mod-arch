@@ -166,7 +166,7 @@ function stateClass(state: string): string {
 }
 
 .sched-metrics__pid {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-weight: 700;
   letter-spacing: 1px;
 }

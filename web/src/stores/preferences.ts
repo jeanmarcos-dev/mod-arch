@@ -12,7 +12,7 @@ export type Density = 'comfortable' | 'compact';
 // Theme controls the color palette + font family of the whole shell. The
 // active theme is reflected on <html data-theme="..."> so it reaches portals
 // and modals mounted outside the shell root.
-export type Theme = 'amber' | 'green' | 'modern';
+export type Theme = 'amber' | 'green' | 'dark' | 'accesible';
 
 interface PrefsState {
   sidebarCollapsed: boolean;
@@ -53,8 +53,12 @@ export function readStoredTheme(): Theme {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULTS.theme;
     const parsed = JSON.parse(raw) as Partial<PrefsState>;
-    const t = parsed.theme;
-    if (t === 'amber' || t === 'green' || t === 'modern') return t;
+    const t = parsed.theme as string | undefined;
+    // The "modern" theme was merged into "dark" — silently migrate any
+    // pre-existing preference so returning users see the new (sharper) dark
+    // instead of having their localStorage entry rejected as invalid.
+    if (t === 'modern') return 'dark';
+    if (t === 'amber' || t === 'green' || t === 'dark' || t === 'accesible') return t;
   } catch { /* corrupt entry → default */ }
   return DEFAULTS.theme;
 }

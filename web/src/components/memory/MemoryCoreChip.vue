@@ -137,7 +137,7 @@ function jumpESP() {
 }
 
 .core-chip__id {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 16px;
   letter-spacing: 3px;
   color: var(--core-color);

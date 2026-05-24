@@ -201,7 +201,7 @@ function pidShort(pid: number) {
 
 .conc__head { display: flex; flex-direction: column; gap: var(--space-3); }
 .conc__head h1 {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   letter-spacing: 4px;
   font-size: 18px;
   color: var(--amber);
@@ -287,7 +287,7 @@ function pidShort(pid: number) {
   text-transform: uppercase;
   color: var(--amber);
   margin: 0 0 var(--space-2);
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
 }
 .lock-block p.empty { font-size: 11px; color: var(--text-muted); margin: 0; }
 .lock-block code { background: rgba(var(--accent-rgb), 0.1); padding: 0 4px; border-radius: var(--radius-sm); }

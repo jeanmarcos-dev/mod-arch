@@ -164,7 +164,7 @@ const totalEntries = GLOSSARY_ENTRIES.length;
 }
 
 .gloss-page__title {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 18px;
   letter-spacing: 5px;
   color: var(--amber);
@@ -271,7 +271,7 @@ const totalEntries = GLOSSARY_ENTRIES.length;
 }
 
 .gloss-page__toc-title {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 10px;
   letter-spacing: 2px;
   color: var(--text-dim);
@@ -335,7 +335,7 @@ const totalEntries = GLOSSARY_ENTRIES.length;
 }
 
 .gloss-page__cat {
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 13px;
   letter-spacing: 3px;
   color: var(--cyan);

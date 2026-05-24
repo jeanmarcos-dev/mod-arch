@@ -209,7 +209,7 @@ const isEmpty = computed(() =>
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  font-family: 'Major Mono Display', monospace;
+  font-family: var(--font-display);
   font-size: 11px;
   letter-spacing: 1.5px;
   color: var(--text-dim);
