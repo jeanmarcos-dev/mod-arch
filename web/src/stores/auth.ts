@@ -21,6 +21,10 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<AuthUser | null>(null);
   const lastError = ref<string | null>(null);
   const magicSent = ref(false);
+  // magicLink is populated when the server could not deliver the link by
+  // email (SMTP off / failed). The login page surfaces it as a copyable URL
+  // so the student is not stranded.
+  const magicLink = ref<string | null>(null);
 
   async function fetchMe(): Promise<boolean> {
     try {
@@ -41,14 +45,16 @@ export const useAuthStore = defineStore('auth', () => {
   async function login(payload: LoginPayload): Promise<boolean> {
     lastError.value = null;
     magicSent.value = false;
+    magicLink.value = null;
     try {
-      const data = await apiJSON<{ user: AuthUser; magic_sent: boolean }>(
+      const data = await apiJSON<{ user: AuthUser; magic_sent: boolean; magic_link?: string }>(
         'POST',
         '/api/auth/login',
         payload,
       );
       user.value = data.user;
       magicSent.value = Boolean(data.magic_sent);
+      magicLink.value = data.magic_link ?? null;
       return true;
     } catch (err) {
       lastError.value = (err as Error).message;
@@ -62,8 +68,9 @@ export const useAuthStore = defineStore('auth', () => {
     } finally {
       user.value = null;
       magicSent.value = false;
+      magicLink.value = null;
     }
   }
 
-  return { user, lastError, magicSent, fetchMe, login, logout };
+  return { user, lastError, magicSent, magicLink, fetchMe, login, logout };
 });

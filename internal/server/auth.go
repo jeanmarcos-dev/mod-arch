@@ -86,21 +86,33 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
 
 	magicSent := false
+	magicFallback := ""
 	if email != "" {
-		if err := s.issueMagicLink(r, email); err != nil {
+		url, sent, err := s.issueMagicLink(r, email)
+		if err != nil {
 			s.logger.Warn("auth: issue magic link failed", "email", email, "err", err)
 		} else {
-			magicSent = true
+			magicSent = sent
+			if !sent {
+				// SMTP was unavailable or off — expose the link so the
+				// frontend can show a toast with a copyable URL instead of
+				// leaving the user stuck.
+				magicFallback = url
+			}
 		}
 	}
 
 	s.auditFromContext(r, "user:"+user.ID, "auth.login", sess.ID, "")
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"ok":         true,
 		"user":       publicUser(user),
 		"magic_sent": magicSent,
-	})
+	}
+	if magicFallback != "" {
+		resp["magic_link"] = magicFallback
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // upsertUser dedupes by email, then by student_id, otherwise creates a fresh
@@ -148,10 +160,20 @@ func (s *Server) upsertUser(ctx context.Context, st *store.Store, name, email, s
 	return &row, nil
 }
 
-func (s *Server) issueMagicLink(r *http.Request, email string) error {
+// issueMagicLink mints a token, persists it, and attempts to deliver the
+// resulting URL by email. Returns:
+//
+//   - url:  the magic-link URL (always populated when err is nil)
+//   - sent: true when SMTP accepted the message; false when SMTP is not
+//     configured or the send failed (caller surfaces the URL as fallback)
+//   - err:  only set when the token could not be persisted at all
+//
+// The link is always logged to stderr so a desperate operator can recover it
+// from journalctl even when SMTP, the UI and the network all fail at once.
+func (s *Server) issueMagicLink(r *http.Request, email string) (string, bool, error) {
 	st := s.manager.Store()
 	if st == nil {
-		return errors.New("store unavailable")
+		return "", false, errors.New("store unavailable")
 	}
 	token := newAuthID() + newAuthID()
 	now := time.Now()
@@ -161,7 +183,7 @@ func (s *Server) issueMagicLink(r *http.Request, email string) error {
 		CreatedAt: now.Unix(),
 		ExpiresAt: now.Add(magicLinkTTL).Unix(),
 	}); err != nil {
-		return err
+		return "", false, err
 	}
 	scheme := "http"
 	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
@@ -169,7 +191,14 @@ func (s *Server) issueMagicLink(r *http.Request, email string) error {
 	}
 	url := fmt.Sprintf("%s://%s/auth/magic?t=%s", scheme, r.Host, token)
 	s.logger.Info("magic link", "email", email, "url", url, "expires_in", magicLinkTTL.String())
-	return nil
+
+	if err := s.sendMagicLinkEmail(r.Context(), email, url); err != nil {
+		if !errors.Is(err, errSMTPNotConfigured) {
+			s.logger.Warn("smtp: send magic link failed", "email", email, "err", err)
+		}
+		return url, false, nil
+	}
+	return url, true, nil
 }
 
 // handleAuthMe reports the user attached to the caller's session, if any.

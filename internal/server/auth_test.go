@@ -112,8 +112,9 @@ func TestAuth_LoginCreatesUserAndSession(t *testing.T) {
 		t.Fatalf("login status=%d body=%s", status, body)
 	}
 	var got struct {
-		OK        bool `json:"ok"`
-		MagicSent bool `json:"magic_sent"`
+		OK        bool   `json:"ok"`
+		MagicSent bool   `json:"magic_sent"`
+		MagicLink string `json:"magic_link"`
 		User      struct {
 			ID    string `json:"id"`
 			Name  string `json:"name"`
@@ -124,8 +125,13 @@ func TestAuth_LoginCreatesUserAndSession(t *testing.T) {
 	if !got.OK || got.User.ID == "" || got.User.Email != "ada@ucv.ve" {
 		t.Errorf("login response = %+v", got)
 	}
-	if !got.MagicSent {
-		t.Error("magic_sent should be true when email is provided")
+	// Test server runs without SMTP configured. The login flow must surface
+	// the link inline so a student can recover without an external mailer.
+	if got.MagicSent {
+		t.Error("magic_sent should be false when SMTP is disabled")
+	}
+	if got.MagicLink == "" {
+		t.Error("magic_link fallback should be present when SMTP is disabled")
 	}
 
 	users, _ := st.ListUsers(t.Context())

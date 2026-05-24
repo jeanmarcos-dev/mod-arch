@@ -23,6 +23,7 @@ const AdminInvites = () => import('../views/admin/AdminInvites.vue');
 const AdminAccess = () => import('../views/admin/AdminAccess.vue');
 const AdminUsers = () => import('../views/admin/AdminUsers.vue');
 const AdminAudit = () => import('../views/admin/AdminAudit.vue');
+const AdminSmtp = () => import('../views/admin/AdminSmtp.vue');
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -66,6 +67,7 @@ export const router = createRouter({
         { path: 'usuarios', name: 'admin-users', component: AdminUsers, meta: { title: 'Usuarios' } },
         { path: 'invitaciones', name: 'admin-invites', component: AdminInvites, meta: { title: 'Invitaciones' } },
         { path: 'accesos', name: 'admin-access', component: AdminAccess, meta: { title: 'Accesos' } },
+        { path: 'smtp', name: 'admin-smtp', component: AdminSmtp, meta: { title: 'Correo' } },
         { path: 'auditoria', name: 'admin-audit', component: AdminAudit, meta: { title: 'Auditoría' } },
       ],
     },

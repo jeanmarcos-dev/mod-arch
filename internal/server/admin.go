@@ -187,6 +187,13 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /admin/api/users/{id}", s.requireAdminAPI(s.requireCSRF(s.handleAdminUpdateUser)))
 	mux.HandleFunc("DELETE /admin/api/users/{id}", s.requireAdminAPI(s.requireCSRF(s.handleAdminDeleteUser)))
 
+	// SMTP block: read/write the magic-link delivery config. Test endpoint
+	// dispatches a canned message so credentials can be validated before the
+	// next real login attempt fails for a user.
+	mux.HandleFunc("GET /admin/api/smtp", s.requireAdminAPI(s.handleAdminGetSMTP))
+	mux.HandleFunc("PUT /admin/api/smtp", s.requireAdminAPI(s.requireCSRF(s.handleAdminSetSMTP)))
+	mux.HandleFunc("POST /admin/api/smtp/test", s.requireAdminAPI(s.requireCSRF(s.handleAdminTestSMTP)))
+
 	mux.HandleFunc("GET /admin", s.handleAdminSPA)
 	mux.HandleFunc("GET /admin/", s.handleAdminSPA)
 }

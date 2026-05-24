@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { Gauge, Monitor, Users, Mail, Lock, ScrollText, ExternalLink, LogOut, ShieldUser } from '@lucide/vue';
+import { Gauge, Monitor, Users, Mail, Lock, Send, ScrollText, ExternalLink, LogOut, ShieldUser } from '@lucide/vue';
 import { useAdminStore } from '../stores/admin';
 import { useToastStore } from '../stores/toast';
 import Sidebar from '../components/shell/Sidebar.vue';
@@ -22,12 +22,14 @@ const items = computed(() => {
     { to: '/admin/usuarios', label: 'Usuarios', icon: Users, group: 'ADMINISTRACIÓN' },
     { to: '/admin/invitaciones', label: 'Invitaciones', icon: Mail, group: 'ADMINISTRACIÓN' },
     { to: '/admin/accesos', label: 'Accesos', icon: Lock, group: 'ADMINISTRACIÓN' },
+    { to: '/admin/smtp', label: 'Correo', icon: Send, group: 'ADMINISTRACIÓN' },
     { to: '/admin/auditoria', label: 'Auditoría', icon: ScrollText, group: 'ADMINISTRACIÓN' },
   ];
   if (admin.isModerator) {
     return baseAll.filter(item =>
       item.to !== '/admin/invitaciones' &&
-      item.to !== '/admin/accesos'
+      item.to !== '/admin/accesos' &&
+      item.to !== '/admin/smtp'
     );
   }
   return baseAll;

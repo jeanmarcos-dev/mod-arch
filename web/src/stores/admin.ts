@@ -63,6 +63,20 @@ export interface AuditRow {
   meta?: string;
 }
 
+export interface SmtpView {
+  host: string;
+  port: number;
+  user: string;
+  password_set: boolean;
+  from_name: string;
+  from_email: string;
+  reply_to: string;
+  subject_prefix: string;
+  bcc: string;
+  tls_mode: 'starttls' | 'tls' | 'none' | string;
+  enabled: boolean;
+}
+
 async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
   const opts: RequestInit = { method };
   if (body !== undefined) {
@@ -274,6 +288,19 @@ export const useAdminStore = defineStore('admin', () => {
     await refresh();
   }
 
+  // SMTP block: the panel lets an admin configure the magic-link mailer.
+  async function fetchSmtpSettings(): Promise<SmtpView> {
+    return await send<SmtpView>('GET', '/admin/api/smtp');
+  }
+
+  async function saveSmtpSettings(payload: Record<string, unknown>): Promise<SmtpView> {
+    return await send<SmtpView>('PUT', '/admin/api/smtp', payload);
+  }
+
+  async function testSmtp(to: string): Promise<void> {
+    await send<{ ok: boolean }>('POST', '/admin/api/smtp/test', { to });
+  }
+
   return {
     user,
     userId,
@@ -307,5 +334,8 @@ export const useAdminStore = defineStore('admin', () => {
     createUser,
     updateUser,
     deleteUser,
+    fetchSmtpSettings,
+    saveSmtpSettings,
+    testSmtp,
   };
 });
