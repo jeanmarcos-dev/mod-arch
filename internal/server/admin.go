@@ -215,6 +215,7 @@ func (s *Server) handleAdminSPA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.ensureCSRFCookie(w, r)
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	r2 := r.Clone(r.Context())
 	r2.URL.Path = "/"
 	http.FileServer(http.FS(s.staticFS)).ServeHTTP(w, r2)
@@ -222,6 +223,8 @@ func (s *Server) handleAdminSPA(w http.ResponseWriter, r *http.Request) {
 
 // serveSPAStatus writes index.html with the given status code so the client
 // shows the SPA NotFound view even when the response carries a real 404.
+// no-cache prevents edge caches (Cloudflare) from holding onto a stale shell
+// that references asset hashes from a previous deploy.
 func serveSPAStatus(w http.ResponseWriter, files fs.FS, status int) {
 	data, err := fs.ReadFile(files, "index.html")
 	if err != nil {
@@ -229,6 +232,7 @@ func serveSPAStatus(w http.ResponseWriter, files fs.FS, status int) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.WriteHeader(status)
 	_, _ = w.Write(data)
 }

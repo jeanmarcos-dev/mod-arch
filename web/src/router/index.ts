@@ -79,12 +79,23 @@ export const router = createRouter({
   ],
 });
 
-router.beforeEach(async (to) => {
+router.beforeEach(async (to, from) => {
   if (to.name === 'not-found') return true;
   const isAdminPath = to.path === '/admin' || to.path.startsWith('/admin/');
   if (!isAdminPath) return true;
 
   const admin = useAdminStore();
+
+  // Skip the /me roundtrip when we are already inside the admin shell with a
+  // known role — the AdminShell layout polls /me every 5s so the store stays
+  // fresh on its own. Re-running the fetch on every navigation made
+  // overlapping guards stack up; a slow or contended response could leave a
+  // navigation pending forever, ending in a blank <main> with no error.
+  const fromAdmin = from.path === '/admin' || from.path.startsWith('/admin/');
+  if (fromAdmin && admin.role !== null && to.name !== 'admin-login') {
+    return true;
+  }
+
   const status = await admin.fetchMeStatus();
 
   if (status === 404 || status === 0) {
@@ -101,4 +112,28 @@ router.beforeEach(async (to) => {
     return { name: 'admin-login', query: { next: to.fullPath } };
   }
   return true;
+});
+
+function isLazyRouteLoadError(err: unknown): boolean {
+  const msg = err instanceof Error ? `${err.name} ${err.message}` : String(err);
+  return /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Loading chunk [\w-]+ failed|ChunkLoadError/i.test(msg);
+}
+
+// A lazy route chunk can disappear during or after a deploy while the browser
+// is still running the previous HTML shell. Vue Router leaves the parent
+// layout mounted in that case, so admin pages look like an empty content area
+// with no backend logs. Reload once to force the no-cache HTML path.
+router.onError((err, to) => {
+  if (!isLazyRouteLoadError(err)) {
+    console.error(err);
+    return;
+  }
+
+  const key = `mc:route-reload:${to.fullPath}`;
+  if (sessionStorage.getItem(key) === '1') {
+    console.error(err);
+    return;
+  }
+  sessionStorage.setItem(key, '1');
+  window.location.assign(to.fullPath);
 });

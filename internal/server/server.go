@@ -162,14 +162,47 @@ func (s *Server) handleSessionError(w http.ResponseWriter, r *http.Request, err 
 // serveSPA hands the request to the embedded FileServer. HTML-shaped paths
 // other than "/" (e.g. /login) are rewritten to "/" so vue-router can take
 // over on the client.
+//
+// Cache headers are tuned for the hashed-bundle deploy model:
+//   - The HTML shell is served with no-cache so the browser always revalidates
+//     and picks up new asset hashes immediately after a deploy.
+//   - 404 responses for /assets/* are wrapped with no-store so a CDN in front
+//     (Cloudflare) cannot cache a stale "asset gone" answer for hours — that
+//     was what made post-deploy navigation freeze on missing chunks.
+//   - Successful asset responses keep the FileServer-provided headers; their
+//     filename hash already provides cache busting.
 func (s *Server) serveSPA(w http.ResponseWriter, r *http.Request, path string) {
-	if isHTMLPath(path) && path != "/" {
-		r2 := r.Clone(r.Context())
-		r2.URL.Path = "/"
-		http.FileServer(http.FS(s.staticFS)).ServeHTTP(w, r2)
+	fs := http.FileServer(http.FS(s.staticFS))
+	if isHTMLPath(path) {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		if path != "/" {
+			r2 := r.Clone(r.Context())
+			r2.URL.Path = "/"
+			fs.ServeHTTP(w, r2)
+			return
+		}
+		fs.ServeHTTP(w, r)
 		return
 	}
-	http.FileServer(http.FS(s.staticFS)).ServeHTTP(w, r)
+	// Asset path. Wrap the writer so we can attach no-store to 404 responses
+	// before the FileServer flushes them, blocking edge caches from holding
+	// onto a "this hash is gone" answer between deploys.
+	fs.ServeHTTP(&noStoreOn404Writer{ResponseWriter: w}, r)
+}
+
+// noStoreOn404Writer is a thin wrapper around http.ResponseWriter that, when
+// the upstream handler writes a 4xx/5xx status, replaces Cache-Control with
+// no-store. It does nothing for 2xx/3xx responses so cache-friendly assets
+// keep their headers.
+type noStoreOn404Writer struct {
+	http.ResponseWriter
+}
+
+func (w *noStoreOn404Writer) WriteHeader(status int) {
+	if status >= 400 {
+		w.Header().Set("Cache-Control", "no-store")
+	}
+	w.ResponseWriter.WriteHeader(status)
 }
 
 // consumePrivInvite tries to consume a privileged invite. On success it
@@ -354,6 +387,7 @@ func (s *Server) handleViewer(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if s.staticFS != nil {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		r2 := r.Clone(r.Context())
 		r2.URL.Path = "/"
 		http.FileServer(http.FS(s.staticFS)).ServeHTTP(w, r2)
@@ -449,7 +483,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 		defer cancel()
 		_ = srv.Shutdown(shutCtx)
 	}()
-	s.logger.Info("server listening", "addr", addr)
+	s.logger.Info("server listening", "url", "http://"+addr)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

@@ -86,11 +86,12 @@ onUnmounted(() => {
           <ShieldUser :size="14" :stroke-width="2" />
           <span>Sesión de moderación — algunas acciones de gobierno quedan reservadas al administrador.</span>
         </div>
-        <RouterView v-slot="{ Component }">
-          <Transition name="route" mode="out-in">
-            <component :is="Component" />
-          </Transition>
-        </RouterView>
+        <!-- Plain RouterView without a Transition wrapper: the previous
+             out-in transition could deadlock when a leaving view never
+             emitted transitionend (Teleport modals + 5s polling were the
+             usual triggers), leaving the admin panel stuck on a blank
+             screen with no console error. -->
+        <RouterView />
       </main>
     </div>
     <Toast />
@@ -162,8 +163,4 @@ onUnmounted(() => {
   letter-spacing: 0.5px;
 }
 
-.route-enter-from { opacity: 0; transform: translateY(8px); }
-.route-leave-to   { opacity: 0; transform: translateY(-6px); }
-.route-enter-active,
-.route-leave-active { transition: opacity var(--transition-base), transform var(--transition-base); }
 </style>
