@@ -26,6 +26,13 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     detail: 'x86 define 4 niveles de privilegio (0-3). Convencionalmente PL0 = kernel (todos los permisos) y PL3 = user (acceso restringido). Los niveles intermedios casi nunca se usan. El HW chequea PL en cada acceso a memoria, ejecución de instrucciones privilegiadas, etc. El SW NO puede cambiar el PL directamente — solo el HW lo hace en INT/IRET/excepciones.',
   },
   {
+    term: 'RPL — Requested Privilege Level',
+    category: 'Modos',
+    short: 'Bits 0-1 de un selector de segmento. Indican el privilegio "solicitado" por ese selector.',
+    detail: 'Cada selector de 16 bits (CS, DS, SS, etc.) lleva su RPL codificado en los dos bits menos significativos. En user mode los selectores tienen RPL=3 (ej. CS = 0x1B = 0x18 | 3); en kernel los selectores tienen RPL=0 (ej. CS = 0x08). La CPU usa el RPL al ejecutar IRET para decidir si rebaja el privilegio: si el CS popeado tiene RPL=3, además popea SS y ESP del stack y cambia a user mode (inter-privilege IRET). El RPL no debe confundirse con el CPL (Current Privilege Level), que es el RPL del CS actualmente en uso — el CPL es el "modo real" en que está corriendo la CPU; el RPL es lo que pide cada selector cuando se lo carga.',
+    aliases: ['CPL', 'current privilege level', 'requested privilege level'],
+  },
+  {
     term: 'USER MODE (PL3)',
     category: 'Modos',
     short: 'Procesos normales. Acceso restringido.',
@@ -58,10 +65,17 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     detail: 'Históricamente usados por instrucciones de string (MOVS, LODS, STOS) que copiaban bytes de [ESI] a [EDI]. Hoy se usan como generales.',
   },
   {
-    term: 'ESP, EBP',
+    term: 'ESP — Stack Pointer',
     category: 'Registros',
-    short: 'Stack Pointer / Base Pointer.',
-    detail: 'ESP apunta al tope del stack (donde se pushea/popea). EBP marca la base del stack frame actual de la función. PUSH decrementa ESP por 4 y escribe; POP lee y suma 4. El stack crece HACIA ABAJO.',
+    short: 'Apunta al tope actual del stack (la última posición ocupada).',
+    detail: 'Cada PUSH lo decrementa en 4 bytes y escribe el valor; cada POP lee y lo incrementa en 4. CALL/RET, INT/IRET también lo modifican automáticamente: CALL pushea la dirección de retorno (RET la popea); INT pushea EFLAGS/CS/EIP (IRET los popea). La pila crece HACIA ABAJO — desde direcciones altas hacia bajas — por lo que ESP disminuye a medida que se acumula trabajo. Importante: el valor concreto de ESP depende del modo. En PL3 apunta al stack del proceso de usuario; en PL0 apunta al stack del kernel (la CPU recarga ESP automáticamente al cambiar de privilegio).',
+  },
+  {
+    term: 'EBP — Base Pointer',
+    category: 'Registros',
+    short: 'Apunta a la base del stack frame actual. Anclaje fijo durante una función.',
+    detail: 'A diferencia de ESP, EBP no se mueve con cada PUSH/POP: queda fijo durante toda la ejecución de la función para que el compilador genere accesos predecibles a parámetros y variables locales. La convención clásica es el prólogo `PUSH EBP; MOV EBP, ESP` al entrar, y `POP EBP; RET` al salir. Dentro de la función, los argumentos viven en `[EBP+8]`, `[EBP+12]`, etc. (después del EBP guardado y la dirección de retorno), y las variables locales en `[EBP-4]`, `[EBP-8]`, etc. Resumen: ESP se mueve constantemente; EBP queda quieto.',
+    aliases: ['frame pointer'],
   },
   {
     term: 'EIP',
@@ -79,7 +93,7 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     term: 'CS, DS, SS',
     category: 'Registros',
     short: 'Segment selectors (Code / Data / Stack).',
-    detail: 'Selectores de 16 bits que indexan entradas de la GDT. Los bits 0-1 son el RPL (Requested Privilege Level). En user mode CS = 0x1B (0x18 | 3), en kernel CS = 0x08. IRET lee el CS que va a popear para decidir si vuelve a user o queda en kernel.',
+    detail: 'Selectores de 16 bits que indexan entradas de la GDT (o de la LDT cuando el bit TI=1; este simulador no usa LDT). Los bits 0-1 son el RPL (Requested Privilege Level). En user mode CS = 0x1B (0x18 | 3), en kernel CS = 0x08. IRET lee el CS que va a popear para decidir si vuelve a user o queda en kernel.',
   },
 
   // ─── Flags individuales ─────────────────────────────────────────────────
@@ -111,7 +125,7 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     term: 'IF — Interrupt Flag',
     category: 'Flags',
     short: 'Si IF=1, las IRQs HW pueden interrumpir. Si IF=0, ignoradas.',
-    detail: 'En user mode IF normalmente está en 1 para que el timer pueda preempt. Cuando entra una IRQ, el HW pushea EFLAGS y clearea IF (evita re-entrancia). IRET restaura el EFLAGS popeado (re-habilita IF si estaba). HLT con IF=1 espera la próxima IRQ.',
+    detail: 'En user mode IF normalmente está en 1 para que el timer pueda preempt. Cuando entra una IRQ, el HW pushea EFLAGS y clearea IF para evitar re-entrancia. IRET restaura el EFLAGS popeado (re-habilita IF si estaba en 1). HLT con IF=1 espera la próxima IRQ. Nota fina: en x86 real este clear de IF depende del tipo de "gate" en la IDT — los interrupt gates clearean IF, los trap gates no. En este simulador toda entrada se trata como interrupt gate.',
   },
 
   // ─── Interrupciones ─────────────────────────────────────────────────────
@@ -119,7 +133,7 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     term: 'Vector',
     category: 'Interrupciones',
     short: 'Índice 0-255 en la IDT. Cubre IRQs de HW, excepciones del CPU y software interrupts.',
-    detail: 'Todo lo que entra por la IDT lleva un vector que indexa el handler correspondiente. La taxonomía técnica distingue tres orígenes para ese vector: IRQ (hardware externo), excepción (el propio CPU al ejecutar una instrucción) y software interrupt (la instrucción INT N). Coloquialmente — y en el código fuente de este simulador — se usa "IRQ" como término paraguas para los tres; el glosario en cambio respeta la distinción para que usted aprenda la terminología real de x86.',
+    detail: 'Todo lo que entra por la IDT lleva un vector que indexa el handler correspondiente. La taxonomía técnica distingue tres orígenes para ese vector: IRQ (hardware externo), excepción (el propio CPU al ejecutar una instrucción) y software interrupt (la instrucción INT N). Coloquialmente — y en el código fuente de este simulador — se usa "IRQ" como término paraguas para los tres; el glosario en cambio respeta la distinción para que usted aprenda la terminología real de x86. Convención de naming en las entradas siguientes: prefijo "Vector NN" para excepciones del CPU (0x00, 0x0D, 0x0E), prefijo "IRQ NN" para interrupciones de hardware externo (0x20, 0x21) y prefijo "INT NN" para software interrupts (0x80, 0x81). El número del vector es el mismo concepto en los tres casos: el origen del trigger es lo que cambia.',
     aliases: ['vector de interrupción', 'vector de interrupcion'],
   },
   {
@@ -178,9 +192,9 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
   {
     term: 'Vector 0x0E — Page Fault',
     category: 'Interrupciones',
-    short: 'Excepción cuando un acceso de memoria es inválido (lo detecta la MMU).',
-    detail: 'Cuando user intenta leer/escribir memoria a la que no tiene permiso (ej. memoria kernel, o página no mapeada), la MMU dispara esta excepción. El kernel decide: resolver la falla (paging, COW), o matar el proceso. Como toda excepción, la genera el CPU mismo, no HW externo.',
-    aliases: ['IRQ 0x0E', 'page fault', '#PF'],
+    short: 'Vector de la excepción de página, disparada por la MMU.',
+    detail: 'Es el slot de la IDT al que la MMU envía cualquier acceso de memoria inválido. Como toda excepción, la dispara el CPU mismo (no HW externo): cuando la unidad de memoria detecta que el acceso no se puede satisfacer en el modo actual, recarga ESP al kernel stack, pushea el frame y salta a IDT[0x0E]. Para qué condiciones lo dispara y qué hace el kernel después, ver la entrada "Page fault" en la sección de Memoria.',
+    aliases: ['IRQ 0x0E', '#PF'],
   },
   {
     term: 'Vector 0x0D — General Protection',
@@ -199,7 +213,7 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     term: 'IRET',
     category: 'Interrupciones',
     short: 'Return from interrupt. Deshace lo que hizo INT/dispatch.',
-    detail: 'Popea EIP, CS, EFLAGS del stack (en ese orden). Si el CS popeado es user (RPL=3), también popea el ESP/SS originales y cambia a user mode. Es la única forma "limpia" de volver de kernel a user.',
+    detail: 'Popea del stack, EN ESE ORDEN DE POP: primero EIP (porque está en la cima), luego CS, luego EFLAGS. Si el CS popeado es user (RPL=3), además popea ESP y SS y cambia a user mode (esto se llama "inter-privilege IRET"). Es la única forma "limpia" de volver de kernel a user. La memoria física del frame, leída desde direcciones bajas a altas, queda como [EIP][CS][EFLAGS][ESP_user][SS_user]: el orden inverso al de pop porque el stack crece hacia abajo.',
   },
   {
     term: 'IDT — Interrupt Descriptor Table',
@@ -260,8 +274,8 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
   {
     term: 'Waiting queue',
     category: 'Procesos',
-    short: 'Cola de procesos BLOCKED en algún recurso.',
-    detail: 'Por simplicidad la tenemos como una sola lista. En kernels reales hay UNA waiting queue POR recurso (teclado, cada socket, cada semáforo, etc.). El kernel sabe qué proceso despertar cuando llega el evento.',
+    short: 'Cola de procesos BLOCKED esperando un recurso.',
+    detail: 'En este simulador la presentamos como una sola lista por simplicidad. En kernels reales hay UNA waiting queue POR recurso: una por cada dispositivo de I/O (teclado, disco, cada socket de red), una por cada mutex, una por cada semáforo, una por cada cola de mensajes. Eso permite que cuando ocurre un evento — por ejemplo la IRQ del teclado — el kernel sepa exactamente a qué proceso despertar consultando SOLO la cola del recurso correspondiente, sin tener que escanear la lista completa de procesos del sistema. La separación por recurso también permite políticas distintas por dispositivo: una cola de disco puede atender por orden de llegada, una de socket por prioridad, etc.',
   },
 
   // ─── Scheduler ──────────────────────────────────────────────────────────
@@ -332,7 +346,6 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     category: 'Sincronización',
     short: 'Mutual exclusion lock: garantiza que solo un hilo entra a la sección crítica.',
     detail: 'Tiene dos estados: libre o tomado por un único holder. El syscall mutex_lock bloquea al hilo si el mutex ya está tomado (lo manda a BLOCKED encolado al mutex); mutex_unlock lo libera y despierta al primer waiter. En este simulador cada mutex aparece en /concurrencia con su holder y su cola de espera.',
-    aliases: ['mutex'],
   },
   {
     term: 'Semaphore',
@@ -373,7 +386,7 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     term: 'Dining philosophers',
     category: 'Concurrencia',
     short: 'Cena de los filósofos: ejemplo canónico de deadlock con N hilos compartiendo N recursos.',
-    detail: 'Cinco filósofos comparten una mesa con cinco tenedores; cada uno necesita dos tenedores para comer. Si todos toman el de la izquierda al mismo tiempo, esperan por siempre el de la derecha (deadlock). Soluciones clásicas: ordenar los tenedores globalmente, o limitar a 4 filósofos comiendo en simultáneo. El demo dining_philosophers muestra ambas variantes.',
+    detail: 'Cinco filósofos comparten una mesa con cinco tenedores; cada uno necesita dos tenedores para comer. Si todos toman el de la izquierda al mismo tiempo, esperan por siempre el de la derecha (deadlock). Soluciones clásicas: ordenar los tenedores globalmente, o limitar a N-1 filósofos comiendo en simultáneo. En este simulador hay dos demos separados: `philos_deadlock` (los filósofos se traban en círculo y el sistema deja de progresar) y `philos_safe` (uno de ellos invierte el orden de toma — primero el tenedor de menor id, después el de mayor — y esa asimetría rompe la espera circular).',
     aliases: ['filósofos comensales', 'filosofos comensales', 'filósofos', 'filosofos'],
   },
   {
@@ -403,10 +416,18 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     detail: 'En x86 cada segmento tiene un descriptor (base, límite, permisos). Los selectores (CS/DS/SS) son índices a esta tabla. En nuestro simulador la GDT es nominal — solo usamos los selectores como pistas visuales, no hay translation real.',
   },
   {
+    term: 'TSS — Task State Segment',
+    category: 'Memoria',
+    short: 'Estructura por núcleo donde x86 guarda SS:ESP del kernel y otros datos del task switch.',
+    detail: 'En x86 real, cuando una interrupción cambia el privilegio de PL3 a PL0, el HW consulta la TSS del núcleo para saber a qué dirección recargar SS:ESP — esa pareja (SS0, ESP0) es la cima del kernel stack. La TSS vive en memoria, su dirección se carga en el registro TR (Task Register) y su descriptor está en la GDT. En este simulador la TSS no existe como estructura propia: sus dos campos críticos se simplifican a `KernelStackTop` (rol de ESP0) y al manejo directo dentro de la CPU. Cada núcleo lleva su propio `KernelStackTop` para que traps concurrentes no se pisen los frames. Al entrar al kernel desde user, el ESP de usuario se guarda en `SavedUserESP` — rol que en x86 real cumple precisamente la TSS al hacer el switch — e IRET lo restaura al volver a PL3.',
+    aliases: ['task state segment'],
+  },
+  {
     term: 'Page fault',
     category: 'Memoria',
-    short: 'Excepción cuando acceso a memoria es inválido.',
-    detail: 'La MMU detecta acceso prohibido (mal permiso, página no presente, etc.) y dispara IRQ 0x0E. En kernels reales, page fault es CRÍTICO porque también dispara para mapear páginas on-demand (lazy allocation). En nuestro demo es siempre fatal: matamos el proceso.',
+    short: 'El acceso de memoria es inválido y la MMU lo rechaza.',
+    detail: 'Causas típicas: el proceso en PL3 intenta tocar memoria del kernel, escribe en una página de solo lectura (como user_code), o accede a una dirección fuera de su región asignada. En kernels reales el page fault NO es siempre fatal — también se usa para resolución on-demand: paginación demand-paging, copy-on-write tras un fork, mapeo lazy de heap. El kernel decide caso por caso: resolver (mapeando la página) o matar al proceso. En este simulador todo page fault es fatal: el proceso pasa a ZOMBIE con BlockedOn="page_fault". El dispatch del HW va por el vector 0x0E (ver esa entrada en Interrupciones).',
+    aliases: ['page fault', 'pagefault'],
   },
 
   // ─── Syscalls ───────────────────────────────────────────────────────────

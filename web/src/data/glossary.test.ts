@@ -18,7 +18,19 @@ describe('findEntry', () => {
     const entry = findEntry('EBX');
     expect(entry?.term).toBe('EAX, EBX, ECX, EDX');
     expect(findEntry('ecx')?.term).toBe('EAX, EBX, ECX, EDX');
-    expect(findEntry('ESP')?.term).toBe('ESP, EBP');
+  });
+
+  it('resolves the split ESP / EBP entries to their own cards', () => {
+    expect(findEntry('ESP')?.term).toBe('ESP — Stack Pointer');
+    expect(findEntry('esp')?.term).toBe('ESP — Stack Pointer');
+    expect(findEntry('EBP')?.term).toBe('EBP — Base Pointer');
+    expect(findEntry('frame pointer')?.term).toBe('EBP — Base Pointer');
+  });
+
+  it('resolves new entries added in the rigor pass', () => {
+    expect(findEntry('RPL')?.term).toBe('RPL — Requested Privilege Level');
+    expect(findEntry('CPL')?.term).toBe('RPL — Requested Privilege Level');
+    expect(findEntry('TSS')?.term).toBe('TSS — Task State Segment');
   });
 
   it('strips parenthetical suffixes when indexing', () => {
