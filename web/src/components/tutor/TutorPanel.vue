@@ -135,7 +135,11 @@ onMounted(scrollToBottom);
   flex-direction: column;
   width: 100%;
   height: 100%;
-  background: linear-gradient(180deg, var(--surface-1) 0%, var(--surface-0) 100%);
+  /* Fully opaque background. The previous gradient + backdrop-filter combo
+     read as translucent on top of the simulator and let narrator banners
+     bleed through visually; an opaque surface guarantees the dialog covers
+     whatever is underneath. */
+  background: var(--surface-1);
   border: 1px solid rgba(var(--accent-rgb), 0.5);
   border-radius: 0.75rem;
   color: var(--text);
@@ -145,7 +149,6 @@ onMounted(scrollToBottom);
     0 0 0 1px rgba(var(--accent-rgb), 0.08),
     0 0 30px rgba(var(--accent-rgb), 0.15);
   overflow: hidden;
-  backdrop-filter: blur(10px);
 }
 .tutor-panel.is-expanded { --bubble-max-width: 64ch; }
 

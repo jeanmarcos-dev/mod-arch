@@ -175,7 +175,9 @@ function onBackdropClick() {
      leaving room for a soft drop-shadow underneath. */
   right: 12px;
   bottom: 52px;
-  z-index: 110;
+  /* Above the narrator overlay (--z-overlay = 500) so banners like the
+     ModeFlip mode-switch card do not paint over the tutor panel. */
+  z-index: var(--z-modal, 600);
   pointer-events: none;
   /* The host is a zero-size anchor; both the FAB and the panel attach to
      its bottom-right corner via position: absolute. A flex layout used to
@@ -366,7 +368,9 @@ function onBackdropClick() {
 .tutor-modal-root {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  /* Same rationale as .tutor-host: the modal must outrank narrator overlays
+     so they never bleed through the dialog. */
+  z-index: var(--z-modal, 600);
   display: flex;
   align-items: center;
   justify-content: center;
