@@ -190,11 +190,14 @@ func (EventSyscall) Tag() string { return "syscall" }
 
 // EventConsoleOut delivers bytes written by sys_write to fd 1 (stdout). Text
 // is the UTF-8 representation of the buffer; the raw bytes are included so the
-// frontend may hex-dump them if it wants.
+// frontend may hex-dump them if it wants. CoreID identifies the core whose
+// sys_write produced the bytes — used by the console panel to tag each chunk
+// with the originating core in multicore demos.
 type EventConsoleOut struct {
-	PID   int    `json:"pid"`
-	Bytes []byte `json:"bytes"`
-	Text  string `json:"text"`
+	CoreID int    `json:"core_id"`
+	PID    int    `json:"pid"`
+	Bytes  []byte `json:"bytes"`
+	Text   string `json:"text"`
 }
 
 // Tag returns the event tag.

@@ -112,7 +112,10 @@ func (k *Kernel) handleKeyboard(core *Core) []cpu.Event {
 
 	out := []cpu.Event{
 		cpu.EventProcessState{PID: req.PID, State: string(StateReady), Reason: "keyboard delivered"},
-		cpu.EventConsoleOut{PID: 0, Bytes: delivered, Text: "[in] " + string(delivered)},
+		// Keyboard echoes belong to no specific core — pin them to C0 so
+		// they always pass the visibility filter and the UI never drops
+		// user input from view.
+		cpu.EventConsoleOut{CoreID: 0, PID: 0, Bytes: delivered, Text: "[in] " + string(delivered)},
 	}
 
 	// If the core was idle (no running process), switch directly to the woken

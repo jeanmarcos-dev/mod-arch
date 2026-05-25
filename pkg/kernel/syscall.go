@@ -161,9 +161,10 @@ func (k *Kernel) sysWrite(core *Core, fd, bufAddr, count uint32) (uint32, []cpu.
 	}
 
 	ev := cpu.EventConsoleOut{
-		PID:   core.CurrentPID,
-		Bytes: append([]byte(nil), bytes...),
-		Text:  string(bytes),
+		CoreID: core.CPU.CoreID,
+		PID:    core.CurrentPID,
+		Bytes:  append([]byte(nil), bytes...),
+		Text:   string(bytes),
 	}
 	return count, []cpu.Event{ev}
 }
