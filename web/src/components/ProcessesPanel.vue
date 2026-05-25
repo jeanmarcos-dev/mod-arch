@@ -83,6 +83,7 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
             stateClass(p.state),
             { current: runningPIDs.has(p.pid), flash: cpu.flashingPIDs.has(p.pid) },
           ]"
+          :data-narrator-anchor="`pcb-${p.pid}`"
           :title="runningPIDs.has(p.pid) ? 'Proceso actualmente en RUN — sus registros viven en el CPU.' : 'Proceso fuera de RUN — su estado completo está preservado en su PCB.'"
         >
           <td class="pid">P{{ p.pid }}</td>

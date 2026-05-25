@@ -56,7 +56,9 @@ async function load() {
   }
 }
 
-// Refresh automático cuando cambia EIP/ESP (si estamos en esos modos) o el tick.
+// Refresh automático cuando cambia EIP/ESP del core enfocado, el tick, la vista
+// o la dirección custom. La lista de hits per-core se recomputa con el ref de
+// `cpu.cores` directamente y no requiere re-fetch.
 watch(() => [cpu.regs.EIP, cpu.regs.ESP, cpu.tick, view.value, customAddr.value], () => {
   load();
 });
@@ -91,6 +93,89 @@ function regionOf(addr: number): string {
 
 const currentEIP = computed(() => cpu.regs.EIP >>> 0);
 const currentESP = computed(() => cpu.regs.ESP >>> 0);
+
+// Multi-core mirror: when more than one core exists we no longer paint the
+// hex dump from the focused-core mirror alone — every visible core stamps
+// its own EIP/ESP marker so a 2-core demo shows two simultaneous cursors,
+// each tinted with its own --core-${id} hue. Single-core keeps the legacy
+// behavior so the look does not change for the common case.
+const multicore = computed(() => cpu.cores.length > 1);
+
+// Map address → list of cores whose EIP currently lives there. We track a
+// list (not just a number) so two cores that happen to share an EIP both
+// show up — the renderer still picks the first one for the background to
+// keep the byte readable, but the title attribute lists all owners.
+const eipByAddr = computed<Map<number, number[]>>(() => {
+  const m = new Map<number, number[]>();
+  if (!multicore.value) {
+    m.set(currentEIP.value, [cpu.selectedCoreId]);
+    return m;
+  }
+  for (const c of cpu.cores) {
+    if (!cpu.isCoreVisible(c.id)) continue;
+    const eip = (c.regs.EIP ?? 0) >>> 0;
+    const prev = m.get(eip);
+    if (prev) prev.push(c.id); else m.set(eip, [c.id]);
+  }
+  return m;
+});
+
+// Same idea for ESP, expanded across the 4 bytes that make up the top of
+// stack word so the highlight matches the legacy look.
+const espByAddr = computed<Map<number, number[]>>(() => {
+  const m = new Map<number, number[]>();
+  function stampEsp(esp: number, id: number) {
+    for (let off = 0; off < 4; off++) {
+      const a = (esp + off) >>> 0;
+      const prev = m.get(a);
+      if (prev) prev.push(id); else m.set(a, [id]);
+    }
+  }
+  if (!multicore.value) {
+    stampEsp(currentESP.value, cpu.selectedCoreId);
+    return m;
+  }
+  for (const c of cpu.cores) {
+    if (!cpu.isCoreVisible(c.id)) continue;
+    stampEsp((c.regs.ESP ?? 0) >>> 0, c.id);
+  }
+  return m;
+});
+
+// Resolve the inline-style override for a byte. EIP wins over ESP because
+// the program counter is the more salient marker. Returns a plain record
+// shaped like CSSProperties so Vue's :style prop accepts it without a cast.
+function hitStyle(addr: number): Record<string, string> | undefined {
+  const eip = eipByAddr.value.get(addr);
+  if (eip && eip.length > 0) {
+    return {
+      background: `var(--core-${eip[0] % 4})`,
+      color: `var(--core-fg)`,
+    };
+  }
+  const esp = espByAddr.value.get(addr);
+  if (esp && esp.length > 0) {
+    return {
+      boxShadow: `inset 0 -2px 0 var(--core-${esp[0] % 4})`,
+    };
+  }
+  return undefined;
+}
+
+function hitTitle(addr: number): string | undefined {
+  const eip = eipByAddr.value.get(addr);
+  if (eip && eip.length > 0) {
+    return `EIP de núcleo${eip.length > 1 ? 's' : ''} ` + eip.map((id) => `C${id}`).join(', ');
+  }
+  const esp = espByAddr.value.get(addr);
+  if (esp && esp.length > 0) {
+    return `Tope de pila (ESP) de núcleo${esp.length > 1 ? 's' : ''} ` + esp.map((id) => `C${id}`).join(', ');
+  }
+  return undefined;
+}
+
+// Cores currently visible, sorted so the legend reads left → right C0..C3.
+const visibleCores = computed(() => cpu.cores.filter((c) => cpu.isCoreVisible(c.id)).slice().sort((a, b) => a.id - b.id));
 </script>
 
 <template>
@@ -136,9 +221,12 @@ const currentESP = computed(() => cpu.regs.ESP >>> 0);
             :key="j"
             class="hex-byte"
             :class="{
-              eip: line.addr + j === currentEIP,
-              esp: line.addr + j === currentESP || line.addr + j === currentESP + 1 || line.addr + j === currentESP + 2 || line.addr + j === currentESP + 3,
+              'hex-byte--eip': eipByAddr.has(line.addr + j),
+              'hex-byte--esp': espByAddr.has(line.addr + j) && !eipByAddr.has(line.addr + j),
             }"
+            :style="hitStyle(line.addr + j)"
+            :title="hitTitle(line.addr + j)"
+            :data-mem-addr="`0x${(line.addr + j).toString(16).toLowerCase()}`"
           >{{ hex(b) }}</span>
         </span>
         <span class="hex-ascii">{{ line.ascii }}</span>
@@ -151,8 +239,29 @@ const currentESP = computed(() => cpu.regs.ESP >>> 0);
       <span class="leg leg-user_code">user_code</span>
       <span class="leg leg-user_stack">user_stack</span>
       <span class="leg-sep">·</span>
-      <span class="leg leg-eip">EIP</span>
-      <span class="leg leg-esp">ESP</span>
+      <!-- Single-core: legacy EIP/ESP swatches. Multi-core: per-core swatches
+           so the user can map each highlighted byte back to a core. -->
+      <template v-if="!multicore">
+        <span class="leg leg-eip">EIP</span>
+        <span class="leg leg-esp">ESP</span>
+      </template>
+      <template v-else>
+        <span
+          v-for="c in visibleCores"
+          :key="`eip-${c.id}`"
+          class="leg leg--core"
+          :style="{ background: `var(--core-${c.id % 4})`, color: `var(--core-fg)`, borderColor: `var(--core-${c.id % 4})` }"
+          :title="`EIP del núcleo C${c.id}`"
+        >EIP·C{{ c.id }}</span>
+        <span class="leg-sep">·</span>
+        <span
+          v-for="c in visibleCores"
+          :key="`esp-${c.id}`"
+          class="leg leg--core-stack"
+          :style="{ boxShadow: `inset 0 -2px 0 var(--core-${c.id % 4})`, borderColor: `var(--core-${c.id % 4})`, color: `var(--core-${c.id % 4})` }"
+          :title="`Tope de pila (ESP) del núcleo C${c.id}`"
+        >ESP·C{{ c.id }}</span>
+      </template>
     </div>
   </div>
 </template>
@@ -236,6 +345,9 @@ const currentESP = computed(() => cpu.regs.ESP >>> 0);
   color: var(--text);
 }
 
+/* Single-core legacy classes kept for the !multicore branch. Multicore paints
+   via the inline :style coming from hitStyle(addr) so each core can carry its
+   own --core-${id} tint. */
 .hex-byte.eip {
   background: rgba(var(--accent-rgb), 0.4);
   color: #000;
@@ -245,6 +357,16 @@ const currentESP = computed(() => cpu.regs.ESP >>> 0);
 .hex-byte.esp {
   background: rgba(127, 255, 170, 0.25);
   color: var(--green);
+}
+
+.hex-byte--eip {
+  font-weight: 700;
+}
+
+.leg--core,
+.leg--core-stack {
+  padding: 1px 6px;
+  font-weight: 700;
 }
 
 .hex-ascii {

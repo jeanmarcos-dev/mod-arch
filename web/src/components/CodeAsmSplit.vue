@@ -53,6 +53,21 @@ const runningOnVisibleCores = computed(() => new Set(
   cpu.cores.filter(c => cpu.isCoreVisible(c.id) && c.current_pid > 0).map(c => c.current_pid),
 ));
 
+// Inverse mapping: which core currently holds each PID. The tabs render a
+// "C{n}" chip in the per-core tint so a student can see at a glance "P1 is
+// running on C0, P2 is on C1" without cross-referencing the SimStatusRow.
+// Returns undefined when the PID is not assigned to any core (e.g. it is
+// READY/BLOCKED), so v-if filters it out cleanly.
+const coreOfPID = computed<Record<number, number>>(() => {
+  const m: Record<number, number> = {};
+  for (const c of cpu.cores) {
+    if (c.current_pid > 0) m[c.current_pid] = c.id;
+  }
+  return m;
+});
+
+const multicore = computed(() => cpu.cores.length > 1);
+
 // The offset of the next instruction to execute for the viewing PID. We
 // prefer the EIP of the core currently running this PID; if no core has it,
 // we fall back to the PCB's saved registers (state captured at the last
@@ -164,6 +179,15 @@ function fmtHex(n: number): string {
         >
           <span class="pt-pid">P{{ p.pid }}</span>
           <span class="pt-name">{{ p.name }}</span>
+          <!-- Multicore identity: small chip with the core's color so the
+               student maps PID → core at a glance. Hidden in single-core
+               sessions where the dot is enough. -->
+          <span
+            v-if="multicore && coreOfPID[p.pid] !== undefined"
+            class="pt-core"
+            :style="{ background: `var(--core-${coreOfPID[p.pid] % 4})`, color: `var(--core-fg)` }"
+            :title="`Ejecutándose en el núcleo C${coreOfPID[p.pid]}`"
+          >C{{ coreOfPID[p.pid] }}</span>
           <span v-if="runningOnVisibleCores.has(p.pid)" class="pt-current">●</span>
           <span v-if="pinnedPID === p.pid" class="pt-pin">📌</span>
         </button>
@@ -326,6 +350,18 @@ function fmtHex(n: number): string {
 .pt-pid { font-weight: 700; }
 .pt-current { color: var(--green); font-size: 9px; }
 .pt-pin { font-size: 9px; }
+
+/* Per-core ownership badge inside a proc tab. Background and fg are set
+   inline via --core-${id}; this rule only owns geometry and typography so
+   the chip lines up with the rest of the tab content. */
+.pt-core {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+}
 
 .code-meta {
   display: flex;

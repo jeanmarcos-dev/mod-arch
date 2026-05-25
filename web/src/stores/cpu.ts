@@ -27,7 +27,7 @@ export type CpuEvent =
   | { type: 'sched_decision'; from_pid: number; to_pid: number; reason?: string; ready_queue: number[] }
   | { type: 'process_state'; pid: number; state: string; reason?: string }
   | { type: 'syscall'; pid: number; num: number; name: string; args: number[]; result: number }
-  | { type: 'console_out'; pid: number; bytes: number[]; text: string }
+  | { type: 'console_out'; core_id?: number; pid: number; bytes: number[]; text: string }
   | { type: 'core_assign'; core_id: number; pid: number }
   | { type: 'core_release'; core_id: number; pid: number; reason?: string }
   | { type: 'mutex_op'; core_id: number; pid: number; mutex_id: number; op: 'create' | 'acquired' | 'waiting' | 'released' | 'handoff' | 'rejected'; next_pid?: number; waiters?: number[] }
@@ -216,8 +216,22 @@ export const useCpuStore = defineStore('cpu', () => {
   const stepHz = ref(4);
   const timerQuantum = ref(8);
 
-  // Registros que cambiaron en el último evento, para animar flash.
+  // Registros que cambiaron en el último evento, para animar flash. Per-core:
+  // every reg_write stamps the (coreId, reg) pair into the right set so a
+  // change on C1 flashes inside the C1 strip even when C0 is the focused
+  // core. The legacy `changedRegs` set is kept as a thin view over the
+  // focused core so any pre-multicore consumer keeps reading the same shape.
+  const changedRegsByCore = reactive<Record<number, Set<string>>>({});
   const changedRegs = reactive<Set<string>>(new Set());
+
+  function ensureChangedSlot(coreId: number): Set<string> {
+    let s = changedRegsByCore[coreId];
+    if (!s) {
+      s = reactive(new Set<string>());
+      changedRegsByCore[coreId] = s;
+    }
+    return s;
+  }
 
   // ─── Programas y log ────────────────────────────────────────────────────
   const programs = ref<ProgramInfo[]>([]);
@@ -431,9 +445,10 @@ export const useCpuStore = defineStore('cpu', () => {
   const flashingPIDs = reactive<Set<number>>(new Set());
 
   // ─── Consola ────────────────────────────────────────────────────────────
-  // Salida acumulada de sys_write. Cada bloque tiene el PID que escribió para
-  // colorearlos por proceso.
-  interface ConsoleChunk { pid: number; text: string }
+  // Salida acumulada de sys_write. Cada bloque tiene el PID que escribió y el
+  // core que originó el write para colorearlos y filtrarlos por core en
+  // multicore.
+  interface ConsoleChunk { pid: number; coreId?: number; text: string }
   const consoleChunks = ref<ConsoleChunk[]>([]);
 
   // ─── Sesión multi-tenant ────────────────────────────────────────────────
@@ -561,7 +576,10 @@ export const useCpuStore = defineStore('cpu', () => {
       hasEverConnected.value = true;
       reconnectAttempts.value = 0;
       clearRetryTimer();
-      pushLog('▸ conectado al backend', 'amber');
+      // Connection state is already surfaced by the WS pill in the SimStatusRow.
+      // Don't push it as an EventLog entry — the log is reserved for simulator
+      // events (instructions, mode switches, syscalls) so a fresh session
+      // shouldn't read like something just happened.
     };
     ws.onclose = () => {
       connected.value = false;
@@ -648,6 +666,7 @@ export const useCpuStore = defineStore('cpu', () => {
           }
         }
         changedRegs.clear();
+        for (const k of Object.keys(changedRegsByCore)) delete changedRegsByCore[Number(k)];
         break;
       case 'programs':
         programs.value = ev.list;
@@ -657,9 +676,11 @@ export const useCpuStore = defineStore('cpu', () => {
         const c = ensureCoreSlot(ev.core_id);
         c.regs[ev.reg] = ev.new;
         markCoreActive(c, ev.core_id);
+        // Stamp the per-core flash unconditionally — every visible core lights
+        // up its own register strip on a write, not only the focused one.
+        flashReg(ev.reg, ev.core_id);
         if (isSelected(ev.core_id)) {
           regs[ev.reg] = ev.new;
-          flashReg(ev.reg);
         }
         break;
       }
@@ -765,6 +786,7 @@ export const useCpuStore = defineStore('cpu', () => {
       case 'reset':
         pushLog('▸ reset', 'cyan');
         changedRegs.clear();
+        for (const k of Object.keys(changedRegsByCore)) delete changedRegsByCore[Number(k)];
         procs.value = [];
         readyQueue.value = [];
         waitQueue.value = [];
@@ -843,7 +865,7 @@ export const useCpuStore = defineStore('cpu', () => {
         pushLog(`⚙ sys_${ev.name}(${ev.args[0]}, 0x${(ev.args[1]>>>0).toString(16)}, ${ev.args[2]}) → ${ev.result}  [P${ev.pid}]`, 'green');
         break;
       case 'console_out':
-        consoleChunks.value.push({ pid: ev.pid, text: ev.text });
+        consoleChunks.value.push({ pid: ev.pid, coreId: ev.core_id, text: ev.text });
         if (consoleChunks.value.length > 200) consoleChunks.value.splice(0, consoleChunks.value.length - 200);
         break;
       case 'session_info':
@@ -994,9 +1016,14 @@ export const useCpuStore = defineStore('cpu', () => {
     }
   }
 
-  function flashReg(name: string) {
-    changedRegs.add(name);
-    setTimeout(() => changedRegs.delete(name), 800);
+  function flashReg(name: string, coreId: number = selectedCoreId.value) {
+    const slot = ensureChangedSlot(coreId);
+    slot.add(name);
+    if (isSelected(coreId)) changedRegs.add(name);
+    setTimeout(() => {
+      slot.delete(name);
+      if (isSelected(coreId)) changedRegs.delete(name);
+    }, 800);
   }
 
   function flashPID(pid: number) {
@@ -1138,7 +1165,7 @@ export const useCpuStore = defineStore('cpu', () => {
 
   return {
     regs, segments, mode, halted, running, tick, stepHz, timerQuantum,
-    changedRegs,
+    changedRegs, changedRegsByCore,
     programs, selectedProgram, log, connected, hasEverConnected, lastError,
     reconnectAttempts, nextRetryAt, reconnectNow,
     procs, currentPID, readyQueue, waitQueue, flashingPIDs, procSources, procSourceMaps,

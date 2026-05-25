@@ -28,6 +28,7 @@ interface Hop {
   toY: number;
   kind: 'enter' | 'iret';
   source: string;
+  coreId: number;
   frame: { EIP: string; CS: string; EFLAGS: string };
 }
 
@@ -147,6 +148,7 @@ narrators.onIrqFire((ev: IrqFire) => {
     fromX: from.x, fromY: from.y,
     toX: to.x, toY: to.y,
     kind: 'enter', source: ev.source,
+    coreId: ev.coreId,
     frame: snapshotFrame(ev.coreId),
   });
 });
@@ -176,6 +178,7 @@ narrators.onModeSwitch((ev: ModeSwitch) => {
     fromX: idtCenter.x, fromY: idtCenter.y,
     toX: cpuCenter.x, toY: cpuCenter.y,
     kind: 'iret', source: ev.cause,
+    coreId: ev.coreId,
     frame: snapshotFrame(ev.coreId),
   });
 
@@ -280,7 +283,10 @@ function vecLabel(v: number): string {
           :class="['int-narrator__arc', `int-narrator__arc--${h.kind}`]"
           :d="curvePath(h)"
           :marker-end="h.kind === 'enter' ? 'url(#int-arrow-enter)' : 'url(#int-arrow-iret)'"
-          :style="{ '--ttl': `${props.ttlMs / prefs.animationSpeed}ms` }"
+          :style="{
+            '--ttl': `${props.ttlMs / prefs.animationSpeed}ms`,
+            '--core-color': `var(--core-${h.coreId % 4})`,
+          }"
         />
       </template>
       <template v-for="a in iretArrows" :key="`ia-${a.id}`">
@@ -308,6 +314,7 @@ function vecLabel(v: number): string {
         '--x': `${cardPos(h).x}px`,
         '--y': `${cardPos(h).y}px`,
         '--ttl': `${props.ttlMs / prefs.animationSpeed}ms`,
+        '--core-color': `var(--core-${h.coreId % 4})`,
       }"
     >
       <header class="int-narrator__card-head">
@@ -359,10 +366,13 @@ function vecLabel(v: number): string {
   animation: int-arc var(--ttl) ease-out forwards;
 }
 
+/* ENTER picks up the issuing core's tint so a 4-core demo paints four
+   distinct arcs into the IDT. IRET stays semantic-green to read as "return
+   to user mode" regardless of core. */
 .int-narrator__arc--enter {
-  stroke: var(--amber);
-  color: var(--amber);
-  filter: drop-shadow(0 0 5px rgba(var(--accent-rgb), 0.6));
+  stroke: var(--core-color, var(--amber));
+  color: var(--core-color, var(--amber));
+  filter: drop-shadow(0 0 5px color-mix(in oklab, var(--core-color, var(--amber)) 60%, transparent));
 }
 
 .int-narrator__arc--iret {
@@ -393,8 +403,8 @@ function vecLabel(v: number): string {
 }
 
 .int-narrator__card--enter {
-  color: var(--amber);
-  box-shadow: var(--shadow-glow-amber);
+  color: var(--core-color, var(--amber));
+  box-shadow: 0 0 12px color-mix(in oklab, var(--core-color, var(--amber)) 35%, transparent);
 }
 
 .int-narrator__card--iret {

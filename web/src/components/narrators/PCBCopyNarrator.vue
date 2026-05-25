@@ -19,6 +19,7 @@ const cpu = useCpuStore();
 interface Trip {
   id: number;
   pid: number;
+  coreId: number;
   fromX: number;
   fromY: number;
   toX: number;
@@ -105,6 +106,7 @@ function launch(kind: 'save' | 'restore', payload: PcbSave | PcbRestore) {
   trips.value.push({
     id: payload.seq,
     pid: payload.pid,
+    coreId: payload.coreId,
     fromX: from.x,
     fromY: from.y,
     toX: to.x,
@@ -135,7 +137,10 @@ onUnmounted(() => { trips.value = []; });
           :y1="t.fromY"
           :x2="t.toX"
           :y2="t.toY"
-          :style="{ '--ttl': `${props.ttlMs / prefs.animationSpeed}ms` }"
+          :style="{
+            '--ttl': `${props.ttlMs / prefs.animationSpeed}ms`,
+            '--core-color': `var(--core-${t.coreId % 4})`,
+          }"
         />
       </template>
     </svg>
@@ -150,6 +155,7 @@ onUnmounted(() => { trips.value = []; });
         '--to-x':   `${t.toX}px`,
         '--to-y':   `${t.toY}px`,
         '--ttl':    `${props.ttlMs / prefs.animationSpeed}ms`,
+        '--core-color': `var(--core-${t.coreId % 4})`,
       }"
     >
       <header class="pcb-copy__card-head">
@@ -189,9 +195,12 @@ onUnmounted(() => { trips.value = []; });
   animation: pcb-trail var(--ttl) linear forwards;
 }
 
+/* SAVE picks up the source core's tint (matches the InterruptNarrator
+   convention). RESTORE stays green — semantically "this PID is now running
+   again" — regardless of which core received the context. */
 .pcb-copy__trail--save {
-  stroke: var(--amber);
-  filter: drop-shadow(0 0 5px rgba(var(--accent-rgb), 0.6));
+  stroke: var(--core-color, var(--amber));
+  filter: drop-shadow(0 0 5px color-mix(in oklab, var(--core-color, var(--amber)) 60%, transparent));
 }
 
 .pcb-copy__trail--restore {
@@ -221,8 +230,8 @@ onUnmounted(() => { trips.value = []; });
 }
 
 .pcb-copy__card--save {
-  color: var(--amber);
-  box-shadow: var(--shadow-glow-amber);
+  color: var(--core-color, var(--amber));
+  box-shadow: 0 0 12px color-mix(in oklab, var(--core-color, var(--amber)) 35%, transparent);
 }
 
 .pcb-copy__card--restore {

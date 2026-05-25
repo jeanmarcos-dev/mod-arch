@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useCpuStore } from '../stores/cpu';
-import { onUpdated, ref } from 'vue';
+import { computed, onUpdated, ref } from 'vue';
 
 const cpu = useCpuStore();
 const scroller = ref<HTMLElement | null>(null);
@@ -22,6 +22,11 @@ const PID_COLORS = [
 function colorOf(pid: number) {
   return PID_COLORS[pid] ?? 'var(--green)';
 }
+
+// Show the per-core badge only when the session actually has more than one
+// core. In single-core demos every chunk is implicit C0 so the prefix would
+// be visual noise.
+const multicore = computed(() => cpu.cores.length > 1);
 
 function onKeyPress(e: KeyboardEvent) {
   // Cada tecla individual se envía como una IRQ separada.
@@ -46,11 +51,15 @@ function focusInput() {
       <span class="kbd-hint" @click="focusInput">⌨ clic para escribir</span>
     </div>
     <pre class="output" ref="scroller">
-      <span
-        v-for="(c, i) in cpu.consoleChunks"
-        :key="i"
-        :style="{ color: colorOf(c.pid) }"
-      >{{ c.text }}</span>
+      <template v-for="(c, i) in cpu.consoleChunks" :key="i">
+        <span
+          v-if="multicore && c.coreId !== undefined"
+          class="output__core-chip"
+          :style="{ background: `var(--core-${c.coreId % 4})`, color: `var(--core-fg)` }"
+          :title="`Salida del núcleo C${c.coreId}`"
+        >C{{ c.coreId }}</span>
+        <span :style="{ color: colorOf(c.pid) }">{{ c.text }}</span>
+      </template>
       <span v-if="cpu.consoleChunks.length === 0" class="empty">(sin output todavía)</span>
     </pre>
     <div class="kbd-wrap">
@@ -154,6 +163,21 @@ function focusInput() {
   font-style: italic;
   font-family: 'JetBrains Mono', monospace;
   font-size: 14px;
+}
+
+/* Compact "C0/C1/..." badge prefixed in front of each console chunk so
+   multicore output stays decipherable even when two cores interleave
+   sys_write calls. Sized small so it does not steal focus from the text. */
+.output__core-chip {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 0 4px;
+  margin-right: 4px;
+  border-radius: var(--radius-sm);
+  vertical-align: baseline;
 }
 
 .kbd-wrap {

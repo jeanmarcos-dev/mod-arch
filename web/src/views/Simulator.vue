@@ -9,6 +9,9 @@ import ProcessesPanel from '../components/ProcessesPanel.vue';
 import ConsolePanel from '../components/ConsolePanel.vue';
 import MemoryPanel from '../components/MemoryPanel.vue';
 import CodeAsmSplit from '../components/CodeAsmSplit.vue';
+import ByteFlightNarrator from '../components/narrators/ByteFlightNarrator.vue';
+import ModeFlipNarrator from '../components/narrators/ModeFlipNarrator.vue';
+import PCBCopyNarrator from '../components/narrators/PCBCopyNarrator.vue';
 
 const cpu = useCpuStore();
 const mirror = useViewerMirrorStore();
@@ -151,6 +154,17 @@ onUnmounted(() => {
       <ProcessesPanel v-show="visible.procs" class="col-right" />
     </main>
 
+    <!-- Narrators are mounted at the Overview root so byte-flight, PCB-copy
+         and mode-flip animations are visible in the general view, not only in
+         /memoria, /procesos and /interrupciones. They are pure overlays
+         (pointer-events: none, position: absolute) and only render when their
+         events arrive, so they cost nothing when idle. InterruptNarrator is
+         intentionally omitted because the IDT anchors live exclusively in
+         the /interrupciones view. -->
+    <ByteFlightNarrator />
+    <ModeFlipNarrator />
+    <PCBCopyNarrator />
+
     <div class="credit" title="Demo de Sistemas Operativos">
       <span class="credit-tag">DEMO_SO · UCV</span>
       <span class="credit-name">jeanmarcos Juárez</span>
@@ -261,6 +275,10 @@ onUnmounted(() => {
   flex-direction: column;
   height: 100%;
   flex: 1;
+  /* Narrators are absolutely-positioned overlays anchored to this root —
+     without an explicit positioning context they would float up to the
+     viewport and miss the underlying panel coordinates. */
+  position: relative;
 }
 
 @keyframes shake-anim {

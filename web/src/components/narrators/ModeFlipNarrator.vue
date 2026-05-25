@@ -77,7 +77,12 @@ function label(m: 'user' | 'kernel') {
     <div class="mode-flip__tint"></div>
 
     <Transition name="mf-banner">
-      <div v-if="banner" :key="banner.id" class="mode-flip__banner">
+      <div
+        v-if="banner"
+        :key="banner.id"
+        class="mode-flip__banner"
+        :style="{ '--core-color': `var(--core-${banner.coreId % 4})`, '--core-color-fg': `var(--core-fg)` }"
+      >
         <span v-if="cpu.numCores > 1" class="mode-flip__core">C{{ banner.coreId }}</span>
         <span class="mode-flip__chip mode-flip__chip--from">{{ label(banner.from) }}</span>
         <span class="mode-flip__arrow">→</span>
@@ -157,12 +162,13 @@ function label(m: 'user' | 'kernel') {
 .mode-flip__core {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
+  font-weight: 700;
   letter-spacing: 1px;
   padding: 1px 5px;
   border-radius: var(--radius-sm);
-  background: rgba(var(--accent-rgb), 0.18);
-  color: var(--amber);
-  border: 1px solid var(--amber);
+  background: var(--core-color, var(--amber));
+  color: var(--core-color-fg, var(--core-fg, #0e0e10));
+  border: 1px solid var(--core-color, var(--amber));
   margin-right: 2px;
 }
 

@@ -58,21 +58,27 @@ const visibleCores = computed<CoreInfo[]>(() => {
   }];
 });
 
-// changedRegs flash lives on the top-level mirror, which always reflects the
-// focused core. Only highlight registers on that core to keep the contract
-// simple — other cores update their values without flashing.
+// changedRegsByCore stamps every reg_write into the right core's slot, so a
+// write on C1 flashes the C1 strip even when C0 is the focused core. The
+// legacy top-level changedRegs set is left in place for any external
+// consumer, but the panel reads the per-core map directly.
 function shouldFlash(core: CoreInfo, reg: string): boolean {
-  return core.id === cpu.selectedCoreId && cpu.changedRegs.has(reg);
+  return cpu.changedRegsByCore[core.id]?.has(reg) ?? false;
 }
 </script>
 
 <template>
-  <div class="panel cpu" data-pizarra-anchor="cpu-panel">
+  <div
+    class="panel cpu"
+    data-pizarra-anchor="cpu-panel"
+    data-narrator-anchor="cpu"
+  >
     <div class="panel-title">CPU · REGISTROS</div>
     <section
       v-for="core in visibleCores"
       :key="`core-${core.id}`"
       :class="['cpu-core', { 'cpu-core--focus': core.id === cpu.selectedCoreId, 'cpu-core--halted': core.halted }]"
+      :data-narrator-anchor="`cpu-${core.id}`"
     >
       <header v-if="visibleCores.length > 1" class="cpu-core__head">
         <span class="cpu-core__id">C{{ core.id }}</span>
