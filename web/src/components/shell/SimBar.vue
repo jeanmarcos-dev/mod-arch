@@ -28,7 +28,6 @@ import ProgramPicker from '../ProgramPicker.vue';
 import ShareModal from '../ShareModal.vue';
 import Term from '../glossary/Term.vue';
 import SimStatusRow from './SimStatusRow.vue';
-import CoreLegend from './CoreLegend.vue';
 import HandRaiseBadge from './HandRaiseBadge.vue';
 
 const cpu = useCpuStore();
@@ -351,7 +350,6 @@ function dockHeaderDblClick() {
         </div>
       </div>
 
-      <CoreLegend class="sim-bar__row sim-bar__row--legend" :readonly="viewer" />
       <SimStatusRow class="sim-bar__row sim-bar__row--status" />
     </section>
   </Teleport>
@@ -470,14 +468,6 @@ function dockHeaderDblClick() {
   border-top: 1px dashed var(--border);
 }
 
-/* Core legend sits between controls and status. Its own component handles
-   the "only render with ≥2 cores" gate, so when hidden no border accumulates
-   here either — keep it borderless. */
-.sim-bar__row--legend {
-  padding-top: 0;
-  padding-bottom: 0;
-}
-
 .sim-bar__brand {
   font-family: var(--font-display);
   letter-spacing: 3px;
@@ -536,8 +526,21 @@ function dockHeaderDblClick() {
 }
 
 @media (max-width: 480px) {
-  /* Leave room for the floating hamburger button. */
-  .sim-bar__row--controls { padding-left: 52px; }
+  /* Reserve room for the fixed hamburger button (32px + 12 left + 8 gap = 52)
+     and line LOAD/STEP/RUN/RESET up flush against it instead of centering them
+     in the residual space — that gap read as "two disconnected clusters". */
+  .sim-bar__row--controls {
+    padding-left: 52px;
+    justify-content: flex-start;
+  }
+  .sim-bar__center {
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+  }
+  .sim-bar__btns {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+  }
 }
 
 .sim-btn {
@@ -789,5 +792,19 @@ function dockHeaderDblClick() {
   .sim-bar__user-name,
   .sim-bar__login span { display: none; }
   .sim-bar__login { padding: 0 8px; }
+}
+
+/* Mobile compaction. Kept at the very end of the stylesheet on purpose: the
+   non-mediated rules above (.sim-bar__right { display: flex }, etc.) would
+   otherwise override these hides — same specificity, last one in source
+   order wins. The right cluster (identity / pizarra / share), the settings
+   popover trigger and CLEAR all have first-class entry points elsewhere
+   (Perfil, sidebar) so hiding them on a phone is safe. */
+@media (max-width: 768px) {
+  .sim-bar__right,
+  .sim-bar__settings,
+  .sim-btn--clear {
+    display: none;
+  }
 }
 </style>

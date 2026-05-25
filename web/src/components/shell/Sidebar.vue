@@ -390,7 +390,9 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
 
 /* Phone portrait: the icon-rail becomes an off-canvas drawer that the
    hamburger in the topbar opens. The expanded width returns so labels are
-   readable while the drawer is open. */
+   readable while the drawer is open. The drawer outranks the tutor FAB
+   (--z-modal = 600) so a primary nav action is never trapped underneath a
+   secondary overlay — sits at 650, below toast (700). */
 @media (max-width: 480px) {
   .sidebar {
     position: fixed;
@@ -398,7 +400,7 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
     width: 220px;
     transform: translateX(-100%);
     transition: transform var(--transition-base);
-    z-index: var(--z-overlay);
+    z-index: 650;
     box-shadow: 8px 0 24px rgba(0, 0, 0, 0.45);
   }
 
@@ -414,7 +416,7 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
   position: fixed;
   inset: 0;
   background: var(--surface-overlay-strong);
-  z-index: calc(var(--z-overlay) - 1);
+  z-index: 649;
   animation: sidebar-backdrop-in var(--transition-fast) ease-out;
 }
 

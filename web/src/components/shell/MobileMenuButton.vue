@@ -28,25 +28,43 @@ const shiftedDown = computed(() => bannerVisible.value);
 .mobile-menu-btn {
   display: none;
   position: fixed;
-  top: 8px;
-  left: 8px;
-  width: 36px;
-  height: 36px;
+  /* Geometry matches .sim-btn (32px high) so the button sits on the same
+     baseline as LOAD/STEP/RUN/RESET when docked over the SimBar. */
+  top: 10px;
+  left: 12px;
+  width: 32px;
+  height: 32px;
   align-items: center;
   justify-content: center;
   background: var(--surface-2);
-  border: 1px solid var(--accent);
+  border: 1px solid var(--border-strong);
   color: var(--accent);
   border-radius: var(--radius-sm);
   cursor: pointer;
   padding: 0;
-  z-index: calc(var(--z-overlay) + 1);
-  box-shadow: var(--shadow-glow-amber);
-  transition: background var(--transition-fast), color var(--transition-fast);
+  /* Sits one layer above the drawer (650) so the X to close it is always
+     reachable even while the panel itself covers the rest of the UI. */
+  z-index: 651;
+  /* No drop-shadow when docked — the muted border is enough next to the
+     SimBar buttons and avoids the "floating card" look that read as a
+     disconnected column. The glow returns only while the drawer is open so
+     the close affordance still pops. */
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast),
+    left var(--transition-base);
 }
 
 .mobile-menu-btn:hover {
   background: rgba(var(--accent-rgb), 0.18);
+}
+
+/* Drawer open: slide the toggle to the right edge of the drawer so the X
+   sits over the dim backdrop instead of overlapping the first group label
+   ("SIMULACIÓN") inside the menu. */
+.mobile-menu-btn--open {
+  left: 228px;
+  border-color: var(--accent);
+  box-shadow: var(--shadow-glow-amber);
 }
 
 .mobile-menu-btn:focus-visible {
