@@ -1,8 +1,12 @@
-.PHONY: help dev test test-v lint fmt cover build run clean web-install web-dev
+.PHONY: help dev watch ensure-air test test-v lint fmt cover build run clean web-install web-dev
+
+GOPATH_BIN := $(shell go env GOPATH)/bin
+AIR_BIN    ?= $(shell command -v air 2>/dev/null || echo $(GOPATH_BIN)/air)
 
 help:
 	@echo "make dev         - run the Go backend with go run"
 	@echo "make web-dev     - run the Vite dev server for the frontend"
+	@echo "make watch       - live-reload: air (Go :8080) + Vite (:5173) en paralelo"
 	@echo "make test        - run Go tests"
 	@echo "make test-v      - run Go tests with -v"
 	@echo "make cover       - run tests with coverage report"
@@ -14,6 +18,22 @@ help:
 
 dev:
 	go run ./cmd/modos-cpu
+
+# Live-reload de desarrollo: air rebuildea el binario Go al cambiar *.go y
+# Vite hace HMR para Vue/TS. Vite proxea /api y /ws al backend en :8080,
+# así que durante dev se abre http://localhost:5173.
+ensure-air:
+	@if [ ! -x "$(AIR_BIN)" ]; then \
+		echo ">> air no encontrado, instalando en $(GOPATH_BIN)..."; \
+		GOFLAGS= go install github.com/air-verse/air@latest; \
+	fi
+
+watch: ensure-air
+	@echo ">> watch: Go (air) :8080 + Vite :5173 — abrí http://localhost:5173"
+	@( "$(AIR_BIN)" -c .air.toml 2>&1 | sed -u 's/^/[go]  /' ) & go_pid=$$!; \
+	( cd web && npm run dev 2>&1 | sed -u 's/^/[web] /' ) & web_pid=$$!; \
+	trap 'kill $$go_pid $$web_pid 2>/dev/null; wait 2>/dev/null' INT TERM; \
+	wait $$go_pid $$web_pid
 
 test:
 	go test ./...

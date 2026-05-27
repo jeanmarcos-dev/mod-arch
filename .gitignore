@@ -46,3 +46,6 @@ coverage.out
 # deploy.local/v2/export-rag.sh; never commit.
 state-dump-*.sql
 state-dump-*.db
+
+# Local Claude Code skill artifacts (brainstorm scratchpads, etc.).
+.superpowers/
