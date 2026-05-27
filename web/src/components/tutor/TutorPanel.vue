@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { BotMessageSquare, Send, Trash2, X, Maximize2, Minimize2 } from '@lucide/vue';
+import { BotMessageSquare, Send, Trash2, Minus, Maximize2, Minimize2 } from '@lucide/vue';
 
 import TutorMessage from './TutorMessage.vue';
 import { useTutor } from '../../composables/useTutor';
@@ -76,8 +76,8 @@ onMounted(scrollToBottom);
           <Minimize2 v-if="isExpanded" :size="14" :stroke-width="2" />
           <Maximize2 v-else :size="14" :stroke-width="2" />
         </button>
-        <button class="icon-btn" @click="emit('close')" title="Cerrar tutor" aria-label="Cerrar tutor">
-          <X :size="14" :stroke-width="2" />
+        <button class="icon-btn" @click="emit('close')" title="Minimizar tutor" aria-label="Minimizar tutor">
+          <Minus :size="14" :stroke-width="2.5" />
         </button>
       </div>
     </header>

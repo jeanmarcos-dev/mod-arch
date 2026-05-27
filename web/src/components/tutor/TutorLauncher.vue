@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { BotMessageSquare, LogIn, X } from '@lucide/vue';
+import { BotMessageSquare, LogIn, Minus } from '@lucide/vue';
 
 import TutorPanel from './TutorPanel.vue';
 import { useTutorStore, type TutorCitation } from '../../stores/tutor';
@@ -110,8 +110,8 @@ function onBackdropClick() {
     <transition name="slide">
       <div v-if="tutor.open && !isExpanded" class="panel-wrap docked">
         <div v-if="needsLogin" class="login-gate" role="dialog" aria-label="Inicie sesión">
-          <button class="gate-close" @click="tutor.setOpen(false)" aria-label="Cerrar">
-            <X :size="14" :stroke-width="2" />
+          <button class="gate-close" @click="tutor.setOpen(false)" aria-label="Minimizar" title="Minimizar">
+            <Minus :size="14" :stroke-width="2.5" />
           </button>
           <div class="gate-icon"><BotMessageSquare :size="32" :stroke-width="1.4" /></div>
           <h3 class="gate-title">Tutor protegido</h3>
@@ -145,8 +145,8 @@ function onBackdropClick() {
           <div class="tutor-backdrop" @click="onBackdropClick" />
           <div class="panel-wrap expanded" @click.stop>
             <div v-if="needsLogin" class="login-gate expanded-gate" role="dialog" aria-label="Inicie sesión">
-              <button class="gate-close" @click="tutor.setOpen(false)" aria-label="Cerrar">
-                <X :size="16" :stroke-width="2" />
+              <button class="gate-close" @click="tutor.setOpen(false)" aria-label="Minimizar" title="Minimizar">
+                <Minus :size="16" :stroke-width="2.5" />
               </button>
               <div class="gate-icon"><BotMessageSquare :size="44" :stroke-width="1.4" /></div>
               <h3 class="gate-title">Tutor protegido</h3>
