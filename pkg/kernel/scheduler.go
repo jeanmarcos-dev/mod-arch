@@ -206,3 +206,40 @@ func pcbRegsSnapshot(p *PCB) map[string]uint32 {
 		"ESP": p.SavedUserESP,
 	}
 }
+
+// DispatchIdleCores assigns ready processes to idle cores in round-robin
+// fashion (lowest core ID first). For each (core, pid) pairing it flips the
+// PCB to RUN, loads the CPU from the PCB, and emits PCBRestore + SchedDecision
+// + CoreAssign + ProcessState{RUN} so both the READY→RUN transition and the
+// shrinking ready queue are visible in the event log. Idempotent: if every
+// core already has a CurrentPID or the ready queue is empty, returns nil.
+func (k *Kernel) DispatchIdleCores() []cpu.Event {
+	var out []cpu.Event
+	for {
+		idle := k.firstIdleCore()
+		if idle == nil {
+			return out
+		}
+		pid, ok := k.Ready.Pop()
+		if !ok {
+			return out
+		}
+		pcb := k.Processes[pid]
+		if pcb == nil {
+			continue
+		}
+		idle.CurrentPID = pid
+		pcb.State = StateRun
+		pcb.Core = idle.ID
+		k.loadCPUFromPCB(idle, pcb)
+		// SchedDecision broadcasts the post-pop ready queue so the frontend
+		// store stays in sync. Without it the queue would freeze at its
+		// pre-dispatch value and show RUN processes still queued.
+		out = append(out,
+			cpu.EventPCBRestore{CoreID: idle.ID, PID: pid, Regs: pcbRegsSnapshot(pcb)},
+			cpu.EventSchedDecision{FromPID: 0, ToPID: pid, Reason: "dispatch", ReadyQueue: k.Ready.Snapshot()},
+			cpu.EventCoreAssign{CoreID: idle.ID, PID: pid},
+			cpu.EventProcessState{PID: pid, State: string(StateRun)},
+		)
+	}
+}

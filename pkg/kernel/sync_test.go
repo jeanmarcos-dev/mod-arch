@@ -22,6 +22,9 @@ func freshKernelWithProcs(t *testing.T, numProcs int) *Kernel {
 			t.Fatalf("AddProcess: %v", err)
 		}
 	}
+	// These tests assert against k.BootCore().CurrentPID, which the
+	// simulator wires up via DispatchIdleCores before any tick runs.
+	k.DispatchIdleCores()
 	return k
 }
 

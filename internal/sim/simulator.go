@@ -198,6 +198,10 @@ func (s *Simulator) LoadProgram(name string) error {
 // StepOnce executes one instruction and broadcasts the resulting events.
 func (s *Simulator) StepOnce() error {
 	s.mu.Lock()
+	// Boot dispatch covers the case where the user steps without having
+	// pressed RUN first: idle cores pull from the ready queue before the
+	// kernel ticks. Idempotent when every core already has a CurrentPID.
+	bootEvs := s.kernel.DispatchIdleCores()
 	evs, err := s.kernel.Step()
 	tick := s.kernel.BootCPU().Tick
 	halted := s.kernel.AllHalted()
@@ -205,6 +209,10 @@ func (s *Simulator) StepOnce() error {
 	if err != nil {
 		s.Broadcast(map[string]any{"type": "error", "message": err.Error()})
 		return err
+	}
+	for _, e := range bootEvs {
+		s.events.push(e, tick)
+		s.Broadcast(EventToWire(e))
 	}
 	for _, e := range evs {
 		s.events.push(e, tick)
@@ -234,8 +242,17 @@ func (s *Simulator) StartRun(hz int) {
 	stop := s.runStop
 	hzCh := s.hzChange
 	interval := time.Second / time.Duration(hz)
+	// Boot dispatch: assign ready procs to idle cores so the first tick
+	// already has work to do and the READY→RUN transitions are observable
+	// in the event log before any instruction executes.
+	bootEvs := s.kernel.DispatchIdleCores()
+	tick := s.kernel.BootCPU().Tick
 	s.mu.Unlock()
 
+	for _, e := range bootEvs {
+		s.events.push(e, tick)
+		s.Broadcast(EventToWire(e))
+	}
 	s.Broadcast(map[string]any{"type": "state", "running": true, "hz": hz})
 
 	go func() {

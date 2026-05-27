@@ -61,6 +61,10 @@ func TestMulticore_TwoProcessesAdvanceOnTwoCores(t *testing.T) {
 		t.Fatalf("AddProcess p2: %v", err)
 	}
 
+	// Boot dispatch: simulator does this on RUN/STEP. Direct kernel tests
+	// must invoke it explicitly so the READY procs land on idle cores.
+	k.DispatchIdleCores()
+
 	if k.Cores[0].CurrentPID != 1 {
 		t.Fatalf("core 0 CurrentPID = %d, want 1", k.Cores[0].CurrentPID)
 	}
@@ -108,6 +112,8 @@ func TestMulticore_EmitsCoreAssign(t *testing.T) {
 	if _, err := k.AddProcess("p2", pHalt); err != nil {
 		t.Fatal(err)
 	}
+	// Direct kernel tests must dispatch READY procs to cores explicitly.
+	k.DispatchIdleCores()
 
 	var sawAssign, sawRelease bool
 	for step := 0; step < 60 && !k.AllHalted(); step++ {
@@ -162,6 +168,7 @@ func TestMulticore_ResetKeepsNonBootCoresHalted(t *testing.T) {
 	if _, err := k.AddProcess("p1", []byte{0x40, 0xF4}); err != nil {
 		t.Fatal(err)
 	}
+	k.DispatchIdleCores() // wake at least one core so Reset has something to undo
 	k.Reset()
 	if !k.AllHalted() {
 		halted := make([]bool, 0, len(k.Cores))
@@ -184,6 +191,8 @@ func TestMulticore_IdleCoreWhenSingleProcess(t *testing.T) {
 	if _, err := k.AddProcess("only", []byte{0x40, 0xF4}); err != nil {
 		t.Fatal(err)
 	}
+	// Single process + 2 cores: dispatch lands it on core 0, leaving 1 idle.
+	k.DispatchIdleCores()
 
 	if k.Cores[1].CurrentPID != 0 {
 		t.Errorf("core 1 CurrentPID = %d, want 0 (idle)", k.Cores[1].CurrentPID)

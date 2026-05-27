@@ -198,7 +198,7 @@ function dockHeaderDblClick() {
             <button
               type="button"
               class="sim-btn"
-              :disabled="cpu.halted || cpu.running || viewer"
+              :disabled="(cpu.halted && cpu.readyQueue.length === 0) || cpu.running || viewer"
               title="Ejecutar una instrucción"
               @click="cpu.step()"
             ><StepForward :size="14" :stroke-width="2" /><span>STEP</span></button>
@@ -206,7 +206,7 @@ function dockHeaderDblClick() {
               v-if="!cpu.running"
               type="button"
               class="sim-btn"
-              :disabled="cpu.halted || viewer"
+              :disabled="(cpu.halted && cpu.readyQueue.length === 0) || viewer"
               title="Ejecutar continuamente"
               @click="cpu.run(cpu.stepHz)"
             ><Play :size="14" :stroke-width="2" /><span>RUN</span></button>
@@ -630,7 +630,10 @@ function dockHeaderDblClick() {
   flex-direction: column;
   gap: var(--space-3);
   min-width: 220px;
-  z-index: var(--z-dropdown, 100);
+  /* Sits above narrators (--z-overlay = 500) so byte-flight lines and
+     mode-flip banners don't paint over an open settings popover. Stays
+     below modals/toasts. */
+  z-index: calc(var(--z-overlay, 500) + 10);
   box-shadow: var(--shadow-elevation-2);
 }
 

@@ -6,9 +6,9 @@ import Term from '../glossary/Term.vue';
 // SimStatusRow renders the CPU status chips. Single-core sessions get the
 // flat one-row layout with the canonical pills (PID, MODE, EIP/EAX/ESP,
 // TICK, STATE, WS). Multicore sessions split into a header (cores filter +
-// aggregates: TICK, STATE with per-core LEDs, WS) plus one sub-row per
-// visible core so the spectator sees real per-core registers instead of a
-// single mirror of whichever core happens to be focused.
+// TICK, WS) plus one sub-row per visible core so the spectator sees real
+// per-core registers AND each core's own STATE chip — a global STATE in
+// multicore hides the case where one core runs while another is halted.
 //
 // `readonly` (set by the viewer shell) disables the only interactive bits:
 // the core filter tabs and the click-to-focus behavior on sub-rows.
@@ -28,28 +28,31 @@ const visibleCores = computed<CoreInfo[]>(() => {
 // otherwise it would push everything onto an extra line for nothing.
 const flat = computed(() => cpu.numCores === 1 || visibleCores.value.length === 1);
 
-type CoreLedKind = 'run' | 'halt' | 'idle';
-interface CoreLed { id: number; kind: CoreLedKind; pid: number }
+type CoreStateKind = 'RUN' | 'HALT' | 'IDLE';
 
-const coreLeds = computed<CoreLed[]>(() => {
-  if (cpu.numCores <= 1) return [];
-  return cpu.cores.map((c) => {
-    let kind: CoreLedKind = 'idle';
-    if (c.halted) kind = 'halt';
-    else if (c.current_pid > 0) kind = 'run';
-    return { id: c.id, kind, pid: c.current_pid };
-  });
-});
+function coreStateLabel(c: CoreInfo): CoreStateKind {
+  if (c.halted) return 'HALT';
+  if (c.current_pid > 0) return 'RUN';
+  return 'IDLE';
+}
+function coreStateClass(c: CoreInfo): string {
+  const l = coreStateLabel(c);
+  if (l === 'HALT') return 'sim-pill--halt';
+  if (l === 'RUN') return 'sim-pill--running';
+  return 'sim-pill--idle';
+}
+function coreStateTerm(c: CoreInfo): string {
+  const l = coreStateLabel(c);
+  if (l === 'HALT') return 'HLT';
+  if (l === 'RUN') return 'RUN';
+  return 'Round-Robin';
+}
 
-const stateLabel = computed(() => {
-  if (cpu.numCores <= 1) {
-    if (cpu.halted) return 'HALT';
-    if (cpu.running) return 'RUN';
-    return 'IDLE';
-  }
-  const leds = coreLeds.value;
-  if (leds.some((l) => l.kind === 'run')) return 'RUN';
-  if (leds.every((l) => l.kind === 'halt')) return 'HALT';
+// Flat-mode aggregate kept for the single-core / single-visible-core path:
+// when only one row is rendered, the chip lives next to it inline.
+const stateLabel = computed<CoreStateKind>(() => {
+  if (cpu.halted) return 'HALT';
+  if (cpu.running) return 'RUN';
   return 'IDLE';
 });
 const stateClass = computed(() => {
@@ -63,12 +66,6 @@ const stateTerm = computed(() => {
   if (l === 'HALT') return 'HLT';
   if (l === 'RUN') return 'RUN';
   return 'Round-Robin';
-});
-const stateTooltip = computed(() => {
-  if (cpu.numCores <= 1) return '';
-  return coreLeds.value
-    .map((l) => `C${l.id}: ${l.kind === 'run' ? 'RUN P' + l.pid : l.kind.toUpperCase()}`)
-    .join(' · ');
 });
 
 function hex(v: number | undefined): string {
@@ -179,7 +176,7 @@ function onCoreAllClick() {
         <Term term="IRQ 0x20" mode="label" class="sim-pill__k">TICK</Term>
         <span class="sim-pill__v">{{ cpu.tick }}</span>
       </span>
-      <span :class="['sim-pill', 'sim-pill--state', stateClass]" :title="stateTooltip">
+      <span :class="['sim-pill', 'sim-pill--state', stateClass]">
         <Term :term="stateTerm" mode="label" class="sim-pill__k">STATE</Term>
         <span class="sim-pill__v">{{ stateLabel }}</span>
       </span>
@@ -233,17 +230,6 @@ function onCoreAllClick() {
           <Term term="IRQ 0x20" mode="label" class="sim-pill__k">TICK</Term>
           <span class="sim-pill__v">{{ cpu.tick }}</span>
         </span>
-        <span :class="['sim-pill', 'sim-pill--state', stateClass]" :title="stateTooltip">
-          <Term :term="stateTerm" mode="label" class="sim-pill__k">STATE</Term>
-          <span class="sim-pill__v">{{ stateLabel }}</span>
-          <span v-if="coreLeds.length" class="sim-pill__leds" aria-hidden="true">
-            <span
-              v-for="l in coreLeds"
-              :key="l.id"
-              :class="['sim-pill__led', `sim-pill__led--${l.kind}`]"
-            />
-          </span>
-        </span>
         <span :class="['sim-pill', 'sim-pill--ws', cpu.connected ? 'sim-pill--ws-on' : 'sim-pill--ws-off']" :title="`WebSocket ${cpu.connected ? 'conectado' : 'desconectado'}`">
           <span class="sim-pill__k">WS</span>
           <span class="sim-pill__v">{{ cpu.connected ? 'ON' : 'OFF' }}</span>
@@ -281,6 +267,17 @@ function onCoreAllClick() {
           <span class="sim-pill sim-pill--mono sim-pill--reg">
             <Term term="ESP" mode="label" class="sim-pill__k">ESP</Term>
             <span class="sim-pill__v">{{ hex(c.regs.ESP) }}</span>
+          </span>
+          <span
+            :class="['sim-pill', 'sim-pill--state', coreStateClass(c)]"
+            :title="c.halted
+              ? `C${c.id} ejecutó HLT y duerme hasta el próximo IRQ.`
+              : (c.current_pid > 0
+                ? `C${c.id} corre P${c.current_pid} en este momento.`
+                : `C${c.id} está ocioso, esperando que el dispatcher le asigne un proceso.`)"
+          >
+            <Term :term="coreStateTerm(c)" mode="label" class="sim-pill__k">STATE</Term>
+            <span class="sim-pill__v">{{ coreStateLabel(c) }}</span>
           </span>
         </div>
       </div>
@@ -369,10 +366,10 @@ function onCoreAllClick() {
   letter-spacing: 1px;
   text-transform: uppercase;
   background: transparent;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   color: var(--text-muted);
-  padding: 0 6px;
-  height: 18px;
+  padding: 0 8px;
+  height: 24px;
   box-sizing: border-box;
   cursor: pointer;
   border-radius: var(--radius-sm);
@@ -416,10 +413,10 @@ function onCoreAllClick() {
   letter-spacing: 1px;
   text-transform: uppercase;
   background: transparent;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   color: var(--text-dim);
-  padding: 0 6px;
-  height: 18px;
+  padding: 0 8px;
+  height: 24px;
   /* Fixed width so the label oscillating between "ALL" and "ONLY Cx" does
      not reflow the surrounding chips. Sized for the longest variant. */
   min-width: 64px;
@@ -481,31 +478,6 @@ function onCoreAllClick() {
 .sim-pill--tick  { min-width: 80px; }
 .sim-pill--state { min-width: 78px; }
 .sim-pill--ws    { min-width: 62px; }
-
-.sim-pill__leds {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin-left: 6px;
-}
-.sim-pill__led {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  flex-shrink: 0;
-}
-.sim-pill__led--run {
-  background: var(--green);
-  box-shadow: 0 0 4px var(--green-glow);
-}
-.sim-pill__led--halt {
-  background: var(--red);
-  box-shadow: 0 0 4px rgba(255, 58, 58, 0.5);
-}
-.sim-pill__led--idle {
-  background: var(--text-dim);
-}
 
 .sim-pill--user { border-color: var(--green); }
 .sim-pill--user .sim-pill__v { color: var(--green); }

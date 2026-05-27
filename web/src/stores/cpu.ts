@@ -251,6 +251,24 @@ export const useCpuStore = defineStore('cpu', () => {
   const readyQueue = ref<number[]>([]);
   const waitQueue = ref<WaitInfo[]>([]);
 
+  // Cross-panel intent: when a row of the PCB table requests "jump to my
+  // memory", it writes the target address here. Simulator switches the
+  // middle tab to memory and MemoryPanel re-centers its custom view on the
+  // address, then clears the flag. Kept in the store so the originating
+  // component does not need a callback chain to two ancestors.
+  const pendingMemoryJump = ref<number | null>(null);
+  function requestMemoryJump(addr: number) {
+    pendingMemoryJump.value = addr >>> 0;
+  }
+  function clearMemoryJump() {
+    pendingMemoryJump.value = null;
+  }
+
+  // Latest decoded mnemonic per core. Fed by the 'instruction' event so the
+  // PCB panel can show "next/last instruction" for the running process
+  // without re-requesting it on every render.
+  const lastMnemonic = reactive<Record<number, string>>({});
+
   // ─── Multicore + sync primitives ─────────────────────────────────────────
   // cores tracks per-core state. numCores comes from the snapshot. mutexes
   // and semaphores are kept up-to-date via the mutex_op / sem_op events so
@@ -291,6 +309,17 @@ export const useCpuStore = defineStore('cpu', () => {
     const it = selectedCoreIds.value.values().next();
     return it.done ? 0 : (it.value as number);
   });
+
+  // Cores currently visible (selected in the filter), sorted by id so any
+  // consumer iterates them as C0..C3 left → right. Components that need to
+  // render one row per visible core (MemoryPanel acordeón, EventLog chips,
+  // narrators) should read this instead of filtering cores manually.
+  const visibleCores = computed<CoreInfo[]>(() =>
+    cores.value
+      .filter(c => selectedCoreIds.value.has(c.id))
+      .slice()
+      .sort((a, b) => a.id - b.id),
+  );
 
   function ensureCoreSlot(id: number): CoreInfo {
     let c = cores.value.find(x => x.id === id);
@@ -689,6 +718,7 @@ export const useCpuStore = defineStore('cpu', () => {
         const nextEIP = ev.eip + ev.bytes.length;
         c.regs.EIP = nextEIP;
         markCoreActive(c, ev.core_id);
+        lastMnemonic[ev.core_id] = ev.mnemonic;
         // EventsLog renders the per-core chip from coreId so the text itself
         // stays clean and identical across single- and multi-core sessions.
         pushLog(`[${ev.eip.toString(16).padStart(6, '0')}]  ${ev.mnemonic}`, 'amber', ev.core_id);
@@ -798,6 +828,8 @@ export const useCpuStore = defineStore('cpu', () => {
         semaphores.value = [];
         activeFrameByCore.value = {};
         lastFiredHandlerByVector.value = {};
+        pendingMemoryJump.value = null;
+        for (const k of Object.keys(lastMnemonic)) delete lastMnemonic[Number(k)];
         // Reset per-core register/state caches so the next snapshot starts
         // from a clean slate. Without this, stale values from the previous
         // demo would survive a reset on cores that the new demo does not
@@ -1169,7 +1201,8 @@ export const useCpuStore = defineStore('cpu', () => {
     programs, selectedProgram, log, connected, hasEverConnected, lastError,
     reconnectAttempts, nextRetryAt, reconnectNow,
     procs, currentPID, readyQueue, waitQueue, flashingPIDs, procSources, procSourceMaps,
-    cores, numCores, selectedCoreId, selectedCoreIds, isCoreVisible,
+    pendingMemoryJump, requestMemoryJump, clearMemoryJump, lastMnemonic,
+    cores, numCores, selectedCoreId, selectedCoreIds, visibleCores, isCoreVisible,
     toggleCoreSelection, selectAllCores, selectOnlyCore, setSelectedCore, setVisibleCores,
     mutexes, semaphores,
     activeFrameByCore, lastFiredHandlerByVector,

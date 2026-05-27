@@ -7,17 +7,20 @@ import (
 	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
 )
 
-// newTestKernel builds a kernel with a single user process and returns it.
+// newTestKernel builds a kernel with a single user process and returns it
+// ready to step (dispatch already done).
 func newTestKernel(t *testing.T, userProg []byte) *Kernel {
 	t.Helper()
 	k := New(cpu.DefaultMemSize)
 	if _, err := k.AddProcess("p1", userProg); err != nil {
 		t.Fatalf("AddProcess: %v", err)
 	}
+	k.DispatchIdleCores()
 	return k
 }
 
-// newTestKernelMulti loads several processes in order and returns the kernel.
+// newTestKernelMulti loads several processes in order and returns the kernel
+// ready to step (dispatch already done).
 func newTestKernelMulti(t *testing.T, progs ...[]byte) *Kernel {
 	t.Helper()
 	k := New(cpu.DefaultMemSize)
@@ -26,6 +29,7 @@ func newTestKernelMulti(t *testing.T, progs ...[]byte) *Kernel {
 			t.Fatalf("AddProcess %d: %v", i+1, err)
 		}
 	}
+	k.DispatchIdleCores()
 	return k
 }
 
@@ -193,7 +197,7 @@ func TestTimer_OnlyFiresWithIFEnabled(t *testing.T) {
 	}
 }
 
-func TestAddProcess_FirstIsRun(t *testing.T) {
+func TestAddProcess_GoesToReadyQueue(t *testing.T) {
 	k := New(cpu.DefaultMemSize)
 	pid, err := k.AddProcess("p1", []byte{0x90, 0xF4})
 	if err != nil {
@@ -202,30 +206,30 @@ func TestAddProcess_FirstIsRun(t *testing.T) {
 	if pid != 1 {
 		t.Errorf("first PID = %d, want 1", pid)
 	}
-	if k.BootCore().CurrentPID != 1 {
-		t.Errorf("CurrentPID = %d, want 1", k.BootCore().CurrentPID)
+	if k.BootCore().CurrentPID != 0 {
+		t.Errorf("CurrentPID = %d, want 0 (no dispatch on load)", k.BootCore().CurrentPID)
 	}
-	if k.Ready.Len() != 0 {
-		t.Errorf("ready queue should be empty, got: %v", k.Ready.Snapshot())
+	if snap := k.Ready.Snapshot(); len(snap) != 1 || snap[0] != 1 {
+		t.Errorf("ready queue = %v, want [1]", snap)
 	}
-	if k.Processes[1].State != StateRun {
-		t.Errorf("state = %s, want RUN", k.Processes[1].State)
+	if k.Processes[1].State != StateReady {
+		t.Errorf("state = %s, want READY", k.Processes[1].State)
 	}
 }
 
-func TestAddProcess_SecondIsReady(t *testing.T) {
+func TestAddProcess_AllPendingInReadyQueue(t *testing.T) {
 	k := New(cpu.DefaultMemSize)
 	_, _ = k.AddProcess("p1", []byte{0x90, 0xF4})
 	_, _ = k.AddProcess("p2", []byte{0x90, 0xF4})
 
-	if k.BootCore().CurrentPID != 1 {
-		t.Errorf("CurrentPID = %d, want 1 (p2 should be in ready queue)", k.BootCore().CurrentPID)
+	if k.BootCore().CurrentPID != 0 {
+		t.Errorf("CurrentPID = %d, want 0 (no dispatch on load)", k.BootCore().CurrentPID)
 	}
-	if snap := k.Ready.Snapshot(); len(snap) != 1 || snap[0] != 2 {
-		t.Errorf("ready queue = %v, want [2]", snap)
+	if snap := k.Ready.Snapshot(); len(snap) != 2 || snap[0] != 1 || snap[1] != 2 {
+		t.Errorf("ready queue = %v, want [1 2]", snap)
 	}
-	if k.Processes[2].State != StateReady {
-		t.Errorf("p2 state = %s, want READY", k.Processes[2].State)
+	if k.Processes[1].State != StateReady || k.Processes[2].State != StateReady {
+		t.Errorf("states = %s/%s, want both READY", k.Processes[1].State, k.Processes[2].State)
 	}
 }
 

@@ -10,7 +10,8 @@ import (
 
 const sharedCounterAddr = 0x3FFFE0
 
-// loadDemo wires a Demo's procs into a fresh single-core kernel.
+// loadDemo wires a Demo's procs into a fresh single-core kernel and triggers
+// the boot dispatch the simulator would normally run on RUN/STEP.
 func loadDemo(t *testing.T, k *kernel.Kernel, d Demo) {
 	t.Helper()
 	for _, p := range d.Procs {
@@ -18,6 +19,7 @@ func loadDemo(t *testing.T, k *kernel.Kernel, d Demo) {
 			t.Fatalf("AddProcess %s: %v", p.Name, err)
 		}
 	}
+	k.DispatchIdleCores()
 }
 
 // runToHalt drives the kernel until every core halts or the budget runs out.

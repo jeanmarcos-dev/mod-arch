@@ -133,7 +133,9 @@ function label(m: 'user' | 'kernel') {
 
 .mode-flip__banner {
   position: absolute;
-  top: var(--space-3);
+  /* Clears the middle-tabs row in Simulator.vue (layout pad 8 + tab height
+     ~32 + gap). At 12px it landed directly on the EVENT LOG tab label. */
+  top: 56px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;

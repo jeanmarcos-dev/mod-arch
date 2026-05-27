@@ -109,11 +109,12 @@ func NewMulti(memSize, numCores int) *Kernel {
 			c.KernelStackTop = stackTop
 		} else {
 			c = cpu.NewWithMemory(mem, stackTop)
-			// Non-boot cores start halted; they wake up when the scheduler
-			// assigns them a process. Without this AllHalted would never be
-			// true for an N-core kernel that only ran on one core.
-			c.Halted = true
 		}
+		// Every core starts halted. With no process assigned there is nothing
+		// to advance, so HasWork() must report false until DispatchIdleCores
+		// wakes a core via loadCPUFromPCB. This mirrors Reset() and prevents
+		// the run loop from spinning on an empty kernel.
+		c.Halted = true
 		// Tag the CPU with its core index so every event it emits carries
 		// CoreID — the frontend uses it to keep per-core register files
 		// separate instead of overwriting a global one.
@@ -164,9 +165,12 @@ func (k *Kernel) AllHalted() bool {
 }
 
 // HasWork reports whether any core can still make progress on the next
-// Step: either it is actively running or it has an interrupt waiting to be
-// dispatched. Halted-with-pending-IRQ counts as work because dispatchIRQ
-// clears the halt as soon as the CPU runs one more cycle.
+// Step: either it is actively running, has an interrupt waiting to be
+// dispatched, or there is a process queued in READY waiting for a core.
+// Halted-with-pending-IRQ counts as work because dispatchIRQ clears the
+// halt as soon as the CPU runs one more cycle. Halted-with-ready-queue
+// counts because Simulator.StepOnce calls DispatchIdleCores first, which
+// wakes a core via loadCPUFromPCB.
 //
 // The run loop polls this instead of AllHalted so that an asynchronous IRQ
 // arriving while every core is halted (e.g. PushKey on a process blocked in
@@ -180,7 +184,7 @@ func (k *Kernel) HasWork() bool {
 			return true
 		}
 	}
-	return false
+	return k.Ready.Len() > 0
 }
 
 // Reset clears the process table and reinstalls the IDT. Useful for loading a
@@ -211,7 +215,8 @@ func (k *Kernel) Reset() {
 
 // AddProcess registers a new process, copies its code into the user_code
 // region for that process, and returns the assigned PID. The process is left
-// in the READY state.
+// in the READY state, queued for dispatch — actual core assignment happens
+// later via DispatchIdleCores (invoked by Simulator.StartRun / StepOnce).
 //
 // The first registered process becomes CurrentPID on the boot core and is
 // loaded into its CPU; any subsequent ones either fill remaining idle cores
@@ -262,16 +267,10 @@ func (k *Kernel) AddProcess(name string, code []byte) (int, error) {
 
 	k.Processes[pid] = pcb
 
-	// Hand the process to the first idle core; if every core is busy it goes
-	// onto the ready queue instead.
-	if idle := k.firstIdleCore(); idle != nil {
-		idle.CurrentPID = pid
-		pcb.State = StateRun
-		pcb.Core = idle.ID
-		k.loadCPUFromPCB(idle, pcb)
-	} else {
-		k.Ready.Push(pid)
-	}
+	// Load-time semantics: every process enters READY. Dispatch to a core
+	// happens later via DispatchIdleCores so the READY→RUN transition is
+	// observable in the event log instead of hidden inside AddProcess.
+	k.Ready.Push(pid)
 	return pid, nil
 }
 

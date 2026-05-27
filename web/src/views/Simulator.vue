@@ -69,6 +69,14 @@ watch(() => mirror.mobileTab, (val) => {
   if (isViewer.value && val) localMobileTab.value = val as MobileTab;
 });
 
+// "Jump to memory of P<n>" intents emitted from ProcessesPanel land here. We
+// only own the tab switch — MemoryPanel handles re-centering and clears the
+// flag, which is fine because <MemoryPanel> stays mounted via v-show.
+watch(() => cpu.pendingMemoryJump, (addr) => {
+  if (addr === null || addr === undefined) return;
+  setMiddleTab('memory');
+});
+
 const isMobile = ref(false);
 function checkMobile() {
   isMobile.value = window.matchMedia('(max-width: 768px)').matches;

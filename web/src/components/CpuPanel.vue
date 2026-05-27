@@ -40,6 +40,7 @@ function flagsString(eflags: number): string {
 
 const FLAGS_HELP = 'Flags activos: C=Carry (overflow no signado), Z=Zero (resultado fue 0), S=Sign (resultado negativo), I=Interrupt (IRQs habilitadas), O=Overflow (overflow signado). - = apagado.';
 const PL_HELP = 'PL = Privilege Level. PL3 = USER (procesos comunes, sin permiso de tocar memoria/recursos kernel). PL0 = KERNEL (privilegios totales). El HW cambia el PL automáticamente en INT/IRET/excepción — el SW no puede setearlo directamente.';
+const INSTR_HELP = 'Instruction Register (IR) decodificado: los bytes apuntados por EIP traducidos a la forma legible que el CPU acaba de ejecutar. Cambia con cada step. x86 no expone el IR como un registro arquitectónico, pero conceptualmente esto es lo que vive en el pipeline después del fetch+decode.';
 
 // Cores currently visible in the SimBar filter, sorted by id for stable
 // vertical order. Empty array falls back to a synthetic boot core so the
@@ -95,6 +96,11 @@ function shouldFlash(core: CoreInfo, reg: string): boolean {
       >
         <span class="reg-name">{{ r }}</span>
         <span class="reg-val">{{ hex(core.regs[r] ?? 0) }}</span>
+      </div>
+      <div class="separator"></div>
+      <div class="reg-row instr-row" :title="INSTR_HELP">
+        <span class="reg-name">INSTR</span>
+        <span class="reg-val instr-val">{{ cpu.lastMnemonic[core.id] ?? '—' }}</span>
       </div>
       <div class="separator"></div>
       <div class="reg-row clickable" :title="FLAGS_HELP + '\n\n— click para abrir el glosario —'" @click="cpu.openGlossary('EFLAGS')">
@@ -213,6 +219,20 @@ function shouldFlash(core: CoreInfo, reg: string): boolean {
 .reg-val {
   color: var(--yellow);
   font-family: 'JetBrains Mono', monospace;
+}
+
+.instr-row {
+  cursor: help;
+}
+
+.instr-val {
+  color: var(--amber);
+  font-size: 12px;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 70%;
 }
 
 .separator {

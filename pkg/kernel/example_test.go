@@ -20,6 +20,9 @@ func ExampleKernel_AddProcess() {
 		fmt.Println("add:", err)
 		return
 	}
+	// AddProcess now only enqueues into READY; the dispatch happens
+	// explicitly. In the simulator this is invoked by StartRun/StepOnce.
+	k.DispatchIdleCores()
 
 	for !k.BootCPU().Halted {
 		if _, err := k.Step(); err != nil {

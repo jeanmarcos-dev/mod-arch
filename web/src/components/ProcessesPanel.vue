@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { useCpuStore, type CoreInfo, type PCBInfo } from '../stores/cpu';
-import { computed } from 'vue';
+import { useCpuStore, type PCBInfo } from '../stores/cpu';
+import { computed, ref } from 'vue';
+import { ChevronRight } from '@lucide/vue';
 
 const cpu = useCpuStore();
 
@@ -12,87 +13,245 @@ function stateClass(state: string) {
   return `state-${state.toLowerCase()}`;
 }
 
-// Lista ordenada por PID para que la tabla no salte
+// Mirror of pkg/cpu/cpu.go FlagCF/ZF/SF/IF/OF bit positions. Anything outside
+// this set is irrelevant for the chip strip; if the backend adds new flags
+// the strip degrades silently (no chip rendered) instead of breaking layout.
+const EFLAGS_BITS: Array<{ name: string; mask: number; help: string }> = [
+  { name: 'CF', mask: 1 << 0,  help: 'Carry: el resultado generó acarreo o pidió préstamo.' },
+  { name: 'ZF', mask: 1 << 6,  help: 'Zero: el resultado fue cero.' },
+  { name: 'SF', mask: 1 << 7,  help: 'Sign: el resultado fue negativo (bit alto en 1).' },
+  { name: 'IF', mask: 1 << 9,  help: 'Interrupt Enable: el CPU acepta interrupciones de hardware.' },
+  { name: 'OF', mask: 1 << 11, help: 'Overflow: el resultado se salió del rango con signo.' },
+];
+
+// Lista ordenada por PID para que las tarjetas no salten. El PID es secuencial
+// al crear cada proceso, así que esto equivale al orden de carga del kernel.
 const sortedProcs = computed(() => [...cpu.procs].sort((a, b) => a.pid - b.pid));
 
-// In multicore each visible core has its own running process. We surface one
-// PCB block per visible core so the user does not have to flip focus to see
-// what is running on C1, C2, ... Single-core just collapses to one block.
-interface PCBView { core: CoreInfo; pcb: PCBInfo }
-const visiblePCBs = computed<PCBView[]>(() => {
-  const out: PCBView[] = [];
-  for (const c of cpu.cores) {
-    if (!cpu.isCoreVisible(c.id)) continue;
-    if (c.current_pid <= 0) continue;
-    const pcb = sortedProcs.value.find((p) => p.pid === c.current_pid);
-    if (pcb) out.push({ core: c, pcb });
-  }
-  return out.sort((a, b) => a.core.id - b.core.id);
-});
+const EXPANDED_KEY = 'modos.procs.expandedPids';
 
-// PIDs currently running on any visible core. Used by the table to mark the
-// rows that are actually live (not just the focused-core one).
-const runningPIDs = computed<Set<number>>(() => {
-  const s = new Set<number>();
-  for (const c of cpu.cores) {
-    if (!cpu.isCoreVisible(c.id)) continue;
-    if (c.current_pid > 0) s.add(c.current_pid);
-  }
-  return s;
-});
-
-// Live EIP for a PID: prefer the core where it is currently running so the
-// value tracks instruction-by-instruction. Falls back to the PCB snapshot
-// (stale, but the correct thing for non-running procs).
-function liveEIP(pid: number): number {
-  for (const c of cpu.cores) {
-    if (!cpu.isCoreVisible(c.id)) continue;
-    if (c.current_pid === pid) return c.regs.EIP ?? 0;
-  }
-  return sortedProcs.value.find((p) => p.pid === pid)?.regs.EIP ?? 0;
+function loadExpanded(): Set<number> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = window.localStorage.getItem(EXPANDED_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return new Set(parsed.filter((x: unknown): x is number => typeof x === 'number'));
+      }
+    }
+  } catch { /* corrupt entry, fall back to empty */ }
+  return new Set();
 }
 
-function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: number }> {
+function persistExpanded() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(EXPANDED_KEY, JSON.stringify([...expandedPids.value]));
+  } catch { /* quota / private mode → keep in memory only */ }
+}
+
+const expandedPids = ref<Set<number>>(loadExpanded());
+
+function isExpanded(pid: number): boolean {
+  return expandedPids.value.has(pid);
+}
+
+function toggleExpanded(p: PCBInfo) {
+  const next = new Set(expandedPids.value);
+  if (next.has(p.pid)) {
+    next.delete(p.pid);
+  } else {
+    next.add(p.pid);
+    // Expanding a PCB centers the memory panel on this process so the user
+    // sees the bytes of the code segment update as the proc runs. ZOMBIEs are
+    // skipped because their memory slot is gone.
+    if (canJumpToMemory(p)) {
+      cpu.requestMemoryJump(p.code_base);
+    }
+  }
+  expandedPids.value = next;
+  persistExpanded();
+}
+
+function expandAll() {
+  // Bulk expand does not fire a memory jump: with N procs there is no good
+  // "last one wins" answer, and the user expects this control to just open
+  // the cards. They can still click an individual head to jump.
+  expandedPids.value = new Set(sortedProcs.value.map(p => p.pid));
+  persistExpanded();
+}
+
+function collapseAll() {
+  expandedPids.value = new Set();
+  persistExpanded();
+}
+
+const allExpanded = computed(() =>
+  sortedProcs.value.length > 0 && sortedProcs.value.every(p => expandedPids.value.has(p.pid)),
+);
+
+function canJumpToMemory(p: PCBInfo): boolean {
+  if (p.state === 'ZOMBIE') return false;
+  return p.code_base > 0;
+}
+
+// PID → core that is currently executing it (if any). Used to surface the
+// C<id> chip on RUN cards and to pick the live register source.
+function coreOfPid(pid: number): number | null {
+  for (const c of cpu.cores) {
+    if (!cpu.isCoreVisible(c.id)) continue;
+    if (c.current_pid === pid) return c.id;
+  }
+  return null;
+}
+
+// Live register block: when the proc is RUN on a visible core we read the
+// core's CPU registers (they tick every instruction). When the proc is
+// READY/BLOCKED/NEW/ZOMBIE the CPU is busy with someone else, so we read its
+// last saved PCB copy. This makes the "save → restore" mechanic visible: the
+// numbers freeze the moment a context switch parks the proc.
+function liveRegs(p: PCBInfo): Record<string, number> {
+  const coreId = coreOfPid(p.pid);
+  if (coreId === null) return p.regs;
+  const c = cpu.cores.find(x => x.id === coreId);
+  return c ? c.regs : p.regs;
+}
+
+function liveEIP(p: PCBInfo): number {
+  return (liveRegs(p).EIP ?? 0) >>> 0;
+}
+
+function regsList(regs: Record<string, number>): Array<{ name: string; val: number }> {
   const order = ['EAX', 'EBX', 'ECX', 'EDX', 'ESP', 'EBP', 'EIP'];
   return order.filter(k => k in regs).map(k => ({ name: k, val: regs[k] }));
+}
+
+function flagOn(eflags: number, mask: number): boolean {
+  return (eflags & mask) !== 0;
+}
+
+function regsSource(p: PCBInfo): string {
+  return coreOfPid(p.pid) !== null ? 'live · CPU' : 'guardado · PCB';
+}
+
+function stateTitle(p: PCBInfo): string {
+  switch (p.state) {
+    case 'RUN':     return `Corriendo en C${coreOfPid(p.pid) ?? '?'}: sus registros viven en el CPU.`;
+    case 'READY':   return 'En cola listo para correr. Sus registros están guardados en el PCB.';
+    case 'BLOCKED': return `Esperando un recurso${p.blocked_on ? ` (${p.blocked_on})` : ''}. Sus registros están guardados en el PCB.`;
+    case 'NEW':     return 'Recién creado, todavía no entró a la cola de listos.';
+    case 'ZOMBIE':  return 'Terminó; el kernel mantiene el PCB hasta que el padre lo recoja.';
+    default:        return p.state;
+  }
 }
 </script>
 
 <template>
   <div class="panel procs" data-pizarra-anchor="procs-panel">
-    <div class="panel-title clickable-title" title="Tabla de procesos del sistema con su Process Control Block.&#10;&#10;— click para más info —" @click="cpu.openGlossary('PCB')">PROCESOS · PCB</div>
+    <div class="proc-header">
+      <div
+        class="panel-title clickable-title"
+        title="Process Control Block: tabla completa de procesos cargados por el kernel, en orden de carga (PID asc), sin importar el estado.&#10;&#10;— click para más info —"
+        @click="cpu.openGlossary('PCB')"
+      >PCB DE PROCESOS</div>
+      <button
+        v-if="sortedProcs.length > 0"
+        type="button"
+        class="proc-toolbar__btn"
+        :class="{ 'proc-toolbar__btn--open': allExpanded }"
+        :title="allExpanded ? 'Colapsar todos los PCBs.' : 'Expandir el PCB de todos los procesos.'"
+        :aria-label="allExpanded ? 'Colapsar todos' : 'Expandir todos'"
+        :aria-expanded="allExpanded"
+        @click="allExpanded ? collapseAll() : expandAll()"
+      >
+        <ChevronRight :size="11" :stroke-width="2" />
+      </button>
+    </div>
 
     <div v-if="sortedProcs.length === 0" class="empty">
       Cargue un demo para ver los procesos.
     </div>
 
-    <table v-else class="proc-table">
-      <thead>
-        <tr>
-          <th class="clickable-th" title="Process ID. Identificador único asignado por el kernel al crear el proceso.&#10;&#10;— click para más info —" @click="cpu.openGlossary('PID')">PID</th>
-          <th class="clickable-th" title="Estado actual: RUN=corriendo en CPU, READY=esperando turno, BLOCKED=esperando I/O, ZOMBIE=terminó pero el PCB queda.&#10;&#10;— click para más info —" @click="cpu.openGlossary('RUN')">STATE</th>
-          <th title="Nombre del binario que el proceso está ejecutando.">NAME</th>
-          <th class="clickable-th" title="Instruction Pointer. Próxima instrucción a ejecutar.&#10;&#10;— click para más info —" @click="cpu.openGlossary('EIP')">EIP</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          v-for="p in sortedProcs"
-          :key="p.pid"
-          :class="[
-            stateClass(p.state),
-            { current: runningPIDs.has(p.pid), flash: cpu.flashingPIDs.has(p.pid) },
-          ]"
-          :data-narrator-anchor="`pcb-${p.pid}`"
-          :title="runningPIDs.has(p.pid) ? 'Proceso actualmente en RUN — sus registros viven en el CPU.' : 'Proceso fuera de RUN — su estado completo está preservado en su PCB.'"
+    <div v-if="sortedProcs.length > 0" class="proc-list">
+      <section
+        v-for="p in sortedProcs"
+        :key="p.pid"
+        class="proc-card"
+        :class="[
+          stateClass(p.state),
+          {
+            'proc-card--running': coreOfPid(p.pid) !== null,
+            'proc-card--expanded': isExpanded(p.pid),
+            'proc-card--flash': cpu.flashingPIDs.has(p.pid),
+          },
+        ]"
+        :data-narrator-anchor="`pcb-${p.pid}`"
+      >
+        <header
+          class="proc-card__head"
+          role="button"
+          tabindex="0"
+          :aria-expanded="isExpanded(p.pid)"
+          :title="stateTitle(p)"
+          @click="toggleExpanded(p)"
+          @keydown.enter.prevent="toggleExpanded(p)"
+          @keydown.space.prevent="toggleExpanded(p)"
         >
-          <td class="pid">P{{ p.pid }}</td>
-          <td class="state">{{ p.state }}</td>
-          <td class="name">{{ p.name }}</td>
-          <td class="eip">{{ hex(liveEIP(p.pid)) }}</td>
-        </tr>
-      </tbody>
-    </table>
+          <span class="proc-card__chevron">{{ isExpanded(p.pid) ? '▾' : '▸' }}</span>
+          <span class="proc-card__state" :class="stateClass(p.state)">{{ p.state }}</span>
+          <span
+            v-if="coreOfPid(p.pid) !== null"
+            class="proc-card__core"
+            :style="{ color: `var(--core-${(coreOfPid(p.pid) as number) % 4})` }"
+            :title="`Núcleo C${coreOfPid(p.pid)} ejecutando este proceso.`"
+          >C{{ coreOfPid(p.pid) }}</span>
+          <span class="proc-card__pid">P{{ p.pid }}</span>
+          <span class="proc-card__name" :title="`${p.name} · EIP ${hex(liveEIP(p), 8)}`">{{ p.name }}</span>
+        </header>
+
+        <div v-if="isExpanded(p.pid)" class="proc-card__body">
+          <div class="proc-card__meta">
+            <span class="proc-card__addr" title="Dirección donde el kernel cargó el binario .text de este proceso.">
+              @ {{ hex(p.code_base, 8) }}
+            </span>
+            <span class="proc-card__regs-src" :title="`Los valores mostrados son ${coreOfPid(p.pid) !== null ? 'los registros vivos del CPU mientras este proceso corre. Cambian cada step.' : 'la última copia guardada en el PCB. Se congelaron en el último context switch hasta que el scheduler lo restaure.'}`">
+              {{ regsSource(p) }}
+            </span>
+          </div>
+
+          <div v-if="p.state === 'BLOCKED' && p.blocked_on" class="proc-card__blocked">
+            ⏸ esperando: {{ p.blocked_on }}
+          </div>
+
+          <div class="proc-card__regs">
+            <span
+              v-for="r in regsList(liveRegs(p))"
+              :key="r.name"
+              :title="`${r.name} ${coreOfPid(p.pid) !== null ? 'live en CPU' : 'guardado en PCB'} de P${p.pid}.`"
+            >
+              <span class="r-name">{{ r.name }}</span>
+              <span class="r-val">{{ hex(r.val, 8) }}</span>
+            </span>
+          </div>
+
+          <div class="proc-card__flags">
+            <span
+              class="proc-card__flags-label clickable-label"
+              title="EFLAGS: registro de banderas del CPU guardado en el PCB. Cada bit refleja el último resultado aritmético (CF/ZF/SF/OF) o configuración del núcleo (IF). Cada chip se enciende cuando su bandera está en 1.&#10;&#10;— click para más info —"
+              @click="cpu.openGlossary('EFLAGS')"
+            >EFLAGS</span>
+            <span
+              v-for="f in EFLAGS_BITS"
+              :key="f.name"
+              class="pcb-flag"
+              :class="{ 'pcb-flag--on': flagOn(liveRegs(p).EFLAGS ?? 0, f.mask) }"
+              :title="`${f.name} — ${f.help} Actualmente ${flagOn(liveRegs(p).EFLAGS ?? 0, f.mask) ? 'en 1 (encendida)' : 'en 0 (apagada)'}.`"
+            >{{ f.name }}</span>
+          </div>
+        </div>
+      </section>
+    </div>
 
     <div class="ready-queue" v-if="sortedProcs.length > 0">
       <div
@@ -122,32 +281,6 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
         </span>
       </div>
     </div>
-
-    <div class="pcb-detail" v-if="visiblePCBs.length > 0">
-      <div
-        class="pcb-section-title clickable-label"
-        title="Process Control Block: estructura del kernel que guarda el estado completo de un proceso.&#10;&#10;— click para más info —"
-        @click="cpu.openGlossary('PCB')"
-      >{{ visiblePCBs.length === 1 ? 'PCB DEL PROCESO ACTUAL' : 'PCB POR NÚCLEO' }}</div>
-      <div
-        v-for="v in visiblePCBs"
-        :key="v.core.id"
-        class="pcb-block"
-      >
-        <div class="pcb-meta">
-          <span v-if="cpu.numCores > 1" class="pcb-core" :title="`Núcleo C${v.core.id}`">C{{ v.core.id }}</span>
-          <span class="pid-tag">P{{ v.pcb.pid }}</span>
-          <span class="pcb-name">{{ v.pcb.name }}</span>
-          <span class="pcb-addr" title="Dirección donde el kernel cargó el binario .text de este proceso. Cada proceso ocupa un slot de 256 KB.">@ {{ hex(v.pcb.code_base) }}</span>
-        </div>
-        <div class="pcb-regs">
-          <span v-for="r in pcbRegs(v.core.regs)" :key="r.name" :title="`${r.name} vivo del núcleo C${v.core.id} mientras P${v.pcb.pid} corre allí. Al ceder el CPU el kernel lo copia al PCB.`">
-            <span class="r-name">{{ r.name }}</span>
-            <span class="r-val">{{ hex(r.val, 8) }}</span>
-          </span>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -167,14 +300,6 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
     height: auto;
     flex: 1;
   }
-
-  .proc-table {
-    font-size: 14px;
-  }
-
-  .proc-table td, .proc-table th {
-    padding: 8px 6px;
-  }
 }
 
 .empty {
@@ -184,57 +309,274 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
   text-align: center;
 }
 
-.proc-table {
-  width: 100%;
-  font-size: 13px;
-  border-collapse: collapse;
+.clickable-title, .clickable-label {
+  cursor: pointer;
+  transition: color 0.15s ease;
 }
 
-.proc-table th {
-  text-align: left;
+.clickable-title:hover, .clickable-label:hover {
   color: var(--cyan);
-  font-weight: 400;
-  text-transform: uppercase;
+  text-shadow: 0 0 6px rgba(106, 212, 255, 0.4);
+}
+
+/* Pull the title's dashed underline up onto the whole header so it spans
+   the full panel width and the toggle button sits on it. The original
+   .panel-title underline is suppressed inside this flex container. */
+.proc-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px dashed var(--border-strong);
+  padding-bottom: 5px;
+  margin-bottom: 8px;
+}
+
+.proc-header .panel-title {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 0;
+}
+
+.proc-toolbar__btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  /* Match the .panel-title cap-height (font-size 11px). box-sizing: border-box
+     keeps the outer footprint at exactly 14×14 including the 1px border. */
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  /* Override the global `button { min-height: 32px }` mobile-touch baseline. */
+  min-height: 0;
+  padding: 0;
+  /* Cancel the global `button { font-size: 14px }` so no line-box of the
+     wrapped icon stretches the button taller than its declared height. */
+  font-size: 0;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.proc-toolbar__btn :deep(svg) {
+  transition: transform 0.2s ease;
+}
+
+.proc-toolbar__btn--open :deep(svg) {
+  transform: rotate(90deg);
+}
+
+.proc-toolbar__btn:hover {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.proc-toolbar__btn:focus-visible {
+  outline: 1px solid var(--amber);
+  outline-offset: 1px;
+}
+
+.proc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.proc-card {
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-left-color: var(--border);
+  background: var(--surface-overlay);
+  transition: background 0.15s ease;
+}
+
+.proc-card.state-run     { border-left-color: var(--green); }
+.proc-card.state-ready   { border-left-color: var(--yellow); }
+.proc-card.state-blocked { border-left-color: var(--red-soft); }
+.proc-card.state-new     { border-left-color: var(--cyan); }
+.proc-card.state-zombie  { border-left-color: var(--text-muted); }
+
+.proc-card--running {
+  background: rgba(127, 255, 170, 0.04);
+}
+
+.proc-card--flash {
+  background: rgba(var(--accent-rgb), 0.18);
+  animation: flash-amber 800ms ease-out;
+}
+
+@keyframes flash-amber {
+  0%   { background: rgba(var(--accent-rgb), 0.30); }
+  100% { background: rgba(var(--accent-rgb), 0.04); }
+}
+
+.proc-card__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
+  cursor: pointer;
+  user-select: none;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.proc-card__head:hover {
+  background: rgba(var(--accent-rgb), 0.06);
+}
+
+.proc-card__head:focus-visible {
+  outline: 1px solid var(--amber);
+  outline-offset: -1px;
+}
+
+.proc-card__chevron {
+  width: 8px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  font-size: 10px;
+}
+
+/* All in-header tags are plain coloured text — no boxes, no backgrounds. The
+   visual hierarchy comes from colour and weight, not from chip frames that
+   compete with the panel border. */
+.proc-card__state {
+  font-size: 10px;
   letter-spacing: 1px;
-  font-size: 11px;
-  padding: 4px 4px;
-  border-bottom: 1px dashed var(--border);
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
-.proc-table td {
-  padding: 5px 4px;
-  border-bottom: 1px dashed rgba(var(--accent-rgb), 0.08);
+.proc-card__state.state-run     { color: var(--green); }
+.proc-card__state.state-ready   { color: var(--yellow); }
+.proc-card__state.state-blocked { color: var(--red-soft); }
+.proc-card__state.state-new     { color: var(--cyan); }
+.proc-card__state.state-zombie  { color: var(--text-muted); }
+
+.proc-card__core {
+  font-size: 10px;
+  letter-spacing: 1px;
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
-.proc-table tr.current td {
-  background: rgba(127, 255, 170, 0.06);
-}
-
-.proc-table tr.flash td {
-  background: rgba(var(--accent-rgb), 0.15);
-  animation: flash-green 800ms ease-out;
-}
-
-.pid {
+.proc-card__pid {
   color: var(--amber);
   font-weight: 700;
-}
-
-.state {
-  letter-spacing: 1px;
   font-size: 11px;
+  flex-shrink: 0;
 }
 
-.state-run    { color: var(--green); }
-.state-ready  { color: var(--yellow); }
-.state-blocked{ color: var(--red-soft); }
-.state-zombie { color: var(--text-muted); }
+.proc-card__name {
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
-.name { color: var(--text); font-size: 13px; }
-.eip { color: var(--cyan); font-family: 'JetBrains Mono', monospace; }
+.proc-card__body {
+  padding: 6px 10px 8px;
+  border-top: 1px dashed var(--border);
+  background: rgba(var(--accent-rgb), 0.03);
+}
 
-.ready-queue {
-  margin-top: 12px;
+.proc-card__meta {
+  display: flex;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.proc-card__addr {
+  color: var(--cyan);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.proc-card__regs-src {
+  margin-left: auto;
+  font-style: italic;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+}
+
+.proc-card__blocked {
+  font-size: 11px;
+  color: var(--red-soft);
+  margin-bottom: 6px;
+  font-style: italic;
+}
+
+.proc-card__regs {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 3px 12px;
+  font-size: 12px;
+}
+
+.proc-card__regs > span {
+  display: flex;
+  justify-content: space-between;
+  cursor: help;
+}
+
+.r-name {
+  color: var(--cyan);
+}
+
+.r-val {
+  color: var(--yellow);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.proc-card__flags-label {
+  color: var(--cyan);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.proc-card__flags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.pcb-flag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: transparent;
+  cursor: help;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.pcb-flag--on {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: rgba(var(--accent-rgb), 0.12);
+  text-shadow: 0 0 4px rgba(var(--accent-rgb), 0.45);
+}
+
+.ready-queue,
+.wait-queue {
+  margin-top: 10px;
   padding-top: 8px;
   border-top: 1px dashed var(--border);
 }
@@ -266,12 +608,6 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
   color: var(--text-muted);
   font-style: italic;
   font-size: 13px;
-}
-
-.wait-queue {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border);
 }
 
 .wq-hint {
@@ -307,113 +643,5 @@ function pcbRegs(regs: Record<string, number>): Array<{ name: string; val: numbe
 @keyframes wait-pulse {
   0%, 100% { opacity: 1; box-shadow: none; }
   50%      { opacity: 0.7; box-shadow: 0 0 6px rgba(255, 122, 122, 0.3); }
-}
-
-.pcb-detail {
-  margin-top: 14px;
-  padding-top: 10px;
-  border-top: 2px solid var(--border-strong);
-  background: rgba(var(--accent-rgb), 0.03);
-  margin-left: -10px;
-  margin-right: -10px;
-  padding-left: 10px;
-  padding-right: 10px;
-  padding-bottom: 4px;
-}
-
-.pcb-section-title {
-  font-family: var(--font-display);
-  font-size: 11px;
-  color: var(--amber);
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  margin-bottom: 8px;
-}
-
-/* Each running core gets its own PCB block. Faint divider between them so
-   they read as a stack without competing with the parent panel border. */
-.pcb-block {
-  padding: 6px 0;
-}
-.pcb-block + .pcb-block {
-  border-top: 1px dashed rgba(var(--accent-rgb), 0.18);
-  margin-top: 4px;
-}
-
-.pcb-core {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  letter-spacing: 1px;
-  color: var(--amber);
-  background: rgba(var(--accent-rgb), 0.12);
-  border: 1px solid var(--amber);
-  border-radius: var(--radius-sm);
-  padding: 1px 5px;
-  min-width: 26px;
-  text-align: center;
-}
-
-.clickable-title, .clickable-label, .clickable-th {
-  cursor: pointer;
-  transition: color 0.15s ease;
-}
-
-.clickable-title:hover, .clickable-label:hover, .clickable-th:hover {
-  color: var(--cyan);
-  text-shadow: 0 0 6px rgba(106, 212, 255, 0.4);
-}
-
-.pcb-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
-}
-
-.pid-tag {
-  color: var(--amber);
-  font-weight: 700;
-  background: rgba(var(--accent-rgb), 0.15);
-  padding: 2px 6px;
-  font-size: 12px;
-  border: 1px solid var(--border-strong);
-}
-
-.pcb-name {
-  color: var(--text);
-  font-size: 12px;
-}
-
-.pcb-addr {
-  color: var(--cyan);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-}
-
-.pcb-regs {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 4px 12px;
-  font-size: 13px;
-}
-
-.pcb-regs > span {
-  display: flex;
-  justify-content: space-between;
-  cursor: help;
-}
-
-.pcb-regs > span:hover {
-  background: rgba(var(--accent-rgb), 0.05);
-}
-
-.r-name {
-  color: var(--cyan);
-}
-
-.r-val {
-  color: var(--yellow);
-  font-family: 'JetBrains Mono', monospace;
 }
 </style>
