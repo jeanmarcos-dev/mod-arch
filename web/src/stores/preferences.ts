@@ -36,23 +36,40 @@ export interface ColumnWidths {
 
 export type ColumnSide = 'left' | 'right';
 
-// PanelHeights stores a flex-grow weight per right-column panel. Drag of the
-// horizontal handles between them rewrites the weights so the user can give
-// more vertical room to Procesos than to IPC, etc. Defaults are equal (1).
-// Cores lives in the left column and has only one panel, so no weight is
-// tracked for it.
-export type StackPanelName = 'processes' | 'queues' | 'ipc';
+// PanelHeights stores a flex-grow weight per resizable row. The right column
+// stack (Procesos/Colas/IPC) uses three weights, and the center column splits
+// vertical space between the tab pile (Código/Bitácora/Memoria) and the
+// console below it via two extra weights. Drag of the horizontal handles
+// rewrites the weights so the user can rebalance any pair. Cores lives alone
+// in the left column, so no weight is tracked for it.
+export type StackPanelName = 'processes' | 'queues' | 'ipc' | 'middleTabs' | 'middleConsole';
 
 export interface PanelHeights {
   processes: number;
   queues: number;
   ipc: number;
+  middleTabs: number;
+  middleConsole: number;
+}
+
+export interface LayoutSnapshot {
+  panelsCollapsed: PanelsCollapsed;
+  columnWidths: ColumnWidths;
+  panelHeights: PanelHeights;
 }
 
 export const PANEL_HEIGHT_MIN_WEIGHT = 0.15;
 
 interface PrefsState {
   sidebarCollapsed: boolean;
+  // showInit controls whether the init process (PID 1, always present in the
+  // background) appears in the PROCESOS tree, the queues panel and narrator
+  // animations. The default is recomputed on each demo load via
+  // applyShowInitDefault — but ONLY while the user has not touched the toggle:
+  // once setShowInit fires, showInitTouched flips and subsequent demos respect
+  // the user's pick instead of resetting it.
+  showInit: boolean;
+  showInitTouched: boolean;
   mode: PresentationMode;
   density: Density;
   narratorsEnabled: boolean;
@@ -90,6 +107,8 @@ export const COLUMN_MAX_PERCENT = 0.33;
 // them straight away rather than having to discover the toggle.
 const DEFAULTS: PrefsState = {
   sidebarCollapsed: false,
+  showInit: false,
+  showInitTouched: false,
   mode: 'pedagogic',
   density: 'comfortable',
   narratorsEnabled: true,
@@ -103,13 +122,17 @@ const DEFAULTS: PrefsState = {
     ipc: false,
   },
   columnWidths: {
-    leftPx: 160,
-    rightPx: 280,
+    leftPx: 250,
+    rightPx: 400,
   },
   panelHeights: {
     processes: 1,
     queues: 1,
     ipc: 1,
+    // Console arranca un poco más alta que la pila de tabs para preservar la
+    // sensación previa al resizer (cuando ConsolePanel crecía con el contenido).
+    middleTabs: 1,
+    middleConsole: 1.2,
   },
 };
 
@@ -190,7 +213,7 @@ export function readStoredTheme(): Theme {
 // fields on load and start fresh from the all-expanded defaults. Other prefs
 // (theme, locale, sidebar, mode, density, narrators) are kept regardless,
 // since their schemas have not changed.
-const PANELS_RESET_VERSION = 2;
+const PANELS_RESET_VERSION = 3;
 
 function loadFromStorage(): PrefsState {
   if (typeof window === 'undefined') return DEFAULTS;
@@ -228,6 +251,8 @@ function loadFromStorage(): PrefsState {
 export const usePreferencesStore = defineStore('preferences', () => {
   const initial = loadFromStorage();
   const sidebarCollapsed = ref(initial.sidebarCollapsed);
+  const showInit = ref(initial.showInit);
+  const showInitTouched = ref(initial.showInitTouched);
   const mode = ref<PresentationMode>(initial.mode);
   const density = ref<Density>(initial.density);
   const narratorsEnabled = ref(initial.narratorsEnabled);
@@ -253,6 +278,8 @@ export const usePreferencesStore = defineStore('preferences', () => {
     return JSON.stringify({
       panelsResetVersion: PANELS_RESET_VERSION,
       sidebarCollapsed: sidebarCollapsed.value,
+      showInit: showInit.value,
+      showInitTouched: showInitTouched.value,
       mode: mode.value,
       density: density.value,
       narratorsEnabled: narratorsEnabled.value,
@@ -266,7 +293,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
   }
 
   watch(
-    [sidebarCollapsed, mode, density, narratorsEnabled, narratorMinTickMs, theme, locale, panelsCollapsed, columnWidths, panelHeights],
+    [sidebarCollapsed, showInit, showInitTouched, mode, density, narratorsEnabled, narratorMinTickMs, theme, locale, panelsCollapsed, columnWidths, panelHeights],
     () => {
       try {
         window.localStorage.setItem(STORAGE_KEY, serialize());
@@ -289,6 +316,25 @@ export const usePreferencesStore = defineStore('preferences', () => {
 
   function toggleSidebar() {
     sidebarCollapsed.value = !sidebarCollapsed.value;
+  }
+
+  function setShowInit(v: boolean) {
+    showInit.value = v;
+    // Flag the toggle as user-driven so later `loaded` events stop overwriting
+    // the pick via applyShowInitDefault. This is persisted alongside showInit
+    // so the override survives reloads.
+    showInitTouched.value = true;
+  }
+
+  // applyShowInitDefault picks a sensible visibility for the init card based
+  // on the demo's shape, called from cpu.ts on every `loaded` event:
+  //   - 0 or 1 user-space procs  → hidden (single-proc demos like ADD)
+  //   - 2 or more user-space procs → visible (fork/threads/IPC demos)
+  // Once the user has explicitly toggled (showInitTouched=true) the default
+  // becomes a no-op: the user's pick wins for the rest of the session.
+  function applyShowInitDefault(nonInitProcCount: number) {
+    if (showInitTouched.value) return;
+    showInit.value = nonInitProcCount > 1;
   }
 
   function togglePanel(name: PanelName, value?: boolean) {
@@ -315,6 +361,33 @@ export const usePreferencesStore = defineStore('preferences', () => {
     const clamped = Math.max(PANEL_HEIGHT_MIN_WEIGHT, weight);
     if (panelHeights.value[name] === clamped) return;
     panelHeights.value = { ...panelHeights.value, [name]: clamped };
+  }
+
+  // Layout snapshot covers everything the user can move/resize/collapse from
+  // the simulator chrome: side column widths, vertical weights and the
+  // collapsed state of each side panel. Theme, locale, mode, density and
+  // narrator preferences are intentionally NOT part of "layout" — they are
+  // editorial choices that survive a UI reset.
+  function getLayoutSnapshot(): LayoutSnapshot {
+    return {
+      panelsCollapsed: { ...panelsCollapsed.value },
+      columnWidths: { ...columnWidths.value },
+      panelHeights: { ...panelHeights.value },
+    };
+  }
+
+  function applyLayoutSnapshot(snap: LayoutSnapshot) {
+    panelsCollapsed.value = { ...snap.panelsCollapsed };
+    columnWidths.value = { ...snap.columnWidths };
+    panelHeights.value = { ...snap.panelHeights };
+  }
+
+  function resetLayout() {
+    applyLayoutSnapshot({
+      panelsCollapsed: { ...DEFAULTS.panelsCollapsed },
+      columnWidths: { ...DEFAULTS.columnWidths },
+      panelHeights: { ...DEFAULTS.panelHeights },
+    });
   }
 
   function openSidebarMobile() {
@@ -368,6 +441,9 @@ export const usePreferencesStore = defineStore('preferences', () => {
   return {
     sidebarCollapsed,
     sidebarMobileOpen,
+    showInit,
+    setShowInit,
+    applyShowInitDefault,
     mode,
     density,
     narratorsEnabled,
@@ -390,5 +466,8 @@ export const usePreferencesStore = defineStore('preferences', () => {
     togglePanel,
     setColumnWidth,
     setPanelHeight,
+    getLayoutSnapshot,
+    applyLayoutSnapshot,
+    resetLayout,
   };
 });

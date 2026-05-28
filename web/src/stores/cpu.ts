@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { computed, reactive, ref } from 'vue';
 import { formatLog } from '../i18n/formatLog';
+import { usePreferencesStore } from './preferences';
 
 // Tipos de eventos que llegan por WS (espejo de internal/cpu/events.go).
 // Todos los eventos generados por la CPU llevan core_id: con multicore el
@@ -33,7 +34,7 @@ export type CpuEvent =
   | { type: 'pcb_save'; core_id: number; pid: number; regs: Record<string, number> }
   | { type: 'pcb_restore'; core_id: number; pid: number; regs: Record<string, number> }
   | { type: 'sched_decision'; from_pid: number; to_pid: number; reason?: string; ready_queue: number[] }
-  | { type: 'process_state'; pid: number; state: string; reason?: string }
+  | { type: 'process_state'; pid: number; state: string; reason?: string; exit_code?: number }
   | { type: 'syscall'; pid: number; num: number; name: string; args: number[]; result: number }
   | { type: 'console_out'; core_id?: number; pid: number; kind?: 'in' | 'out'; bytes: number[]; text: string }
   | { type: 'kbd_state'; buf_used: number; buf_cap: number; readers: { pid: number; prog: string }[] }
@@ -263,7 +264,7 @@ export const useCpuStore = defineStore('cpu', () => {
   // drives from the TopBar. effectiveHz = clockHz × speedMul. stepHz is kept
   // as a derived view so legacy consumers (SimBar bindings, snapshots) keep
   // reading the same shape without knowing about the split.
-  const clockHz = ref(4);
+  const clockHz = ref(2);
   const speedMul = ref(1.0);
   const stepHz = computed(() => clockHz.value * speedMul.value);
   const tickIntervalMs = computed(() => {
@@ -872,9 +873,15 @@ export const useCpuStore = defineStore('cpu', () => {
         if (ev.clockHz !== undefined) clockHz.value = ev.clockHz;
         if (ev.speedMul !== undefined) speedMul.value = ev.speedMul;
         break;
-      case 'loaded':
+      case 'loaded': {
         pushLog(formatLog.loaded(ev.name, ev.pids.length, ev.pids), 'green');
         procs.value = ev.procs;
+        // Pick a sensible default for the "Mostrar init" toggle based on how
+        // many user-space procs the demo carries (init excluded). Single-proc
+        // demos like ADD start with init hidden; fork/threads demos reveal it.
+        const prefs = usePreferencesStore();
+        const userProcs = ev.procs.filter(p => p.name !== 'init').length;
+        prefs.applyShowInitDefault(userProcs);
         // A new demo starts with no open IPC channels — the kernel
         // resets its Pipes registry alongside its process table.
         pipes.value = [];
@@ -893,6 +900,7 @@ export const useCpuStore = defineStore('cpu', () => {
           procSourceMaps.value = {};
         }
         break;
+      }
       case 'reset':
         pushLog(formatLog.reset(), 'cyan');
         changedRegs.clear();
@@ -965,6 +973,9 @@ export const useCpuStore = defineStore('cpu', () => {
         if (p) {
           p.state = ev.state;
           if (ev.reason) p.blocked_on = ev.reason;
+          // The kernel attaches exit_code on the ZOMBIE transition so the
+          // panel does not need to wait for the next full procs snapshot.
+          if (ev.exit_code !== undefined) p.exit_code = ev.exit_code;
         }
         // Mantener wait_queue sincronizada con BLOCKED ⇄ otros estados.
         if (ev.state === 'BLOCKED') {

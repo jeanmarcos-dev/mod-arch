@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { RefreshCw } from '@lucide/vue';
 import { apiFetch } from '../../lib/api';
 import { useToastStore } from '../../stores/toast';
 import Card from '../../components/ui/Card.vue';
@@ -173,7 +174,10 @@ onMounted(load);
       >
         Borrar secret (desactivar widget)
       </button>
-      <button class="btn ghost" :disabled="loading" @click="load">↻ Refrescar</button>
+      <button class="btn ghost" :disabled="loading" @click="load">
+        <RefreshCw :size="14" :stroke-width="2" />
+        Refrescar
+      </button>
     </div>
 
     <Card title="Reglas anti-abuso ya activas" :elevation="0">

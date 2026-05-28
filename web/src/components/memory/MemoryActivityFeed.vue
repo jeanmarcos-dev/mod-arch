@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { ArrowUp, ArrowDown } from '@lucide/vue';
 import Card from '../ui/Card.vue';
 import { fmtAddr, fmtByte, coreColorVar } from '../../lib/memoryLayout';
 
@@ -71,7 +72,10 @@ function styleFor(coreId: number) {
         @click="emit('jump', e.addr)"
       >
         <span class="feed-row__tag">[C{{ e.coreId }}/P{{ e.pid || '—' }}]</span>
-        <span class="feed-row__kind">{{ e.kind === 'write' ? '◣ W' : '◤ R' }}</span>
+        <span class="feed-row__kind">
+          <component :is="e.kind === 'write' ? ArrowUp : ArrowDown" :size="11" :stroke-width="2" />
+          {{ e.kind === 'write' ? 'W' : 'R' }}
+        </span>
         <code class="feed-row__addr">{{ fmtAddr(e.addr) }}</code>
         <code class="feed-row__val">{{ fmtByte(e.value) }}</code>
       </li>
@@ -141,6 +145,12 @@ function styleFor(coreId: number) {
 .feed-row--read .feed-row__kind {
   font-weight: bold;
   letter-spacing: 1px;
+}
+
+.feed-row__kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 
 .feed-row__addr,

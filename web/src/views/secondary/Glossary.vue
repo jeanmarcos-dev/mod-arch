@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { Search } from '@lucide/vue';
+import { Search, ChevronDown, ChevronRight } from '@lucide/vue';
 import {
   GLOSSARY_ENTRIES,
   listCategories,
@@ -128,7 +128,13 @@ const totalEntries = GLOSSARY_ENTRIES.length;
             <div class="gloss-entry__row">
               <span class="gloss-entry__term">{{ e.term }}</span>
               <span class="gloss-entry__short">{{ e.short }}</span>
-              <span class="gloss-entry__arrow" aria-hidden="true">{{ expanded.has(e.term) ? '▾' : '▸' }}</span>
+              <component
+                :is="expanded.has(e.term) ? ChevronDown : ChevronRight"
+                :size="14"
+                :stroke-width="2"
+                class="gloss-entry__arrow"
+                aria-hidden="true"
+              />
             </div>
             <div v-if="expanded.has(e.term)" class="gloss-entry__detail">
               {{ e.detail }}

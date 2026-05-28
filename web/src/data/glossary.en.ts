@@ -107,6 +107,16 @@ export const GLOSSARY_EN: Record<string, { short: string; detail: string }> = {
     short: 'A key was pressed.',
     detail: 'The keyboard controller drops the scancode/byte into a buffer and fires this HW IRQ. The kernel handler reads the byte and, if there is a BLOCKED process waiting on the keyboard, hands it the byte and wakes it. Like the timer, an IRQ in the strict sense (external HW, asynchronous).',
   },
+  KeyboardBuf: {
+    short: 'Internal kernel FIFO queue holding bytes that have not yet been delivered to a reader.',
+    detail: `When you press a key, the IRQ 0x21 handler appends the byte to the KeyboardBuf. From there two scenarios can play out:
+
+• **Delivered** — If a process is BLOCKED on sys_read(stdin), the kernel copies the first byte straight into that process's buffer and flips it to READY. The keyboard narrator labels this as "PID N (prog): BLOCKED → READY".
+
+• **Buffered** — If nobody is reading, the byte stays in the KeyboardBuf until some process calls sys_read. The narrator shows it as "KBuf push · no reader (queue: N)".
+
+The console badge reads "KBuf {used}/{cap}" with cap = 16, which is a purely didactic ceiling — it mirrors the typical capacity of a real keyboard buffer. When "used" exceeds "cap" the badge turns red and gains ⚠: it is a visual alert, not data loss. The underlying slice keeps growing and delivers every byte in FIFO order. The pedagogical point is that pressing keys without a reader has a cost (the queue grows), and that sys_read is what drains it.`,
+  },
   'INT 0x80 — Syscall': {
     short: 'Software interrupt: the user requests a service from the kernel (Linux i386 convention).',
     detail: 'Not a HW IRQ: it is an `int 0x80` instruction the user executes. The HW switches to kernel mode (as with any INT), and the kernel dispatches by EAX to the corresponding syscall. Modern Linux uses `sysenter`/`syscall` for performance, but `int 0x80` still works.',
@@ -228,10 +238,6 @@ export const GLOSSARY_EN: Record<string, { short: string; detail: string }> = {
   'Critical section': {
     short: 'Critical section: a stretch of code that must NOT execute on two threads at once.',
     detail: 'If two threads modify the same variable without protecting the access, results get corrupted (race condition). The critical section is the block that touches the shared resource; it must be guarded by a mutual-exclusion mechanism (mutex, semaphore, atomic instruction). Keep it as short as possible: the longer it is, the more contention.',
-  },
-  'Race condition': {
-    short: 'Race condition: the result depends on the execution order of threads.',
-    detail: 'Appears when two threads access the same resource without synchronization and at least one writes. The race_counter demo shows it: two workers incrementing a shared counter lose increments because the CPU\'s load-modify-store sequence is not atomic. Prevented by wrapping the access in a critical section.',
   },
   Mutex: {
     short: 'Mutual exclusion lock: guarantees that only one thread enters the critical section.',

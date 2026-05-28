@@ -137,6 +137,15 @@
   /* Background of .panel — dark themes use a darkening overlay, light theme
      overrides to a solid white so saturated text stays sharp. */
   --panel-bg: rgba(0, 0, 0, 0.30);
+  /* Tinted backdrop for sub-cards / grouped sub-panels (kbd HW, KBuf
+     wrapper, hint boxes). On CRT themes a barely-visible white overlay
+     keeps the underlying phosphor glow readable. */
+  --panel-soft: rgba(255, 179, 71, 0.04);
+  /* Scrollbar tokens — CRT themes use a darkened track with an accent
+     thumb so the bar reads as part of the phosphor metaphor. */
+  --scrollbar-track:       rgba(0, 0, 0, 0.4);
+  --scrollbar-thumb:       rgba(var(--accent-rgb), 0.3);
+  --scrollbar-thumb-hover: rgba(var(--accent-rgb), 0.5);
 
   /* The console (sys_write) and keyboard input render as an in-app
      terminal. CRT/dark themes use classic phosphor-on-black; the light
@@ -212,6 +221,10 @@
   --surface-overlay:        rgba(0, 0, 0, 0.35);
   --surface-overlay-strong: rgba(0, 0, 0, 0.55);
   --panel-bg:               rgba(0, 0, 0, 0.30);
+  --panel-soft:             rgba(127, 255, 149, 0.04);
+  --scrollbar-track:        rgba(0, 0, 0, 0.4);
+  --scrollbar-thumb:        rgba(var(--accent-rgb), 0.3);
+  --scrollbar-thumb-hover:  rgba(var(--accent-rgb), 0.5);
 
   --terminal-bg: #030806;
   --terminal-fg: var(--green);
@@ -230,13 +243,17 @@
   /* All surfaces are pure white. Separation between panels is done with
      borders and soft drop shadows — gray fills washed out the saturated
      semantic colors (event log, syntax) and the user could not parse them. */
-  --bg-0: #f4f6f8;          /* page background: very subtle cool tint so white panels stand out */
-  --bg-1: #ffffff;
-  --bg-2: #ffffff;
-  --surface-0: #ffffff;
-  --surface-1: #ffffff;
-  --surface-2: #ffffff;
-  --surface-3: #ffffff;
+  --bg-0: #e7ecf2;          /* page background: deeper cool blue-gray so panels lift off */
+  --bg-1: #f6f8fa;          /* panel surface: GitHub-style off-white blue-tinted, no glare */
+  --bg-2: #f6f8fa;
+  --surface-0: #f6f8fa;
+  --surface-1: #f6f8fa;
+  --surface-2: #f6f8fa;
+  --surface-3: #f6f8fa;
+  /* Tinted surface for sub-cards, inputs and grouped sub-panels (kbd HW,
+     KBuf box, hint chips). Sits between page and panel so a sub-panel inside
+     a panel reads as "inset/recessed". */
+  --panel-soft: #eef2f7;
 
   --accent:        #0049b0;     /* ~7.5:1 on white — WCAG AAA */
   --accent-dim:    #003583;
@@ -253,10 +270,10 @@
 
   --text:       #0e0e10;        /* near-black for body copy */
   --text-dim:   #3a3a3d;
-  --text-muted: #5d5d62;
+  --text-muted: #4b5563;        /* lifted from #5d5d62 for stronger label contrast */
 
-  --border:        rgba(14, 14, 16, 0.14);
-  --border-strong: rgba(14, 14, 16, 0.32);
+  --border:        rgba(14, 14, 16, 0.16);
+  --border-strong: rgba(14, 14, 16, 0.36);
 
   /* Soft drop shadows replace the CRT glow — they survive on white without
      overwhelming the layout. */
@@ -281,7 +298,15 @@
   --focus-ring-outer: 0 0 0 4px rgba(0, 73, 176, 0.25);
   --focus-ring: var(--focus-ring-inner), var(--focus-ring-outer);
 
-  --body-gradient: var(--bg-0);
+  /* Blueprint-style graph paper: a faint 32px grid with an even fainter
+     8px sub-grid. Gives the page a technical/laboratory feel without
+     competing with the panels (which sit on solid --panel-bg). */
+  --body-gradient:
+    linear-gradient(to right,  rgba(14, 14, 16, 0.05) 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(to bottom, rgba(14, 14, 16, 0.05) 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(to right,  rgba(14, 14, 16, 0.025) 1px, transparent 1px) 0 0 / 8px 8px,
+    linear-gradient(to bottom, rgba(14, 14, 16, 0.025) 1px, transparent 1px) 0 0 / 8px 8px,
+    var(--bg-0);
   --scanline-color: transparent;
   --selection-bg:   rgba(0, 73, 176, 0.20);
 
@@ -291,17 +316,24 @@
      saturated semantic colors used in the event log. */
   --surface-overlay:        transparent;
   --surface-overlay-strong: rgba(14, 14, 16, 0.025);
-  /* Panel background flips to solid white in light mode — the darkening
-     overlay used in CRT themes turns into a muddy gray on a white page. */
-  --panel-bg: #ffffff;
+  /* Panel background flips to solid off-white in light mode — the darkening
+     overlay used in CRT themes turns into a muddy gray on a white page,
+     and pure #fff feels too glary next to the cool page background. */
+  --panel-bg: #f6f8fa;
 
   /* In light mode the terminal drops the "phosphor on black" metaphor — a
      dark terminal slab inside a white panel reads as broken styling, not
      intentional skeuomorphism. Console output and the kbd input flip to
      ink-on-paper so they match the rest of the layout. */
-  --terminal-bg: #ffffff;
+  --terminal-bg: #f6f8fa;
   --terminal-fg: #0e0e10;
   --terminal-border: var(--border);
+
+  /* Scrollbar tokens — solid panel-soft track + dark semi-transparent
+     thumb so the bar reads on a light layout without phosphor metaphor. */
+  --scrollbar-track:       var(--panel-soft);
+  --scrollbar-thumb:       rgba(14, 14, 16, 0.22);
+  --scrollbar-thumb-hover: rgba(14, 14, 16, 0.42);
 
   --font-display: 'Atkinson Hyperlegible', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --font-body:    'Atkinson Hyperlegible', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
@@ -354,6 +386,20 @@
 }
 :root[data-theme="accesible"] .title-main {
   text-shadow: none;
+}
+
+/* CRT phosphor "glows" (text-shadow + saturated box-shadow on focus / active
+   states) on dark themes simulate a glowing CRT. On a light page those
+   shadows read as blurry halos around the element instead of a glow — flatten
+   them to a clean focus/active styling. */
+:root[data-theme="accesible"] .kbd__title:hover,
+:root[data-theme="accesible"] .kbd__title:focus-visible {
+  text-shadow: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+:root[data-theme="accesible"] .kbd__interactor:focus-within {
+  box-shadow: var(--focus-ring-outer);
 }
 :root[data-theme="accesible"] .status-led {
   box-shadow: none;
@@ -432,6 +478,10 @@
   --surface-overlay:        rgba(0, 0, 0, 0.30);
   --surface-overlay-strong: rgba(0, 0, 0, 0.50);
   --panel-bg:               rgba(0, 0, 0, 0.25);
+  --panel-soft:             rgba(240, 246, 252, 0.04);
+  --scrollbar-track:        rgba(0, 0, 0, 0.35);
+  --scrollbar-thumb:        rgba(var(--accent-rgb), 0.3);
+  --scrollbar-thumb-hover:  rgba(var(--accent-rgb), 0.5);
 
   /* Sober dark terminal: deeper than bg-0 (so it stands apart) with off-white
      monospace text — no phosphor, in line with the rest of the IDE feel. */
@@ -660,7 +710,7 @@ select option:checked {
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(var(--accent-rgb), 0.35) rgba(0, 0, 0, 0.4);
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
 *::-webkit-scrollbar {
@@ -669,22 +719,22 @@ select option:checked {
 }
 
 *::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(var(--accent-rgb), 0.08);
+  background: var(--scrollbar-track);
+  border: 1px solid var(--border);
 }
 
 *::-webkit-scrollbar-thumb {
-  background: rgba(var(--accent-rgb), 0.3);
-  border: 1px solid rgba(var(--accent-rgb), 0.5);
+  background: var(--scrollbar-thumb);
+  border: 1px solid var(--border-strong);
   border-radius: 0;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(var(--accent-rgb), 0.5);
+  background: var(--scrollbar-thumb-hover);
 }
 
 *::-webkit-scrollbar-corner {
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--scrollbar-track);
 }
 
 /* ─── BREAKPOINT CONVENTION ────────────────────────────────────────────────

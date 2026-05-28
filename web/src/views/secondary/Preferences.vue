@@ -64,29 +64,6 @@ const locales: { id: Locale; labelKey: 'es' | 'en' }[] = [
       </div>
     </Card>
 
-    <Card :title="t('preferences.narrators.title')" :elevation="1" class="prefs__card">
-      <p class="prefs__hint">{{ t('preferences.narrators.hint') }}</p>
-      <label class="prefs__toggle">
-        <input
-          type="checkbox"
-          :checked="prefs.narratorsEnabled"
-          @change="(ev) => (prefs.narratorsEnabled = (ev.target as HTMLInputElement).checked)"
-        />
-        <span>{{ prefs.narratorsEnabled ? t('preferences.narrators.on') : t('preferences.narrators.off') }}</span>
-      </label>
-    </Card>
-
-    <Card :title="t('preferences.sidebar.title')" :elevation="1" class="prefs__card">
-      <label class="prefs__toggle">
-        <input
-          type="checkbox"
-          :checked="prefs.sidebarCollapsed"
-          @change="prefs.toggleSidebar()"
-        />
-        <span>{{ t('preferences.sidebar.startCollapsed') }}</span>
-      </label>
-    </Card>
-
   </div>
 </template>
 

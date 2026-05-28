@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { LogIn, Minus } from '@lucide/vue';
 
@@ -9,6 +9,7 @@ import { useTutorStore, type TutorCitation } from '../../stores/tutor';
 import { useCpuStore } from '../../stores/cpu';
 import { useToastStore } from '../../stores/toast';
 import { useAuthStore } from '../../stores/auth';
+import { RESET_FAB_EVENT } from '../../composables/useResetUi';
 
 const tutor = useTutorStore();
 const cpu = useCpuStore();
@@ -57,6 +58,123 @@ function handleCite(citation: TutorCitation) {
   }
 }
 
+// Temporary drag: the FAB can be dragged out of the way to expose UI it
+// overlaps (the IPC panel's collapse caret, for example). The offset is
+// kept in a local ref so it is wiped on reload — by design, this is not a
+// persisted preference.
+const fabRef = ref<HTMLButtonElement | null>(null);
+const dragOffset = ref<{ x: number; y: number } | null>(null);
+const isDragging = ref(false);
+
+const DRAG_THRESHOLD_PX = 5;
+const VIEWPORT_MARGIN_PX = 4;
+
+let dragPointerId = -1;
+let dragStartMouseX = 0;
+let dragStartMouseY = 0;
+let dragStartOffsetX = 0;
+let dragStartOffsetY = 0;
+let fabAnchorLeft = 0;
+let fabAnchorTop = 0;
+let fabWidth = 0;
+let fabHeight = 0;
+
+const dragStyle = computed(() => {
+  if (!dragOffset.value) return undefined;
+  return {
+    transform: `translate(${dragOffset.value.x}px, ${dragOffset.value.y}px)`,
+    animation: 'none',
+    transition: isDragging.value ? 'none' : undefined,
+  } as Record<string, string | undefined>;
+});
+
+function clampOffset(x: number, y: number) {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const minX = VIEWPORT_MARGIN_PX - fabAnchorLeft;
+  const maxX = vw - fabAnchorLeft - fabWidth - VIEWPORT_MARGIN_PX;
+  const minY = VIEWPORT_MARGIN_PX - fabAnchorTop;
+  const maxY = vh - fabAnchorTop - fabHeight - VIEWPORT_MARGIN_PX;
+  return {
+    x: Math.min(Math.max(x, minX), Math.max(minX, maxX)),
+    y: Math.min(Math.max(y, minY), Math.max(minY, maxY)),
+  };
+}
+
+function onFabPointerDown(ev: PointerEvent) {
+  if (ev.button !== 0 || !fabRef.value) return;
+  const rect = fabRef.value.getBoundingClientRect();
+  const currentOffset = dragOffset.value ?? { x: 0, y: 0 };
+  // The anchor is where the FAB would render with no transform applied —
+  // subtract the active offset from the live rect to recover it.
+  fabAnchorLeft = rect.left - currentOffset.x;
+  fabAnchorTop = rect.top - currentOffset.y;
+  fabWidth = rect.width;
+  fabHeight = rect.height;
+  dragStartMouseX = ev.clientX;
+  dragStartMouseY = ev.clientY;
+  dragStartOffsetX = currentOffset.x;
+  dragStartOffsetY = currentOffset.y;
+  dragPointerId = ev.pointerId;
+  isDragging.value = false;
+  window.addEventListener('pointermove', onFabPointerMove);
+  window.addEventListener('pointerup', onFabPointerUp);
+  window.addEventListener('pointercancel', onFabPointerUp);
+}
+
+function onFabPointerMove(ev: PointerEvent) {
+  if (ev.pointerId !== dragPointerId) return;
+  const dx = ev.clientX - dragStartMouseX;
+  const dy = ev.clientY - dragStartMouseY;
+  if (!isDragging.value) {
+    if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+    isDragging.value = true;
+  }
+  dragOffset.value = clampOffset(dragStartOffsetX + dx, dragStartOffsetY + dy);
+}
+
+function onFabPointerUp(ev: PointerEvent) {
+  if (ev.pointerId !== dragPointerId) return;
+  const wasDragging = isDragging.value;
+  dragPointerId = -1;
+  isDragging.value = false;
+  window.removeEventListener('pointermove', onFabPointerMove);
+  window.removeEventListener('pointerup', onFabPointerUp);
+  window.removeEventListener('pointercancel', onFabPointerUp);
+  if (wasDragging) {
+    // Swallow the synthetic click that follows a drag-release so we do not
+    // open the panel right when the user lets go. The safety raf drops the
+    // listener if no click arrives (touch, cancelled gesture).
+    const suppressClick = (e: MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+    };
+    window.addEventListener('click', suppressClick, { capture: true, once: true });
+    requestAnimationFrame(() => {
+      window.removeEventListener('click', suppressClick, { capture: true });
+    });
+  }
+}
+
+function onWindowResize() {
+  if (!dragOffset.value || !fabRef.value) return;
+  const rect = fabRef.value.getBoundingClientRect();
+  fabAnchorLeft = rect.left - dragOffset.value.x;
+  fabAnchorTop = rect.top - dragOffset.value.y;
+  fabWidth = rect.width;
+  fabHeight = rect.height;
+  dragOffset.value = clampOffset(dragOffset.value.x, dragOffset.value.y);
+}
+
+function onResetFabPosition() {
+  dragOffset.value = null;
+}
+
+onMounted(() => {
+  window.addEventListener('resize', onWindowResize);
+  window.addEventListener(RESET_FAB_EVENT, onResetFabPosition);
+});
+
 // Esc collapses an expanded modal back to docked without closing the panel,
 // so the conversation is preserved. If already docked, Esc closes the panel.
 function onKeydown(ev: KeyboardEvent) {
@@ -81,6 +199,11 @@ watch(
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown);
+  window.removeEventListener('pointermove', onFabPointerMove);
+  window.removeEventListener('pointerup', onFabPointerUp);
+  window.removeEventListener('pointercancel', onFabPointerUp);
+  window.removeEventListener('resize', onWindowResize);
+  window.removeEventListener(RESET_FAB_EVENT, onResetFabPosition);
 });
 
 function onBackdropClick() {
@@ -93,10 +216,17 @@ function onBackdropClick() {
   <div class="tutor-host">
     <button
       v-if="!tutor.open"
+      ref="fabRef"
       class="fab"
-      :class="{ has_hint: unreadCount > 0 }"
-      :title="unreadCount > 0 ? `Tutor — ${unreadCount} mensaje(s) nuevo(s)` : 'Hablar con el tutor'"
-      :aria-label="unreadCount > 0 ? `Abrir tutor, ${unreadCount} mensajes nuevos` : 'Abrir tutor'"
+      :class="{ has_hint: unreadCount > 0, 'is-dragging': isDragging }"
+      :style="dragStyle"
+      :title="unreadCount > 0
+        ? `Tutor — ${unreadCount} mensaje(s) nuevo(s) (arrastre para mover)`
+        : 'Hablar con el tutor (arrastre para mover)'"
+      :aria-label="unreadCount > 0
+        ? `Abrir tutor, ${unreadCount} mensajes nuevos. Arrastre para mover`
+        : 'Abrir tutor. Arrastre para mover'"
+      @pointerdown="onFabPointerDown"
       @click="tutor.setOpen(true)"
     >
       <TutorBotIcon :size="22" :stroke-width="1.75" />
@@ -171,8 +301,10 @@ function onBackdropClick() {
 <style scoped>
 .tutor-host {
   position: fixed;
-  /* Sit above the .credit overlay in Simulator.vue (bottom: 6px, ~28px tall),
-     leaving room for a soft drop-shadow underneath. */
+  /* Anchor for the FAB and the docked panel; both attach to the host's
+     bottom-right corner via position: absolute. The FAB itself can be
+     dragged out of this anchor temporarily via a CSS transform applied
+     inline — see the drag logic in <script>. */
   right: 12px;
   bottom: 52px;
   /* Above the narrator overlay (--z-overlay = 500) so banners like the
@@ -222,6 +354,10 @@ function onBackdropClick() {
   color: var(--text);
   box-shadow: 0 0 24px rgba(var(--accent-rgb), 0.45);
   animation: none;
+}
+.fab.is-dragging {
+  cursor: grabbing;
+  box-shadow: 0 0 28px rgba(var(--accent-rgb), 0.55);
 }
 .fab .tutor-bot-icon {
   transition: stroke 180ms ease-out;

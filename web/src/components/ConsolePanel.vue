@@ -162,7 +162,13 @@ const kbufLabel = computed(() => {
 
 <style scoped>
 .console {
+  /* Width: takes its share of .middle via --mc-weight (set inline from
+     Simulator.vue); 60vh caps it so a huge weight on tall screens cannot
+     swallow the entire viewport. min-height keeps a usable strip even when
+     the user drags the resizer to its top. */
+  flex: var(--mc-weight, 1) 1 0;
   min-height: 240px;
+  max-height: 60vh;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -185,7 +191,11 @@ const kbufLabel = computed(() => {
 .console__keyboard {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
 }
 
 .kbd__header {
@@ -208,6 +218,8 @@ const kbufLabel = computed(() => {
   letter-spacing: 1px;
   text-transform: uppercase;
   cursor: pointer;
+  justify-self: flex-start;
+  min-height: auto;
 }
 
 .kbd__title:hover {
@@ -272,7 +284,8 @@ const kbufLabel = computed(() => {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
   color: var(--text-dim);
-  padding: 0 2px;
+  padding: 6px 2px 0;
+  border-top: 1px dashed var(--border);
   min-height: 14px;
 }
 
@@ -394,6 +407,9 @@ const kbufLabel = computed(() => {
     height: 100%;
     flex: 1;
     min-height: 0;
+    /* Mobile shows one panel at a time via tab; the desktop viewport cap
+       would only shrink the only visible panel for no reason. */
+    max-height: none;
   }
 
   /* Side-by-side stops making sense on narrow screens — stack the narrator

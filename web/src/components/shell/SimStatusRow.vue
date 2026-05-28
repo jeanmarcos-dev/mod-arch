@@ -34,14 +34,6 @@ function onCoreTabDblClick(id: number) {
   if (props.readonly) return;
   cpu.selectOnlyCore(id);
 }
-function onCoreAllClick() {
-  if (props.readonly) return;
-  if (cpu.selectedCoreIds.size === cpu.numCores) {
-    cpu.selectOnlyCore(cpu.selectedCoreId);
-  } else {
-    cpu.selectAllCores();
-  }
-}
 </script>
 
 <template>
@@ -82,15 +74,6 @@ function onCoreAllClick() {
           @click="onCoreTabClick(c.id)"
           @dblclick="onCoreTabDblClick(c.id)"
         >C{{ c.id }}</button>
-        <button
-          type="button"
-          class="sim-bar__core-all"
-          :disabled="readonly"
-          :title="cpu.selectedCoreIds.size === cpu.numCores
-            ? t('shell.simStatusRow.onlyFocused', { id: cpu.selectedCoreId })
-            : t('shell.simStatusRow.showAll')"
-          @click="onCoreAllClick"
-        >{{ cpu.selectedCoreIds.size === cpu.numCores ? `ONLY C${cpu.selectedCoreId}` : 'ALL' }}</button>
       </span>
 
       <span class="sim-pill sim-pill--tick">

@@ -191,7 +191,13 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     term: 'KeyboardBuf',
     category: 'Interrupciones',
     short: 'Cola FIFO interna del kernel donde se acumulan los bytes que aún no se entregaron al proceso lector.',
-    detail: 'Cuando usted presiona una tecla, el handler de IRQ 0x21 mete el byte en el KeyboardBuf. Si hay un proceso BLOCKED esperando con sys_read(stdin), el kernel le entrega el primer byte y lo despierta. Si no hay nadie esperando, el byte se queda en el buffer hasta que alguien llame a sys_read. El panel de consola muestra "KBuf {used}/{cap}" para que usted vea cuántos bytes hay pendientes y la cola de procesos esperando lectura.',
+    detail: `Cuando usted presiona una tecla, el handler de IRQ 0x21 mete el byte en el KeyboardBuf. A partir de ahí pueden ocurrir dos escenarios:
+
+• **Delivered (entregado)** — Si hay un proceso BLOCKED esperando con sys_read(stdin), el kernel le copia el primer byte al buffer del proceso y lo pasa a READY. El narrador del teclado lo muestra como "PID N (prog): BLOCKED → READY".
+
+• **Buffered (encolado)** — Si nadie está leyendo, el byte se queda esperando en el KeyboardBuf hasta que algún proceso haga sys_read. El narrador lo muestra como "KBuf push · sin lector (cola: N)".
+
+El badge del panel de consola lee "KBuf {used}/{cap}" con cap = 16, que es un tope puramente didáctico: representa la dimensión típica del buffer en un teclado real. Cuando "used" supera "cap", el badge cambia a rojo y agrega ⚠ — es una alerta visual, no una pérdida de bytes: el slice subyacente sigue creciendo y entregando todo en orden FIFO. La idea pedagógica es que usted vea cómo presionar teclas sin lector tiene un costo (la cola crece) y aprenda a relacionar sys_read con la liberación del buffer.`,
     aliases: ['KBuf', 'buffer del teclado', 'keyboard buffer'],
   },
   {
@@ -276,7 +282,7 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     term: 'ZOMBIE',
     category: 'Procesos',
     short: 'Proceso terminó pero el PCB aún existe.',
-    detail: 'Cuando un proceso hace sys_exit (o muere por una excepción), el kernel marca su PCB como ZOMBIE. El PCB se mantiene para que el padre pueda leer el exit code con wait(). En nuestro demo lo mantenemos por simplicidad.',
+    detail: 'Tras sys_exit (o una excepción mortal) el PCB queda en ZOMBIE: el proceso ya no consume CPU pero su entrada sobrevive para que el padre lea su exit_code con wait() / waitpid(). Si el padre muere antes o nunca lo recoge, init (PID 1) lo adopta y lo reapa apenas el dispatcher lo despierta. En este simulador init siempre corre en segundo plano; con el toggle del panel PROCESOS se puede mostrar u ocultar.',
   },
   {
     term: 'Context switch',

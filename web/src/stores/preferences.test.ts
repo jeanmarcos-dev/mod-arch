@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { nextTick } from 'vue';
+import { createPinia, setActivePinia } from 'pinia';
 import { usePreferencesStore } from './preferences';
 
 describe('preferences store', () => {
@@ -71,5 +73,46 @@ describe('preferences store', () => {
     expect(prefs.columnWidths.rightPx).toBe(240);
     prefs.setColumnWidth('right', 380);
     expect(prefs.columnWidths.rightPx).toBe(380);
+  });
+
+  it('hides init by default and respects the manual toggle', () => {
+    const prefs = usePreferencesStore();
+    expect(prefs.showInit).toBe(false);
+    prefs.setShowInit(true);
+    expect(prefs.showInit).toBe(true);
+    prefs.setShowInit(false);
+    expect(prefs.showInit).toBe(false);
+  });
+
+  it('applyShowInitDefault hides for single-proc demos and reveals for multi-proc', () => {
+    const prefs = usePreferencesStore();
+    prefs.applyShowInitDefault(1);
+    expect(prefs.showInit).toBe(false);
+    prefs.applyShowInitDefault(2);
+    expect(prefs.showInit).toBe(true);
+    prefs.applyShowInitDefault(0);
+    expect(prefs.showInit).toBe(false);
+  });
+
+  it('applyShowInitDefault stops overriding once the user touches the toggle', () => {
+    const prefs = usePreferencesStore();
+    prefs.applyShowInitDefault(2);
+    expect(prefs.showInit).toBe(true);
+    prefs.setShowInit(false);
+    prefs.applyShowInitDefault(5);
+    expect(prefs.showInit).toBe(false);
+    prefs.applyShowInitDefault(1);
+    expect(prefs.showInit).toBe(false);
+  });
+
+  it('persists the user override of showInit across reloads', async () => {
+    const first = usePreferencesStore();
+    first.setShowInit(true);
+    await nextTick();
+    setActivePinia(createPinia());
+    const second = usePreferencesStore();
+    expect(second.showInit).toBe(true);
+    second.applyShowInitDefault(1);
+    expect(second.showInit).toBe(true);
   });
 });

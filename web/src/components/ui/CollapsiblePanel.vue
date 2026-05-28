@@ -51,8 +51,8 @@ function openGlossary() {
           :aria-expanded="isOpen"
           @click="toggle"
         >
-          <ChevronDown v-if="isOpen" :size="11" :stroke-width="2" />
-          <ChevronRight v-else :size="11" :stroke-width="2" />
+          <ChevronDown v-if="isOpen" :size="14" :stroke-width="2" />
+          <ChevronRight v-else :size="14" :stroke-width="2" />
         </button>
       </div>
     </div>
@@ -128,7 +128,7 @@ function openGlossary() {
 .cpanel__actions-divider {
   display: inline-block;
   width: 1px;
-  height: 12px;
+  height: 16px;
   background: var(--border);
 }
 
@@ -137,8 +137,8 @@ function openGlossary() {
   border: 1px solid var(--border);
   color: var(--text-dim);
   box-sizing: border-box;
-  width: 14px;
-  height: 14px;
+  width: 22px;
+  height: 22px;
   min-height: 0;
   padding: 0;
   font-size: 0;
@@ -147,6 +147,7 @@ function openGlossary() {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  border-radius: var(--radius-sm);
   transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
 }
 

@@ -3,6 +3,7 @@ import { useCpuStore } from '../stores/cpu';
 import type { CoreInfo } from '../stores/cpu';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { ChevronDown, ChevronRight } from '@lucide/vue';
 
 const cpu = useCpuStore();
 const { t } = useI18n();
@@ -356,7 +357,13 @@ function effectivelyExpanded(coreId: number): boolean {
           @keydown.enter.prevent="collapsibleMode && toggleExpanded(c.id)"
           @keydown.space.prevent="collapsibleMode && toggleExpanded(c.id)"
         >
-          <span v-if="collapsibleMode" class="memory-card__chevron">{{ effectivelyExpanded(c.id) ? '▾' : '▸' }}</span>
+          <component
+            v-if="collapsibleMode"
+            :is="effectivelyExpanded(c.id) ? ChevronDown : ChevronRight"
+            :size="12"
+            :stroke-width="2"
+            class="memory-card__chevron"
+          />
           <span
             class="memory-card__label"
             :style="{ color: `var(--core-${c.id % 4})`, borderColor: `var(--core-${c.id % 4})` }"
@@ -544,6 +551,7 @@ function effectivelyExpanded(coreId: number): boolean {
   display: flex;
   gap: 12px;
   padding: 1px 0;
+  align-items: center;
 }
 
 .hex-addr {
@@ -552,7 +560,7 @@ function effectivelyExpanded(coreId: number): boolean {
 }
 
 .hex-bytes {
-  flex: 1;
+  display: flex;
 }
 
 .hex-byte {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useCpuStore } from '../stores/cpu';
 import { usePreferencesStore } from '../stores/preferences';
@@ -7,6 +8,19 @@ import CollapsiblePanel from './ui/CollapsiblePanel.vue';
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
 const { t } = useI18n();
+
+// Hide init from both queues whenever the PROCESOS toggle hides it from the
+// tree, so the wait-pill "P1 wait(any)" stops cluttering single-proc demos.
+// Init's PID is discovered by name since the kernel reserves it as PID 1 but
+// the frontend should not hard-code that.
+const initPID = computed(() => cpu.procs.find(p => p.name === 'init')?.pid ?? 0);
+const hideInit = computed(() => !prefs.showInit && initPID.value > 0);
+const readyQueue = computed(() =>
+  hideInit.value ? cpu.readyQueue.filter(pid => pid !== initPID.value) : cpu.readyQueue,
+);
+const waitQueue = computed(() =>
+  hideInit.value ? cpu.waitQueue.filter(w => w.pid !== initPID.value) : cpu.waitQueue,
+);
 </script>
 
 <template>
@@ -25,8 +39,8 @@ const { t } = useI18n();
         @click="cpu.openGlossary('Ready queue')"
       >{{ t('panels.processes.readyQueue') }}</div>
       <div class="rq-pills">
-        <span v-if="cpu.readyQueue.length === 0" class="rq-empty">{{ t('panels.processes.empty') }}</span>
-        <span v-for="pid in cpu.readyQueue" :key="pid" class="rq-pill">P{{ pid }}</span>
+        <span v-if="readyQueue.length === 0" class="rq-empty">{{ t('panels.processes.empty') }}</span>
+        <span v-for="pid in readyQueue" :key="pid" class="rq-pill">P{{ pid }}</span>
       </div>
     </div>
 
@@ -36,12 +50,12 @@ const { t } = useI18n();
         :title="t('panels.processes.waitQueueHint')"
         @click="cpu.openGlossary('Waiting queue')"
       >{{ t('panels.processes.waitQueue') }}
-        <span v-if="cpu.waitQueue.length > 0" class="wq-hint">{{ t('panels.processes.waitQueueHelp') }}</span>
+        <span v-if="waitQueue.length > 0" class="wq-hint">{{ t('panels.processes.waitQueueHelp') }}</span>
       </div>
       <div class="rq-pills">
-        <span v-if="cpu.waitQueue.length === 0" class="rq-empty">{{ t('panels.processes.empty') }}</span>
+        <span v-if="waitQueue.length === 0" class="rq-empty">{{ t('panels.processes.empty') }}</span>
         <span
-          v-for="w in cpu.waitQueue"
+          v-for="w in waitQueue"
           :key="w.pid"
           class="wq-pill"
           :title="t('panels.processes.waitTooltip', { pid: w.pid, reason: w.reason })"
@@ -55,12 +69,6 @@ const { t } = useI18n();
 </template>
 
 <style scoped>
-.queues {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
 .clickable-label {
   cursor: pointer;
   transition: color 0.15s ease;
@@ -124,7 +132,7 @@ const { t } = useI18n();
   align-items: center;
   gap: 6px;
   padding: 2px 8px;
-  background: rgba(255, 122, 122, 0.06);
+  background: color-mix(in oklab, var(--red) 8%, transparent);
   border: 1px solid var(--red-soft);
   color: var(--red-soft);
   font-size: 13px;
@@ -142,6 +150,6 @@ const { t } = useI18n();
 
 @keyframes wait-pulse {
   0%, 100% { opacity: 1; box-shadow: none; }
-  50%      { opacity: 0.7; box-shadow: 0 0 6px rgba(255, 122, 122, 0.3); }
+  50%      { opacity: 0.7; box-shadow: 0 0 6px color-mix(in oklab, var(--red) 30%, transparent); }
 }
 </style>

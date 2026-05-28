@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import {
   Download,
@@ -8,17 +9,20 @@ import {
   Pause,
   RotateCcw,
   Eraser,
+  LayoutGrid,
   Pin,
   PinOff,
   GripHorizontal,
   PanelBottomOpen,
   PanelBottomClose,
+  Settings,
 } from '@lucide/vue';
 import { useCpuStore, type CoreInfo } from '../../stores/cpu';
 import { useSimBarStore } from '../../stores/simBar';
 import { useDraggable } from '../../composables/useDraggable';
 import { useBreakpoint } from '../../composables/useBreakpoint';
 import { useSimSettings } from '../../composables/useSimSettings';
+import { useResetUi } from '../../composables/useResetUi';
 import {
   hex,
   coreModeLabel,
@@ -51,6 +55,12 @@ function onClear() {
   cpu.clearLog();
 }
 
+// Reset UI is scoped to the home route for now — other simulator routes may
+// expose their own resets later.
+const route = useRoute();
+const isHomeRoute = computed(() => route.path === '/');
+const resetUi = useResetUi();
+
 // Floating mode: the panel teleports to <body> with a fixed position. We
 // drive coords via useDraggable so the small "handle" row above the bar
 // doubles as a drag grip and the store persists the final position.
@@ -66,6 +76,15 @@ watch(() => bar.mode, async (m) => {
     await nextTick();
     drag.setPosition({ x: bar.x, y: bar.y });
   }
+});
+
+// Mirror the persisted floating position into the local drag state. Without
+// this watcher, an external write to bar.x/bar.y (Reset UI) would update the
+// store but the visible coords would stay at whatever useDraggable holds.
+watch(() => [bar.x, bar.y] as const, ([x, y]) => {
+  if (bar.mode !== 'floating') return;
+  if (drag.position.value.x === x && drag.position.value.y === y) return;
+  drag.setPosition({ x, y });
 });
 
 // Mobile viewports cannot host a draggable floating toolbar without crowding
@@ -175,6 +194,19 @@ const pauseTooltip = computed(() => {
 
         <button
           type="button"
+          :class="['icon-btn', 'sim-bar__tools-btn', { 'sim-bar__tools-btn--on': bar.toolsDrawerOpen }]"
+          :aria-pressed="bar.toolsDrawerOpen"
+          :aria-label="t('simbar.toolsBtn')"
+          :title="t('simbar.toolsBtnHint')"
+          @click="bar.toggleTools()"
+          @pointerdown.stop
+          @dblclick.stop
+        >
+          <Settings :size="14" :stroke-width="2" />
+        </button>
+
+        <button
+          type="button"
           class="sim-bar__dock-btn"
           :title="t('simbar.dockHint')"
           @click="bar.dock()"
@@ -235,12 +267,29 @@ const pauseTooltip = computed(() => {
               :title="t('simbar.tooltips.clear')"
               @click="onClear"
             ><Eraser :size="14" :stroke-width="2" /><span>{{ t('simbar.buttons.clear') }}</span></button>
+            <button
+              v-if="isHomeRoute"
+              type="button"
+              class="sim-btn sim-btn--reset-ui"
+              :title="t('simbar.tooltips.resetUi')"
+              @click="resetUi()"
+            ><LayoutGrid :size="14" :stroke-width="2" /><span>{{ t('simbar.buttons.resetUi') }}</span></button>
           </div>
         </div>
 
         <SimStatusRow v-if="bar.mode === 'docked'" inline class="sim-bar__status-inline" />
 
         <div v-if="bar.mode === 'docked'" class="sim-bar__right">
+          <button
+            type="button"
+            :class="['icon-btn', 'sim-bar__tools-btn', { 'sim-bar__tools-btn--on': bar.toolsDrawerOpen }]"
+            :aria-pressed="bar.toolsDrawerOpen"
+            :aria-label="t('simbar.toolsBtn')"
+            :title="t('simbar.toolsBtnHint')"
+            @click="bar.toggleTools()"
+          >
+            <Settings :size="14" :stroke-width="2" />
+          </button>
           <button
             type="button"
             :class="['icon-btn', 'sim-bar__cores-btn', { 'sim-bar__cores-btn--on': bar.coresExpanded }]"
@@ -333,7 +382,7 @@ const pauseTooltip = computed(() => {
   background: var(--surface-1);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-elevation-floating, 0 8px 28px rgba(0, 0, 0, 0.55));
+  box-shadow: var(--shadow-elevation-floating);
   max-width: calc(100vw - var(--space-4));
   overflow: visible;
 }
@@ -411,7 +460,7 @@ const pauseTooltip = computed(() => {
   gap: var(--space-2) var(--space-3);
   min-height: 48px;
   position: relative;
-  padding-right: 84px; /* reserve room for the absolute cores-btn + PinOff cluster (docked only) */
+  padding-right: 120px; /* reserve room for the absolute tools + cores + PinOff cluster (docked only) */
 }
 
 /* In floating mode the cores-btn + dock cluster live in the header, so the
@@ -464,7 +513,7 @@ const pauseTooltip = computed(() => {
   .sim-bar__row--main {
     gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
-    padding-right: 84px;
+    padding-right: 120px;
     min-height: 0;
   }
   .sim-bar__center {
@@ -533,11 +582,11 @@ const pauseTooltip = computed(() => {
 }
 .sim-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .sim-btn--reset {
-  border-color: rgba(255, 58, 58, 0.35);
+  border-color: color-mix(in oklab, var(--red) 35%, transparent);
   color: var(--red-soft);
 }
 .sim-btn--reset:hover:not(:disabled) {
-  background: rgba(255, 58, 58, 0.12);
+  background: color-mix(in oklab, var(--red) 12%, transparent);
   box-shadow: var(--shadow-glow-red);
 }
 .sim-btn--clear {
@@ -545,7 +594,7 @@ const pauseTooltip = computed(() => {
   color: var(--text-dim);
 }
 .sim-btn--clear:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in oklab, var(--text) 4%, transparent);
   color: var(--text);
 }
 
@@ -584,8 +633,8 @@ const pauseTooltip = computed(() => {
   background: var(--surface-0);
   border-top: 1px solid var(--border-strong);
   box-shadow:
-    inset 0 6px 10px -8px rgba(0, 0, 0, 0.55),
-    inset 0 -2px 4px -3px rgba(0, 0, 0, 0.25);
+    inset 0 6px 10px -8px var(--surface-overlay-strong),
+    inset 0 -2px 4px -3px var(--surface-overlay);
   overflow: hidden;
 }
 
@@ -685,10 +734,12 @@ const pauseTooltip = computed(() => {
 /* Cores toggle — icon-btn sibling of the PinOff button. Same vocabulary
    (28px square, transparent at rest, amber tint on hover) so it reads as
    "another SimBar control" rather than a floating handle. */
-.sim-bar__cores-btn--on {
+.sim-bar__cores-btn--on,
+.sim-bar__tools-btn--on {
   color: var(--amber);
   border-color: rgba(var(--accent-rgb), 0.45);
   background: rgba(var(--accent-rgb), 0.10);
+  box-shadow: var(--shadow-glow-amber);
 }
 
 @media (max-width: 480px) {

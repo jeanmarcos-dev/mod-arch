@@ -3,7 +3,7 @@ import { useCpuStore, type PCBInfo } from '../stores/cpu';
 import { usePreferencesStore } from '../stores/preferences';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Maximize2, Minimize2 } from '@lucide/vue';
+import { Maximize2, Minimize2, Eye, EyeOff, ChevronDown, ChevronRight } from '@lucide/vue';
 import CollapsiblePanel from './ui/CollapsiblePanel.vue';
 
 const cpu = useCpuStore();
@@ -58,10 +58,27 @@ function isThreadOf(p: PCBInfo): boolean {
   const tgid = p.tgid ?? p.pid;
   return tgid !== p.pid;
 }
+// initPID identifies the always-present init process so we can hide it from
+// the tree when prefs.showInit is off. We trust the "init" name (matches the
+// kernel.SpawnInit constant) since multi-init scenarios are out of scope.
+const initPID = computed(() => {
+  const p = cpu.procs.find(x => x.name === 'init');
+  return p?.pid ?? 0;
+});
+
 const treeNodes = computed<ProcTreeNode[]>(() => {
+  const hideInit = !prefs.showInit && initPID.value > 0;
+  const visibleProcs = hideInit
+    ? cpu.procs.filter(p => p.pid !== initPID.value)
+    : cpu.procs;
   const byParent = new Map<number, PCBInfo[]>();
-  for (const p of cpu.procs) {
-    const pp = treeParentOf(p);
+  for (const p of visibleProcs) {
+    let pp = treeParentOf(p);
+    // When init is hidden, promote its direct children to the top level so
+    // they appear as roots instead of orphaned at depth 1 under a missing
+    // node. This is a purely cosmetic remapping — kernel-side parent_pid
+    // is still init for these procs.
+    if (hideInit && pp === initPID.value) pp = 0;
     if (!byParent.has(pp)) byParent.set(pp, []);
     byParent.get(pp)!.push(p);
   }
@@ -84,9 +101,9 @@ const treeNodes = computed<ProcTreeNode[]>(() => {
   // Fallback for demos that haven't seeded parent_pid on every proc yet
   // (e.g. older snapshots arriving during a reload): append any procs the
   // walk missed so they remain visible instead of vanishing.
-  if (out.length < cpu.procs.length) {
+  if (out.length < visibleProcs.length) {
     const seen = new Set(out.map(n => n.proc.pid));
-    for (const p of sortedProcs.value) {
+    for (const p of visibleProcs) {
       if (!seen.has(p.pid)) {
         out.push({ proc: p, depth: 0, realDepth: 0, isThread: isThreadOf(p) });
       }
@@ -258,14 +275,32 @@ function regsSrcTitle(p: PCBInfo): string {
       <button
         v-if="sortedProcs.length > 0"
         type="button"
-        class="proc-toolbar__btn"
+        class="proc-toolbar__btn proc-toolbar__btn--expand"
         :title="allExpanded ? t('panels.processes.collapseHint') : t('panels.processes.expandHint')"
         :aria-label="allExpanded ? t('panels.processes.collapseAll') : t('panels.processes.expandAll')"
         :aria-expanded="allExpanded"
         @click.stop="allExpanded ? collapseAll() : expandAll()"
       >
-        <Minimize2 v-if="allExpanded" :size="11" :stroke-width="2" />
-        <Maximize2 v-else :size="11" :stroke-width="2" />
+        <component
+          :is="allExpanded ? Minimize2 : Maximize2"
+          :size="13"
+          :stroke-width="2"
+        />
+        <span class="proc-toolbar__btn-label">
+          {{ allExpanded ? t('panels.processes.collapseAll') : t('panels.processes.expandAll') }}
+        </span>
+      </button>
+      <button
+        v-if="initPID > 0"
+        type="button"
+        class="proc-toolbar__btn"
+        :title="prefs.showInit ? t('panels.processes.hideInit') : t('panels.processes.showInit')"
+        :aria-label="prefs.showInit ? t('panels.processes.hideInit') : t('panels.processes.showInit')"
+        :aria-pressed="prefs.showInit"
+        @click.stop="prefs.setShowInit(!prefs.showInit)"
+      >
+        <Eye v-if="prefs.showInit" :size="14" :stroke-width="2" />
+        <EyeOff v-else :size="14" :stroke-width="2" />
       </button>
     </template>
 
@@ -300,7 +335,12 @@ function regsSrcTitle(p: PCBInfo): string {
           @keydown.enter.prevent="toggleExpanded(node.proc)"
           @keydown.space.prevent="toggleExpanded(node.proc)"
         >
-          <span class="proc-card__chevron">{{ isExpanded(node.proc.pid) ? '▾' : '▸' }}</span>
+          <component
+            :is="isExpanded(node.proc.pid) ? ChevronDown : ChevronRight"
+            :size="12"
+            :stroke-width="2"
+            class="proc-card__chevron"
+          />
           <span class="proc-card__state" :class="stateClass(node.proc.state)">{{ node.proc.state }}</span>
           <span
             v-if="coreOfPid(node.proc.pid) !== null"
@@ -396,31 +436,35 @@ function regsSrcTitle(p: PCBInfo): string {
   text-shadow: 0 0 6px rgba(106, 212, 255, 0.4);
 }
 
+/* Container query scope: the panel root advertises its inline size so the
+   "Expand all" button in the header can drop its label when the column is
+   too narrow to fit "PROCESSES" + the action chips comfortably. */
+.procs {
+  container-type: inline-size;
+}
+
 .proc-toolbar__btn {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-dim);
-  /* Match the .panel-title cap-height (font-size 11px). box-sizing: border-box
-     keeps the outer footprint at exactly 14×14 including the 1px border. */
   box-sizing: border-box;
-  width: 14px;
-  height: 14px;
-  /* Override the global `button { min-height: 32px }` mobile-touch baseline. */
+  width: 22px;
+  height: 22px;
   min-height: 0;
   padding: 0;
-  /* Cancel the global `button { font-size: 14px }` so no line-box of the
-     wrapped icon stretches the button taller than its declared height. */
   font-size: 0;
   line-height: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  border-radius: var(--radius-sm);
   transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
 }
 
 .proc-toolbar__btn :deep(svg) {
   transition: opacity 0.2s ease;
+  flex-shrink: 0;
 }
 
 .proc-toolbar__btn:hover {
@@ -432,6 +476,32 @@ function regsSrcTitle(p: PCBInfo): string {
 .proc-toolbar__btn:focus-visible {
   outline: 1px solid var(--amber);
   outline-offset: 1px;
+}
+
+.proc-toolbar__btn--expand {
+  width: auto;
+  padding: 0 7px;
+  gap: 5px;
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.proc-toolbar__btn-label {
+  line-height: 1;
+  white-space: nowrap;
+}
+
+@container (max-width: 280px) {
+  .proc-toolbar__btn--expand {
+    width: 22px;
+    padding: 0;
+    gap: 0;
+  }
+  .proc-toolbar__btn-label {
+    display: none;
+  }
 }
 
 .proc-list {
@@ -456,7 +526,7 @@ function regsSrcTitle(p: PCBInfo): string {
 .proc-card.state-zombie  { border-left-color: var(--text-muted); }
 
 .proc-card--running {
-  background: rgba(127, 255, 170, 0.04);
+  background: color-mix(in oklab, var(--green) 8%, transparent);
 }
 
 .proc-card--flash {
@@ -490,10 +560,12 @@ function regsSrcTitle(p: PCBInfo): string {
 }
 
 .proc-card__chevron {
-  width: 8px;
-  color: var(--text-dim);
+  width: 14px;
+  color: var(--amber);
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: 14px;
+  line-height: 1;
+  text-align: center;
 }
 
 /* All in-header tags are plain coloured text — no boxes, no backgrounds. The

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue';
+import { ChevronRight } from '@lucide/vue';
 import type { GlossaryEntry } from '../../data/glossary';
 
 const props = defineProps<{
@@ -90,7 +91,7 @@ function displayTerm(t: string): string {
         <span class="g-tip__cat">{{ entry.category }}</span>
       </div>
       <p class="g-tip__short">{{ entry.short }}</p>
-      <div class="g-tip__hint">clic para más info ▸</div>
+      <div class="g-tip__hint">clic para más info <ChevronRight :size="11" :stroke-width="2" /></div>
     </div>
   </Teleport>
 </template>

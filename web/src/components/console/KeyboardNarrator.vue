@@ -227,7 +227,7 @@ function outcomeLabel(card: NarratorCard): string {
   flex-direction: column;
   background: var(--terminal-bg);
   border: 1px solid var(--terminal-border);
-  box-shadow: inset 0 0 14px rgba(0, 0, 0, 0.55);
+  box-shadow: inset 0 0 14px var(--surface-overlay-strong);
   position: relative;
   overflow: hidden;
   min-height: 0;

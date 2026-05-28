@@ -2,9 +2,11 @@
 import { onUnmounted, ref, watch, computed } from 'vue';
 import { useNarrators, type PcbSave, type PcbRestore } from '../../lib/narratorBus';
 import { useCpuStore } from '../../stores/cpu';
+import { usePreferencesStore } from '../../stores/preferences';
 import { useNarratorAnimation } from './useNarratorAnimation';
 
 const cpu = useCpuStore();
+const prefs = usePreferencesStore();
 const animator = useNarratorAnimation();
 
 // PCBCopyNarrator animates the kernel's pcb_save / pcb_restore work. On
@@ -88,6 +90,9 @@ const ttlCss = computed(() => `${animator.tickMs.value}ms`);
 function launch(kind: 'save' | 'restore', payload: PcbSave | PcbRestore) {
   if (!cpu.isCoreVisible(payload.coreId)) return;
   if (!animator.shouldFire()) return;
+  // Skip animations for init when the user hid it: the cards would fly to a
+  // PCB row that is not in the DOM, leaving them stranded.
+  if (!prefs.showInit && cpu.processNameOf(payload.pid) === 'init') return;
 
   const cpuEl = cpuAnchorFor(payload.coreId);
   const pcbEl = props.pcbTarget ? props.pcbTarget(payload.pid) : defaultPcbTarget(payload.pid);
@@ -222,7 +227,7 @@ onUnmounted(() => { trips.value = []; });
 
 .pcb-copy__trail--restore {
   stroke: var(--green);
-  filter: drop-shadow(0 0 5px rgba(127, 255, 170, 0.6));
+  filter: drop-shadow(0 0 5px color-mix(in oklab, var(--green) 60%, transparent));
 }
 
 @keyframes pcb-trail {
@@ -254,7 +259,7 @@ onUnmounted(() => { trips.value = []; });
 
 .pcb-copy__card--restore {
   color: var(--green);
-  box-shadow: 0 0 12px rgba(127, 255, 170, 0.4);
+  box-shadow: 0 0 12px color-mix(in oklab, var(--green) 40%, transparent);
 }
 
 .pcb-copy__card-head {

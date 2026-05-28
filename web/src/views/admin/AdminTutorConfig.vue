@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { RefreshCw } from '@lucide/vue';
 import { apiFetch } from '../../lib/api';
 import { useAdminStore } from '../../stores/admin';
 import { useToastStore } from '../../stores/toast';
@@ -339,7 +340,10 @@ onMounted(load);
       <button class="btn ghost" :disabled="saving || loading" @click="reload">
         Solo recargar
       </button>
-      <button class="btn ghost" :disabled="loading" @click="load">↻ Refrescar</button>
+      <button class="btn ghost" :disabled="loading" @click="load">
+        <RefreshCw :size="14" :stroke-width="2" />
+        Refrescar
+      </button>
     </div>
   </div>
 </template>

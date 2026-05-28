@@ -129,11 +129,6 @@ function shouldFlash(core: CoreInfo, reg: string): boolean {
 </template>
 
 <style scoped>
-.cpu {
-  height: 100%;
-  min-height: 0;
-}
-
 @media (max-width: 768px) {
   .reg-row {
     padding: 8px 6px;

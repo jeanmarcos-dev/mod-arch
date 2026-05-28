@@ -67,6 +67,17 @@ const {
 const leftStyle = computed(() => ({ width: `${leftWidth.value}px` }));
 const rightStyle = computed(() => ({ width: `${rightWidth.value}px` }));
 
+// Column widths live inside useResizableColumn, but the preferences store
+// can also rewrite them externally (e.g. Reset UI). Mirror store → ref so a
+// programmatic change reaches the layout; the equality guard prevents the
+// resizer's onChange from echoing back into a write loop.
+watch(() => prefs.columnWidths.leftPx, (px) => {
+  if (leftWidth.value !== px) leftWidth.value = px;
+});
+watch(() => prefs.columnWidths.rightPx, (px) => {
+  if (rightWidth.value !== px) rightWidth.value = px;
+});
+
 // Refs to the three panels stacked in the right column. useResizableRow reads
 // their offsetHeight at drag start to translate pointer deltas into weight
 // changes. Template refs on Vue components resolve to a public instance, not
@@ -75,6 +86,8 @@ type PanelRef = ComponentPublicInstance | HTMLElement | null;
 const processesEl = ref<PanelRef>(null);
 const queuesEl = ref<PanelRef>(null);
 const ipcEl = ref<PanelRef>(null);
+const middleTabsEl = ref<PanelRef>(null);
+const consolePanelEl = ref<PanelRef>(null);
 
 // CSS variable, not `flex` shorthand: CollapsiblePanel reads --cpanel-weight
 // from this inline style and applies it only to flex-grow. The collapsed
@@ -83,6 +96,9 @@ const ipcEl = ref<PanelRef>(null);
 const processesStyle = computed(() => ({ '--cpanel-weight': String(prefs.panelHeights.processes) }));
 const queuesStyle = computed(() => ({ '--cpanel-weight': String(prefs.panelHeights.queues) }));
 const ipcStyle = computed(() => ({ '--cpanel-weight': String(prefs.panelHeights.ipc) }));
+// Center column: tabs pile (Código/Bitácora/Memoria) vs ConsolePanel below.
+const middleTabsStyle = computed(() => ({ '--mc-weight': String(prefs.panelHeights.middleTabs) }));
+const middleConsoleStyle = computed(() => ({ '--mc-weight': String(prefs.panelHeights.middleConsole) }));
 
 const { isResizing: processesQueuesResizing, start: startProcessesQueuesResize } = useResizableRow({
   topEl: processesEl,
@@ -100,6 +116,19 @@ const { isResizing: queuesIpcResizing, start: startQueuesIpcResize } = useResiza
   getBottomWeight: () => prefs.panelHeights.ipc,
   setTopWeight: (w) => prefs.setPanelHeight('queues', w),
   setBottomWeight: (w) => prefs.setPanelHeight('ipc', w),
+});
+
+// Center column: splits vertical space between the active tab (Código /
+// Bitácora / Memoria, all v-show siblings inside .middle__tabs-stack) and the
+// ConsolePanel directly below. Without this handle the console grows with its
+// content until it pushes the tabs out of the viewport.
+const { isResizing: middleTabsConsoleResizing, start: startMiddleTabsConsoleResize } = useResizableRow({
+  topEl: middleTabsEl,
+  bottomEl: consolePanelEl,
+  getTopWeight: () => prefs.panelHeights.middleTabs,
+  getBottomWeight: () => prefs.panelHeights.middleConsole,
+  setTopWeight: (w) => prefs.setPanelHeight('middleTabs', w),
+  setBottomWeight: (w) => prefs.setPanelHeight('middleConsole', w),
 });
 
 // Row resizers only make sense when both neighbours are expanded — a
@@ -296,14 +325,36 @@ onUnmounted(() => {
             :title="isLocked('memory') ? t('simulator.lockedPanel.title') : t('tabs.memoryLong')"
           ><MemoryStick :size="14" :stroke-width="2" /><span>{{ t('tabs.memory') }}</span><Lock v-if="isLocked('memory')" class="tab-lock" :size="10" :stroke-width="2" /></button>
         </div>
-        <CodeAsmSplit v-if="!isLocked('code')" v-show="visible.code" />
-        <LockedPanel v-else v-show="visible.code" />
-        <EventsLog v-if="!isLocked('events')" v-show="visible.events" />
-        <LockedPanel v-else v-show="visible.events" />
-        <MemoryPanel v-if="!isLocked('memory')" v-show="visible.memory" />
-        <LockedPanel v-else v-show="visible.memory" />
-        <ConsolePanel v-if="!isLocked('console')" v-show="visible.console" />
-        <LockedPanel v-else v-show="visible.console" />
+        <div
+          ref="middleTabsEl"
+          class="middle__tabs-stack"
+          :style="!isMobile ? middleTabsStyle : undefined"
+        >
+          <CodeAsmSplit v-if="!isLocked('code')" v-show="visible.code" />
+          <LockedPanel v-else v-show="visible.code" />
+          <EventsLog v-if="!isLocked('events')" v-show="visible.events" />
+          <LockedPanel v-else v-show="visible.events" />
+          <MemoryPanel v-if="!isLocked('memory')" v-show="visible.memory" />
+          <LockedPanel v-else v-show="visible.memory" />
+        </div>
+        <RowResizer
+          v-if="!isMobile && visible.console"
+          class="middle__row-resizer desktop-only"
+          :active="middleTabsConsoleResizing"
+          @pointerdown="startMiddleTabsConsoleResize"
+        />
+        <ConsolePanel
+          v-if="!isLocked('console')"
+          ref="consolePanelEl"
+          v-show="visible.console"
+          :style="!isMobile ? middleConsoleStyle : undefined"
+        />
+        <LockedPanel
+          v-else
+          ref="consolePanelEl"
+          v-show="visible.console"
+          :style="!isMobile ? middleConsoleStyle : undefined"
+        />
       </div>
       <ColumnResizer
         v-if="!isMobile && visible.procs"
@@ -386,10 +437,36 @@ onUnmounted(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 8px;
   min-width: 0;
   /* Breathing room only on the two edges that face a resizer. */
   margin: 0;
+  /* Without this min-height the children expand by their intrinsic size,
+     which lets ConsolePanel push the tabs out of the viewport. With min-height
+     at 0 the column honors the flex weights instead. */
+  min-height: 0;
+}
+
+/* Wrapper around the v-show'd tab panels (Código/Bitácora/Memoria). Only one
+   tab is visible at a time, so its single visible child stretches to fill the
+   wrapper. The wrapper itself participates in the .middle flex split against
+   ConsolePanel via --mc-weight, with the RowResizer in between. */
+.middle__tabs-stack {
+  flex: var(--mc-weight, 1) 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.middle__tabs-stack > * {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Mobile already stacks every panel vertically with its own height rules; the
+   resizer makes no sense there. */
+@media (max-width: 768px) {
+  .middle__row-resizer { display: none; }
+  .middle__tabs-stack { flex: 1 1 auto; }
 }
 
 .col-left {
@@ -418,6 +495,13 @@ onUnmounted(() => {
    .cpanel inside CollapsiblePanel — scoped CSS here cannot reach the
    child component's root. We only handle the column itself. */
 
+/* Adjacent panels with no RowResizer between them (i.e. one or both
+   collapsed) would otherwise sit flush against each other. A tiny margin
+   restores visual separation without reintroducing the resizer's grip. */
+.col-right--stack > .col-right__panel + .col-right__panel {
+  margin-top: 6px;
+}
+
 @media (max-width: 768px) {
   .col-left { width: 100% !important; }
   .col-right--stack { width: 100% !important; }
@@ -439,11 +523,18 @@ onUnmounted(() => {
   padding: 6px 10px;
   color: var(--text-dim);
   border-color: var(--border);
-  background: var(--surface-overlay);
+  background: var(--panel-soft);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.tab:hover:not(.active):not(.locked):not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: color-mix(in oklab, var(--accent) 6%, var(--panel-soft));
 }
 .tab > svg { flex-shrink: 0; }
 .tab > span {
@@ -464,7 +555,7 @@ onUnmounted(() => {
 .tab.active {
   color: var(--amber);
   border-color: var(--amber);
-  background: rgba(var(--accent-rgb), 0.1);
+  background: color-mix(in oklab, var(--accent) 14%, var(--panel-soft));
   box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.2);
 }
 
@@ -472,12 +563,12 @@ onUnmounted(() => {
 .mobile-tabs button.locked {
   opacity: 0.5;
   cursor: not-allowed;
-  background: var(--surface-overlay);
+  background: var(--panel-soft);
 }
 
 .tab.locked:hover,
 .mobile-tabs button.locked:hover {
-  background: var(--surface-overlay);
+  background: var(--panel-soft);
   color: var(--text-dim);
   border-color: var(--border);
   box-shadow: none;

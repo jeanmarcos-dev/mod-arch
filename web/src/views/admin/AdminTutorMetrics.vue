@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { RefreshCw } from '@lucide/vue';
 import { apiFetch } from '../../lib/api';
 import Card from '../../components/ui/Card.vue';
 
@@ -92,7 +93,9 @@ function pct(v: number): string {
             <option :value="168">{{ t('admin.tutorMetrics.windowLast7d') }}</option>
           </select>
         </label>
-        <button class="refresh" @click="load" :disabled="loading">↻</button>
+        <button class="refresh" @click="load" :disabled="loading" aria-label="Refrescar">
+          <RefreshCw :size="14" :stroke-width="2" />
+        </button>
       </div>
     </header>
 

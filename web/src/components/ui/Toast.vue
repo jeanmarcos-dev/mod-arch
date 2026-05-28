@@ -1,6 +1,13 @@
 <script setup lang="ts">
-import { useToastStore } from '../../stores/toast';
+import { useToastStore, type ToastItem } from '../../stores/toast';
 const toast = useToastStore();
+
+function runAction(t: ToastItem) {
+  // Dismiss before running so a slow handler does not keep the snackbar on
+  // screen while the action runs.
+  toast.dismiss(t.id);
+  t.action?.run();
+}
 </script>
 
 <template>
@@ -10,10 +17,16 @@ const toast = useToastStore();
         <div
           v-for="t in toast.items"
           :key="t.id"
-          :class="['toast', `toast--${t.tone}`]"
+          :class="['toast', `toast--${t.tone}`, { 'toast--has-action': !!t.action }]"
           role="status"
         >
-          {{ t.message }}
+          <span class="toast__msg">{{ t.message }}</span>
+          <button
+            v-if="t.action"
+            type="button"
+            class="toast__action"
+            @click="runAction(t)"
+          >{{ t.action.label }}</button>
         </div>
       </TransitionGroup>
     </div>
@@ -43,6 +56,36 @@ const toast = useToastStore();
   background: var(--surface-2);
   box-shadow: var(--shadow-elevation-2);
   pointer-events: auto;
+}
+.toast--has-action {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.toast__msg {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.toast__action {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid currentColor;
+  color: inherit;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.25rem 0.6rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-base);
+}
+.toast__action:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.toast__action:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 
 .toast--ok {

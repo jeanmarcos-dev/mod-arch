@@ -10,6 +10,12 @@ interface SimBarState {
   coresExpanded: boolean;
 }
 
+// Includes toolsDrawerOpen so the Reset UI snackbar can restore an open
+// drawer on Undo — the drawer state is runtime-only otherwise.
+export interface SimBarSnapshot extends SimBarState {
+  toolsDrawerOpen: boolean;
+}
+
 const STORAGE_KEY = 'modos-cpu:simbar:v1';
 
 const DEFAULTS: SimBarState = {
@@ -96,6 +102,32 @@ export const useSimBarStore = defineStore('simBar', () => {
     toolsDrawerOpen.value = !toolsDrawerOpen.value;
   }
 
+  // Snapshot/apply/reset support the "Reset UI" command in SimBar, which
+  // captures the layout before reverting it and offers an Undo via the toast
+  // snackbar. toolsDrawerOpen is included so an open drawer is restored on
+  // undo even though it does not persist across reloads.
+  function getState(): SimBarSnapshot {
+    return {
+      mode: mode.value,
+      x: x.value,
+      y: y.value,
+      coresExpanded: coresExpanded.value,
+      toolsDrawerOpen: toolsDrawerOpen.value,
+    };
+  }
+
+  function applyState(s: SimBarSnapshot) {
+    mode.value = s.mode;
+    x.value = s.x;
+    y.value = s.y;
+    coresExpanded.value = s.coresExpanded;
+    toolsDrawerOpen.value = s.toolsDrawerOpen;
+  }
+
+  function reset() {
+    applyState({ ...DEFAULTS, toolsDrawerOpen: false });
+  }
+
   return {
     mode,
     x,
@@ -110,5 +142,8 @@ export const useSimBarStore = defineStore('simBar', () => {
     openTools,
     closeTools,
     toggleTools,
+    getState,
+    applyState,
+    reset,
   };
 });

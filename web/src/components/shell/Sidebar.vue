@@ -2,7 +2,7 @@
 import { computed, type Component } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { ChevronLeft, ChevronRight, Lock } from '@lucide/vue';
+import { Lock, PanelLeftClose, PanelLeftOpen } from '@lucide/vue';
 import { usePreferencesStore } from '../../stores/preferences';
 
 const { t } = useI18n();
@@ -121,7 +121,7 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
       :aria-label="collapsed ? t('shell.sidebar.expandMenu') : t('shell.sidebar.collapseMenu')"
       @click="prefs.toggleSidebar()"
     >
-      <component :is="collapsed ? ChevronRight : ChevronLeft" :size="16" :stroke-width="2.5" />
+      <component :is="collapsed ? PanelLeftOpen : PanelLeftClose" :size="20" :stroke-width="2" />
     </button>
   </aside>
 </template>
@@ -145,39 +145,62 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
   width: 56px;
 }
 
-/* Toggle handle straddles the right border so it sits on the seam between
-   sidebar and main content. Sits just above the foot so the user chip and
-   the toggle never collide. */
+/* Full-width header strip styled like a nav row. When the sidebar is
+   expanded the toggle is shown in its "active" appearance (amber accent
+   + filled bg) because that mirrors how a selected nav item reads; in
+   the collapsed rail it falls back to a neutral, colourless state. */
 .sidebar__toggle {
   position: absolute;
-  right: -13px;
-  bottom: 68px;
-  width: 26px;
-  height: 26px;
-  background: var(--surface-2);
-  border: 1px solid var(--amber);
+  left: 0;
+  right: 0;
+  top: 0;
+  min-height: 38px;
+  background: rgba(var(--accent-rgb), 0.10);
+  border: none;
+  border-left: 2px solid var(--amber);
   color: var(--amber);
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   cursor: pointer;
   font-family: inherit;
   font-size: 13px;
-  border-radius: var(--radius-sm);
   z-index: 10;
+  padding: 0 var(--space-3);
+  box-shadow: none;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    padding var(--transition-base);
+}
+
+.sidebar--collapsed .sidebar__toggle {
+  justify-content: center;
   padding: 0;
-  box-shadow: 0 0 0 1px var(--surface-0), var(--shadow-glow-amber);
-  transition: background var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+  background: transparent;
+  border-left-color: transparent;
+  color: var(--text-dim);
 }
 
 .sidebar__toggle:hover {
-  background: rgba(var(--accent-rgb), 0.22);
-  transform: scale(1.08);
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--amber);
+  text-shadow: none;
+}
+
+.sidebar--collapsed .sidebar__toggle:hover {
+  background: rgba(var(--accent-rgb), 0.06);
 }
 
 .sidebar__toggle:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 3px rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--amber);
+}
+
+.sidebar--collapsed .sidebar__toggle:focus-visible {
+  background: rgba(var(--accent-rgb), 0.06);
 }
 
 .sidebar__toggle svg { display: block; stroke-width: 2.5; }
@@ -186,7 +209,9 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 0 0 var(--space-2);
+  /* Top padding reserves the 38px header strip occupied by the collapse
+     toggle so the first nav item never slides under it. */
+  padding: 38px 0 var(--space-2);
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;

@@ -66,8 +66,26 @@ function colorOf(pid: number) {
   return PID_COLORS[pid] ?? 'var(--green)';
 }
 
+// xxd-style hexdump: each row shows a 16-byte window aligned to its offset.
+// Two halves of 8 bytes separated by an extra space make the byte index easier
+// to count by eye, and the ASCII column on the right renders printable bytes
+// as-is (DEL and control codes collapse to '.'). The trailing space padding
+// keeps the ASCII column from sliding left when the final row is short.
 function hexOf(bytes: number[]): string {
-  return bytes.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+  const lines: string[] = [];
+  const HALF_PAD = 8 * 3 - 1;
+  for (let off = 0; off < bytes.length; off += 16) {
+    const slice = bytes.slice(off, off + 16);
+    const hexParts = slice.map(b => b.toString(16).padStart(2, '0'));
+    const leftHex = hexParts.slice(0, 8).join(' ').padEnd(HALF_PAD, ' ');
+    const rightHex = hexParts.slice(8, 16).join(' ').padEnd(HALF_PAD, ' ');
+    const ascii = slice
+      .map(b => (b >= 0x20 && b < 0x7f) ? String.fromCharCode(b) : '.')
+      .join('');
+    const offHex = off.toString(16).padStart(4, '0');
+    lines.push(`${offHex}  ${leftHex}  ${rightHex}  ${ascii}`);
+  }
+  return lines.join('\n');
 }
 
 function scrollToBottom() {
@@ -171,7 +189,7 @@ async function onCopy() {
   background: var(--terminal-bg);
   border: 1px solid var(--terminal-border);
   border-radius: 0;
-  box-shadow: inset 0 0 14px rgba(0, 0, 0, 0.55);
+  box-shadow: inset 0 0 14px var(--surface-overlay-strong);
   position: relative;
   overflow: hidden;
   flex: 1;
@@ -373,9 +391,12 @@ async function onCopy() {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
   color: var(--text-dim);
-  white-space: pre-wrap;
-  word-break: break-all;
-  letter-spacing: 0.5px;
+  /* The dump is pre-aligned column-by-column, so we explicitly forbid
+     wrapping and letter-spacing — both would slide the ASCII column off
+     position. Narrow viewports get a horizontal scroll on the block instead. */
+  white-space: pre;
+  word-break: normal;
+  overflow-x: auto;
   border-top: 1px dashed var(--terminal-border);
   padding-top: 2px;
 }

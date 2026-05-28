@@ -87,8 +87,6 @@ function lastOpLabel(p: PipeInfo): string {
 
 <style scoped>
 .ipc {
-  height: 100%;
-  min-height: 0;
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: var(--text);
