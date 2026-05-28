@@ -15,13 +15,15 @@ import (
 )
 
 type stubLLM struct {
-	calls int
-	resp  string
-	err   error
+	calls   int
+	resp    string
+	err     error
+	lastReq llm.ChatRequest // captured for assertions on prompt shape
 }
 
 func (s *stubLLM) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	s.calls++
+	s.lastReq = req
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -131,6 +133,60 @@ func TestAskFallbackOnLLMError(t *testing.T) {
 	}
 	if len(ans.Citations) == 0 {
 		t.Error("fallback should still include citations")
+	}
+}
+
+func TestAskHistoryWindowTruncation(t *testing.T) {
+	llmStub := &stubLLM{resp: "respuesta"}
+	svc := setupService(t, llmStub)
+	defer svc.Close()
+	svc.opts.HistoryWindowTurns = 2 // keep only 2 turns = 4 messages
+
+	history := []HistoryTurn{
+		{Role: "user", Text: "q1"},
+		{Role: "assistant", Text: "a1"},
+		{Role: "user", Text: "q2"},
+		{Role: "assistant", Text: "a2"},
+		{Role: "user", Text: "q3"},
+		{Role: "assistant", Text: "a3"},
+	}
+	_, err := svc.AskWithOptions(context.Background(), nil, "follow-up", AskOptions{History: history}, nil)
+	if err != nil {
+		t.Fatalf("AskWithOptions: %v", err)
+	}
+	// Expect: system + last 4 history messages + final user → 6 messages.
+	if got := len(llmStub.lastReq.Messages); got != 6 {
+		t.Fatalf("len(messages) = %d, want 6 (system+4history+user)", got)
+	}
+	// The retained history should be the last two turns (q2/a2/q3/a3).
+	wantContents := []string{"q2", "a2", "q3", "a3"}
+	for i, want := range wantContents {
+		got := llmStub.lastReq.Messages[i+1].Content
+		if got != want {
+			t.Errorf("messages[%d] = %q, want %q", i+1, got, want)
+		}
+	}
+}
+
+func TestAskHistoryInvalidatesCache(t *testing.T) {
+	llmStub := &stubLLM{resp: "respuesta A"}
+	svc := setupService(t, llmStub)
+	defer svc.Close()
+	svc.opts.HistoryWindowTurns = 3
+
+	histA := []HistoryTurn{{Role: "user", Text: "primera pregunta"}, {Role: "assistant", Text: "primera respuesta"}}
+	histB := []HistoryTurn{{Role: "user", Text: "otra pregunta"}, {Role: "assistant", Text: "otra respuesta"}}
+
+	_, _ = svc.AskWithOptions(context.Background(), nil, "follow-up", AskOptions{History: histA}, nil)
+	ans, err := svc.AskWithOptions(context.Background(), nil, "follow-up", AskOptions{History: histB}, nil)
+	if err != nil {
+		t.Fatalf("AskWithOptions: %v", err)
+	}
+	if ans.CacheHit {
+		t.Error("different history should not reuse the cached answer")
+	}
+	if llmStub.calls != 2 {
+		t.Errorf("llm calls = %d, want 2 (history change forces a new call)", llmStub.calls)
 	}
 }
 

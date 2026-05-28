@@ -55,7 +55,14 @@ func (s *Server) handleTutorAsk(cmd Command, sess *sessions.Session, c *sim.Clie
 			maps.Copy(msg, detail)
 			c.Send <- msg
 		}
-		ans, err := svc.AskWithOptions(ctx, sess, cmd.Question, tutor.AskOptions{Mode: cmd.TutorMode}, progress)
+		// Hard cap to defend against payloads with absurd history sizes; the
+		// orchestrator also truncates to HistoryWindowTurns afterwards.
+		const historyHardCap = 20
+		hist := cmd.History
+		if len(hist) > historyHardCap {
+			hist = hist[len(hist)-historyHardCap:]
+		}
+		ans, err := svc.AskWithOptions(ctx, sess, cmd.Question, tutor.AskOptions{Mode: cmd.TutorMode, History: hist}, progress)
 		if err != nil {
 			var rl *tutor.RateLimitError
 			if errors.As(err, &rl) {

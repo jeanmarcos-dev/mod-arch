@@ -15,15 +15,16 @@ import (
 // Settings keys persisted in the `settings` table. Prefix keeps tutor entries
 // from clashing with other subsystems.
 const (
-	cfgEnabled          = "tutor.enabled"           // "true" | "false"; false desactiva todo el tutor
-	cfgLLMProvider      = "tutor.llm_provider"      // gemini | deepseek | groq | openai_compat
-	cfgLLMModel         = "tutor.llm_model"         // override del default del provider
-	cfgLLMBaseURL       = "tutor.llm_base_url"      // solo para openai_compat
-	cfgLLMRPM           = "tutor.llm_rpm"           // rate limit por minuto, 0 desactiva
-	cfgMode             = "tutor.mode"              // direct | socratic (global, controlado por admin)
-	cfgEmbedderProvider = "tutor.embedder_provider" // ollama | jina
-	cfgOllamaHost       = "tutor.ollama_host"
-	cfgOllamaEmbedModel = "tutor.ollama_embed_model"
+	cfgEnabled            = "tutor.enabled"              // "true" | "false"; false desactiva todo el tutor
+	cfgLLMProvider        = "tutor.llm_provider"         // gemini | deepseek | groq | openai_compat
+	cfgLLMModel           = "tutor.llm_model"            // override del default del provider
+	cfgLLMBaseURL         = "tutor.llm_base_url"         // solo para openai_compat
+	cfgLLMRPM             = "tutor.llm_rpm"              // rate limit por minuto, 0 desactiva
+	cfgMode               = "tutor.mode"                 // direct | socratic (global, controlado por admin)
+	cfgEmbedderProvider   = "tutor.embedder_provider"    // ollama | jina
+	cfgOllamaHost         = "tutor.ollama_host"
+	cfgOllamaEmbedModel   = "tutor.ollama_embed_model"
+	cfgHistoryWindowTurns = "tutor.history_window_turns" // 0..10; 0 desactiva la memoria multi-turno
 
 	// API keys (encrypted at rest with crypto.Seal).
 	cfgKeyGemini       = "tutor.api_key.gemini"
@@ -47,12 +48,16 @@ type Config struct {
 	EmbedderProvider string
 	OllamaHost       string
 	OllamaEmbedModel string
+	// HistoryWindowTurns is the number of prior student/tutor turns the
+	// service replays to the LLM. -1 means "unset" so MergeEnv knows to
+	// apply the default (3); 0 is a valid kill-switch.
+	HistoryWindowTurns int
 
-	GeminiAPIKey      string
-	DeepSeekAPIKey    string
-	GroqAPIKey        string
-	OpenAICompatKey   string
-	JinaAPIKey        string
+	GeminiAPIKey    string
+	DeepSeekAPIKey  string
+	GroqAPIKey      string
+	OpenAICompatKey string
+	JinaAPIKey      string
 }
 
 // MaskedConfig is the safe-to-render version of Config: every API key is
@@ -60,15 +65,16 @@ type Config struct {
 // last four characters. The boolean Has* flags let the UI show "set" vs
 // "unset" without leaking the actual value.
 type MaskedConfig struct {
-	Enabled          bool   `json:"enabled"`
-	LLMProvider      string `json:"llm_provider"`
-	LLMModel         string `json:"llm_model"`
-	LLMBaseURL       string `json:"llm_base_url"`
-	LLMRPM           int    `json:"llm_rpm"`
-	Mode             string `json:"mode"`
-	EmbedderProvider string `json:"embedder_provider"`
-	OllamaHost       string `json:"ollama_host"`
-	OllamaEmbedModel string `json:"ollama_embed_model"`
+	Enabled            bool   `json:"enabled"`
+	LLMProvider        string `json:"llm_provider"`
+	LLMModel           string `json:"llm_model"`
+	LLMBaseURL         string `json:"llm_base_url"`
+	LLMRPM             int    `json:"llm_rpm"`
+	Mode               string `json:"mode"`
+	EmbedderProvider   string `json:"embedder_provider"`
+	OllamaHost         string `json:"ollama_host"`
+	OllamaEmbedModel   string `json:"ollama_embed_model"`
+	HistoryWindowTurns int    `json:"history_window_turns"`
 
 	GeminiAPIKey      string `json:"gemini_api_key"`
 	HasGeminiKey      bool   `json:"has_gemini_key"`
@@ -94,15 +100,16 @@ func (c Config) Mask() MaskedConfig {
 		return "••••••" + k[len(k)-4:], true
 	}
 	m := MaskedConfig{
-		Enabled:          c.Enabled,
-		LLMProvider:      c.LLMProvider,
-		LLMModel:         c.LLMModel,
-		LLMBaseURL:       c.LLMBaseURL,
-		LLMRPM:           c.LLMRPM,
-		Mode:             c.Mode,
-		EmbedderProvider: c.EmbedderProvider,
-		OllamaHost:       c.OllamaHost,
-		OllamaEmbedModel: c.OllamaEmbedModel,
+		Enabled:            c.Enabled,
+		LLMProvider:        c.LLMProvider,
+		LLMModel:           c.LLMModel,
+		LLMBaseURL:         c.LLMBaseURL,
+		LLMRPM:             c.LLMRPM,
+		Mode:               c.Mode,
+		EmbedderProvider:   c.EmbedderProvider,
+		OllamaHost:         c.OllamaHost,
+		OllamaEmbedModel:   c.OllamaEmbedModel,
+		HistoryWindowTurns: c.HistoryWindowTurns,
 	}
 	m.GeminiAPIKey, m.HasGeminiKey = mask(c.GeminiAPIKey)
 	m.DeepSeekAPIKey, m.HasDeepSeekKey = mask(c.DeepSeekAPIKey)
@@ -149,14 +156,15 @@ func LoadConfig(ctx context.Context, r settingsReader, encKey [32]byte) (Config,
 	}
 
 	c := Config{
-		Enabled:          parseBoolDefault(get(cfgEnabled), true),
-		LLMProvider:      get(cfgLLMProvider),
-		LLMModel:         get(cfgLLMModel),
-		LLMBaseURL:       get(cfgLLMBaseURL),
-		Mode:             get(cfgMode),
-		EmbedderProvider: get(cfgEmbedderProvider),
-		OllamaHost:       get(cfgOllamaHost),
-		OllamaEmbedModel: get(cfgOllamaEmbedModel),
+		Enabled:            parseBoolDefault(get(cfgEnabled), true),
+		LLMProvider:        get(cfgLLMProvider),
+		LLMModel:           get(cfgLLMModel),
+		LLMBaseURL:         get(cfgLLMBaseURL),
+		Mode:               get(cfgMode),
+		EmbedderProvider:   get(cfgEmbedderProvider),
+		OllamaHost:         get(cfgOllamaHost),
+		OllamaEmbedModel:   get(cfgOllamaEmbedModel),
+		HistoryWindowTurns: -1, // "unset" sentinel; MergeEnv fills in the default
 
 		GeminiAPIKey:    openKey(get(cfgKeyGemini)),
 		DeepSeekAPIKey:  openKey(get(cfgKeyDeepSeek)),
@@ -167,6 +175,11 @@ func LoadConfig(ctx context.Context, r settingsReader, encKey [32]byte) (Config,
 	if v := get(cfgLLMRPM); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			c.LLMRPM = n
+		}
+	}
+	if v := get(cfgHistoryWindowTurns); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.HistoryWindowTurns = n
 		}
 	}
 	return c, nil
@@ -204,6 +217,7 @@ func SaveConfig(ctx context.Context, w settingsWriter, encKey [32]byte, cfg Conf
 		func() error { return put(cfgEmbedderProvider, cfg.EmbedderProvider) },
 		func() error { return put(cfgOllamaHost, cfg.OllamaHost) },
 		func() error { return put(cfgOllamaEmbedModel, cfg.OllamaEmbedModel) },
+		func() error { return put(cfgHistoryWindowTurns, strconv.Itoa(cfg.HistoryWindowTurns)) },
 		func() error { return putKey(cfgKeyGemini, cfg.GeminiAPIKey) },
 		func() error { return putKey(cfgKeyDeepSeek, cfg.DeepSeekAPIKey) },
 		func() error { return putKey(cfgKeyGroq, cfg.GroqAPIKey) },
@@ -224,21 +238,22 @@ func SaveConfig(ctx context.Context, w settingsWriter, encKey [32]byte, cfg Conf
 // `Clear*` booleans. API keys follow the same convention so the admin can
 // rotate a single key without resending the others.
 type Update struct {
-	Enabled          *bool
-	LLMProvider      *string
-	LLMModel         *string
-	LLMBaseURL       *string
-	LLMRPM           *int
-	Mode             *string
-	EmbedderProvider *string
-	OllamaHost       *string
-	OllamaEmbedModel *string
+	Enabled            *bool   `json:"enabled,omitempty"`
+	LLMProvider        *string `json:"llm_provider,omitempty"`
+	LLMModel           *string `json:"llm_model,omitempty"`
+	LLMBaseURL         *string `json:"llm_base_url,omitempty"`
+	LLMRPM             *int    `json:"llm_rpm,omitempty"`
+	Mode               *string `json:"mode,omitempty"`
+	EmbedderProvider   *string `json:"embedder_provider,omitempty"`
+	OllamaHost         *string `json:"ollama_host,omitempty"`
+	OllamaEmbedModel   *string `json:"ollama_embed_model,omitempty"`
+	HistoryWindowTurns *int    `json:"history_window_turns,omitempty"`
 
-	GeminiAPIKey       *string // nil = no change, "" = clear, "X" = set
-	DeepSeekAPIKey     *string
-	GroqAPIKey         *string
-	OpenAICompatKey    *string
-	JinaAPIKey         *string
+	GeminiAPIKey    *string `json:"gemini_api_key,omitempty"` // nil = no change, "" = clear, "X" = set
+	DeepSeekAPIKey  *string `json:"deepseek_api_key,omitempty"`
+	GroqAPIKey      *string `json:"groq_api_key,omitempty"`
+	OpenAICompatKey *string `json:"openai_compat_api_key,omitempty"`
+	JinaAPIKey      *string `json:"jina_api_key,omitempty"`
 }
 
 // Apply merges patch on top of base, returning the new config.
@@ -270,6 +285,16 @@ func (base Config) Apply(patch Update) Config {
 	}
 	if patch.OllamaEmbedModel != nil {
 		out.OllamaEmbedModel = strings.TrimSpace(*patch.OllamaEmbedModel)
+	}
+	if patch.HistoryWindowTurns != nil {
+		n := *patch.HistoryWindowTurns
+		if n < 0 {
+			n = 0
+		}
+		if n > 10 {
+			n = 10
+		}
+		out.HistoryWindowTurns = n
 	}
 	if patch.GeminiAPIKey != nil {
 		out.GeminiAPIKey = strings.TrimSpace(*patch.GeminiAPIKey)
@@ -322,6 +347,22 @@ func MergeEnv(cfg Config, env func(string) string) Config {
 	cfg.EmbedderProvider = pick(cfg.EmbedderProvider, "EMBEDDER_PROVIDER")
 	cfg.OllamaHost = pick(cfg.OllamaHost, "OLLAMA_HOST")
 	cfg.OllamaEmbedModel = pick(cfg.OllamaEmbedModel, "OLLAMA_EMBED_MODEL")
+
+	// HistoryWindowTurns: -1 means "no admin row, no env" → apply the default
+	// of 3 prior turns. Explicit 0 from the admin stays as 0 (kill-switch).
+	if cfg.HistoryWindowTurns < 0 {
+		if v := strings.TrimSpace(env("TUTOR_HISTORY_WINDOW_TURNS")); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+				cfg.HistoryWindowTurns = n
+			}
+		}
+	}
+	if cfg.HistoryWindowTurns < 0 {
+		cfg.HistoryWindowTurns = 3
+	}
+	if cfg.HistoryWindowTurns > 10 {
+		cfg.HistoryWindowTurns = 10
+	}
 
 	cfg.GeminiAPIKey = pick(cfg.GeminiAPIKey, "GEMINI_API_KEY")
 	cfg.DeepSeekAPIKey = pick(cfg.DeepSeekAPIKey, "DEEPSEEK_API_KEY")

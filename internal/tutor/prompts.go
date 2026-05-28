@@ -88,8 +88,11 @@ FORMATO ESTRICTO DE CITAS (igual que el tutor directo):
 Solo [Glosario: <término exacto>] o [Stallings p. <N>]. Nunca formatos intermedios.`
 
 // BuildMessages assembles the LLM chat history. It is exported so callers can
-// inspect or log the exact bytes that will be sent.
-func BuildMessages(question string, simSnapshot string, retrieved []rag.ScoredChunk) []promptMessage {
+// inspect or log the exact bytes that will be sent. history (already
+// normalized and truncated by the caller) is inserted between the system
+// prompt and the current user turn so the model can resolve follow-ups like
+// "¿y por qué?" without needing the student to repeat themselves.
+func BuildMessages(question string, simSnapshot string, retrieved []rag.ScoredChunk, history []HistoryTurn) []promptMessage {
 	var ctxBlock strings.Builder
 	if strings.TrimSpace(simSnapshot) != "" {
 		ctxBlock.WriteString("ESTADO ACTUAL DEL SIMULADOR\n")
@@ -111,10 +114,13 @@ func BuildMessages(question string, simSnapshot string, retrieved []rag.ScoredCh
 		userContent = question
 	}
 
-	return []promptMessage{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userContent},
+	out := make([]promptMessage, 0, 2+len(history))
+	out = append(out, promptMessage{Role: "system", Content: systemPrompt})
+	for _, h := range history {
+		out = append(out, promptMessage{Role: h.Role, Content: h.Text})
 	}
+	out = append(out, promptMessage{Role: "user", Content: userContent})
+	return out
 }
 
 // promptMessage is local to keep the tutor decoupled from the llm package's

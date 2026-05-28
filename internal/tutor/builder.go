@@ -88,10 +88,11 @@ func Build(ctx context.Context, deps BuildDeps, cfg Config) (*Service, error) {
 	}
 
 	svc := New(retriever, rs, provider, deps.Logger, Options{
-		CorpusVersion:   corpusVersion,
-		TopK:            topK,
-		MaxAnswerTokens: maxTok,
-		RateLimitMax:    rlMax,
+		CorpusVersion:      corpusVersion,
+		TopK:               topK,
+		MaxAnswerTokens:    maxTok,
+		RateLimitMax:       rlMax,
+		HistoryWindowTurns: cfg.HistoryWindowTurns,
 	})
 	svc.SetMetricsStore(NewMetricsStore(deps.Store.DB()))
 	svc.SetDefaultMode(cfg.Mode)

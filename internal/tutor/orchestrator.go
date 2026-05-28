@@ -50,7 +50,16 @@ type Options struct {
 	RateLimitWindow time.Duration
 	CorpusVersion   int
 	MaxToolIters    int // safety cap on the tool-calling loop; default 3
+	// HistoryWindowTurns caps how many prior student/tutor turns are forwarded
+	// to the LLM on each Ask. 0 keeps the legacy stateless behavior; the
+	// builder is responsible for picking the default (currently 3) before
+	// reaching here. Clamped to [0,10] in withDefaults.
+	HistoryWindowTurns int
 }
+
+// historyHardCap mirrors the validation in the admin API: even if the builder
+// passes something out of range, we never replay more than this many turns.
+const historyHardCap = 10
 
 func (o Options) withDefaults() Options {
 	if o.TopK <= 0 {
@@ -70,6 +79,12 @@ func (o Options) withDefaults() Options {
 	}
 	if o.MaxToolIters <= 0 {
 		o.MaxToolIters = 3
+	}
+	if o.HistoryWindowTurns < 0 {
+		o.HistoryWindowTurns = 0
+	}
+	if o.HistoryWindowTurns > historyHardCap {
+		o.HistoryWindowTurns = historyHardCap
 	}
 	return o
 }
@@ -159,11 +174,23 @@ func (e *RateLimitError) Error() string {
 }
 func (e *RateLimitError) Unwrap() error { return ErrRateLimited }
 
+// HistoryTurn is one prior message in the conversation forwarded by the
+// client. Role must be either "user" (the student) or "assistant" (the tutor);
+// anything else is dropped during normalization so a malformed payload cannot
+// smuggle "system" turns past the system prompt.
+type HistoryTurn struct {
+	Role string `json:"role"`
+	Text string `json:"text"`
+}
+
 // AskOptions tunes per-question behavior. Mode controls the system prompt;
 // "" or "direct" use the default tutor, "socratic" swaps in a question-only
-// prompt to push the student to reason out the answer.
+// prompt to push the student to reason out the answer. History carries the
+// recent multi-turn context (oldest first); the service truncates it to the
+// window configured by Options.HistoryWindowTurns.
 type AskOptions struct {
-	Mode string
+	Mode    string
+	History []HistoryTurn
 }
 
 // Ask runs the full pipeline for a single question from a session. progress
@@ -241,9 +268,13 @@ func (s *Service) askInternal(ctx context.Context, sess *sessions.Session, quest
 	snapshot := BuildSnapshot(sess)
 	snapText := snapshot.Render()
 
+	history := normalizeHistory(opts.History, s.opts.HistoryWindowTurns)
+
 	// Answer cache lookup. Key includes corpus version so a reindex
-	// invalidates all hits without us having to drop the table.
-	cacheKey := s.answerCacheKey(question, snapshot)
+	// invalidates all hits without us having to drop the table; it also
+	// includes the conversation history so the same question after a
+	// different follow-up does not collide.
+	cacheKey := s.answerCacheKey(question, snapshot, history)
 	if cached, err := s.store.GetCachedAnswer(ctx, cacheKey); err == nil && cached != nil {
 		var cites []Citation
 		_ = json.Unmarshal(cached.Citations, &cites)
@@ -262,7 +293,7 @@ func (s *Service) askInternal(ctx context.Context, sess *sessions.Session, quest
 		// Continue without retrieved context; the LLM still has the snapshot.
 	}
 
-	initial := BuildMessages(question, snapText, retrieved)
+	initial := BuildMessages(question, snapText, retrieved, history)
 	messages := toLLMMessages(initial)
 	// Socratic mode replaces the first system message with the alternate
 	// prompt. Tools and snapshot context stay untouched so the model can
@@ -533,15 +564,47 @@ func (s *Service) fallbackAnswer(retrieved []rag.ScoredChunk, start time.Time) *
 	}
 }
 
-// answerCacheKey hashes question + snapshot digest + corpus version.
-func (s *Service) answerCacheKey(question string, snap SnapshotView) string {
+// answerCacheKey hashes question + snapshot digest + corpus version + the
+// truncated history. Including the history prevents two different follow-ups
+// to the same base question from returning the same cached answer.
+func (s *Service) answerCacheKey(question string, snap SnapshotView, history []HistoryTurn) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "v=%d|q=%s|snap=%s",
 		s.opts.CorpusVersion,
 		strings.ToLower(strings.TrimSpace(question)),
 		snap.Digest(),
 	)
+	for i, t := range history {
+		fmt.Fprintf(h, "|h%d=%s:%s", i, t.Role, t.Text)
+	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// normalizeHistory drops malformed entries (unknown roles, empty text) and
+// keeps only the most recent 2*maxTurns messages — one student + one tutor
+// per "turn". maxTurns=0 returns nil so the legacy stateless behavior is
+// preserved when the admin explicitly opts out.
+func normalizeHistory(in []HistoryTurn, maxTurns int) []HistoryTurn {
+	if maxTurns <= 0 || len(in) == 0 {
+		return nil
+	}
+	out := make([]HistoryTurn, 0, len(in))
+	for _, h := range in {
+		role := strings.ToLower(strings.TrimSpace(h.Role))
+		if role != "user" && role != "assistant" {
+			continue
+		}
+		text := strings.TrimSpace(h.Text)
+		if text == "" {
+			continue
+		}
+		out = append(out, HistoryTurn{Role: role, Text: text})
+	}
+	limit := maxTurns * 2
+	if len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out
 }
 
 func buildCitations(retrieved []rag.ScoredChunk) []Citation {

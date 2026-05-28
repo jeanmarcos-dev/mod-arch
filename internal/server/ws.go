@@ -13,6 +13,7 @@ import (
 
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
 	"github.com/jeanmarcos/modos-cpu/internal/sim"
+	"github.com/jeanmarcos/modos-cpu/internal/tutor"
 )
 
 // defaultAllowedOrigins are the host patterns accepted on WS upgrades when
@@ -118,9 +119,10 @@ type Command struct {
 	// the UI can pair the answer with the pending input. TutorMode is
 	// "direct" (default) or "socratic" — the orchestrator swaps the system
 	// prompt to a question-driven variant in socratic mode.
-	Question  string `json:"question,omitempty"`
-	RequestID string `json:"request_id,omitempty"`
-	TutorMode string `json:"tutor_mode,omitempty"`
+	Question  string             `json:"question,omitempty"`
+	RequestID string             `json:"request_id,omitempty"`
+	TutorMode string             `json:"tutor_mode,omitempty"`
+	History   []tutor.HistoryTurn `json:"history,omitempty"`
 }
 
 // FocusInput mirrors the wire shape the owner sends inside a presence
