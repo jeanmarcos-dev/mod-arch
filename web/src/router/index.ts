@@ -1,5 +1,18 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { useAdminStore } from '../stores/admin';
+import { useAppConfigStore } from '../stores/appConfig';
+import { useAuthStore } from '../stores/auth';
+
+// Route meta carries a translation key instead of a literal string so the
+// document.title watcher can resolve it through vue-i18n on locale changes.
+declare module 'vue-router' {
+  interface RouteMeta {
+    titleKey?: string;
+    section?: boolean;
+    category?: string;
+    requiresAuth?: boolean;
+  }
+}
 
 const AppShell = () => import('../layouts/AppShell.vue');
 const Overview = () => import('../views/section/Overview.vue');
@@ -26,6 +39,7 @@ const AdminSmtp = () => import('../views/admin/AdminSmtp.vue');
 const AdminTutorMetrics = () => import('../views/admin/AdminTutorMetrics.vue');
 const AdminTutorConfig = () => import('../views/admin/AdminTutorConfig.vue');
 const AdminSecurity = () => import('../views/admin/AdminSecurity.vue');
+const AdminSimulator = () => import('../views/admin/AdminSimulator.vue');
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -34,20 +48,20 @@ export const router = createRouter({
       path: '/',
       component: AppShell,
       children: [
-        { path: '', name: 'overview', component: Overview, meta: { title: 'Vista general', section: false } },
-        { path: 'procesos', name: 'processes', component: Processes, meta: { title: 'Procesos', section: true } },
-        { path: 'memoria', name: 'memory', component: Memory, meta: { title: 'Memoria', section: true } },
-        { path: 'interrupciones', name: 'interrupts', component: Interrupts, meta: { title: 'Interrupciones', section: true } },
-        { path: 'concurrencia', name: 'concurrency', component: Concurrency, meta: { title: 'Concurrencia', section: true, category: 'concurrencia' } },
-        { path: 'x86', name: 'x86-real', component: X86Real, meta: { title: 'x86 real', section: true } },
+        { path: '', name: 'overview', component: Overview, meta: { titleKey: 'router.titles.overview', section: false } },
+        { path: 'procesos', name: 'processes', component: Processes, meta: { titleKey: 'router.titles.processes', section: true } },
+        { path: 'memoria', name: 'memory', component: Memory, meta: { titleKey: 'router.titles.memory', section: true } },
+        { path: 'interrupciones', name: 'interrupts', component: Interrupts, meta: { titleKey: 'router.titles.interrupts', section: true } },
+        { path: 'concurrencia', name: 'concurrency', component: Concurrency, meta: { titleKey: 'router.titles.concurrency', section: true, category: 'concurrencia' } },
+        { path: 'x86', name: 'x86-real', component: X86Real, meta: { titleKey: 'router.titles.x86', section: true } },
         // Legacy URL: /sesiones used to host a list of sessions, but with
         // the "one session per user" policy the list collapses to a single
         // row. Profile now carries the session info inline, so this path
         // redirects to /perfil instead of 404'ing for existing bookmarks.
         { path: 'sesiones', redirect: '/perfil' },
-        { path: 'glosario', name: 'glossary', component: GlossaryPage, meta: { title: 'Glosario', section: false } },
-        { path: 'preferencias', name: 'preferences', component: Preferences, meta: { title: 'Preferencias', section: false } },
-        { path: 'perfil', name: 'profile', component: Profile, meta: { title: 'Perfil', section: false } },
+        { path: 'glosario', name: 'glossary', component: GlossaryPage, meta: { titleKey: 'router.titles.glossary', section: false } },
+        { path: 'preferencias', name: 'preferences', component: Preferences, meta: { titleKey: 'router.titles.preferences', section: false } },
+        { path: 'perfil', name: 'profile', component: Profile, meta: { titleKey: 'router.titles.profile', section: false } },
       ],
     },
     // The backend sets the mc_view cookie when serving /v/<token>, so by the
@@ -68,16 +82,16 @@ export const router = createRouter({
       component: AdminShell,
       meta: { requiresAuth: true },
       children: [
-        { path: '', name: 'admin-dashboard', component: AdminOverview, meta: { title: 'Resumen' } },
-        { path: 'sesiones', name: 'admin-sessions', component: AdminSessions, meta: { title: 'Sesiones' } },
-        { path: 'usuarios', name: 'admin-users', component: AdminUsers, meta: { title: 'Usuarios' } },
-        { path: 'invitaciones', name: 'admin-invites', component: AdminInvites, meta: { title: 'Invitaciones' } },
-        { path: 'accesos', name: 'admin-access', component: AdminAccess, meta: { title: 'Accesos' } },
-        { path: 'smtp', name: 'admin-smtp', component: AdminSmtp, meta: { title: 'Correo' } },
-        { path: 'auditoria', name: 'admin-audit', component: AdminAudit, meta: { title: 'Auditoría' } },
-        { path: 'tutor', name: 'admin-tutor-metrics', component: AdminTutorMetrics, meta: { title: 'Tutor — métricas' } },
-        { path: 'tutor/config', name: 'admin-tutor-config', component: AdminTutorConfig, meta: { title: 'Tutor — configuración' } },
-        { path: 'seguridad', name: 'admin-security', component: AdminSecurity, meta: { title: 'Seguridad' } },
+        { path: '', name: 'admin-dashboard', component: AdminOverview, meta: { titleKey: 'router.titles.adminDashboard' } },
+        { path: 'sesiones', name: 'admin-sessions', component: AdminSessions, meta: { titleKey: 'router.titles.adminSessions' } },
+        { path: 'usuarios', name: 'admin-users', component: AdminUsers, meta: { titleKey: 'router.titles.adminUsers' } },
+        { path: 'invitaciones', name: 'admin-invites', component: AdminInvites, meta: { titleKey: 'router.titles.adminInvites' } },
+        { path: 'accesos', name: 'admin-access', component: AdminAccess, meta: { titleKey: 'router.titles.adminAccess' } },
+        { path: 'smtp', name: 'admin-smtp', component: AdminSmtp, meta: { titleKey: 'router.titles.adminSmtp' } },
+        { path: 'auditoria', name: 'admin-audit', component: AdminAudit, meta: { titleKey: 'router.titles.adminAudit' } },
+        { path: 'tutor', name: 'admin-tutor-metrics', component: AdminTutorMetrics, meta: { titleKey: 'router.titles.adminTutorMetricsLong' } },
+        { path: 'tutor/config', name: 'admin-tutor-config', component: AdminTutorConfig, meta: { titleKey: 'router.titles.adminTutorConfigLong' } },
+        { path: 'seguridad', name: 'admin-security', component: AdminSecurity, meta: { titleKey: 'router.titles.adminSecurity' } },
       ],
     },
     {

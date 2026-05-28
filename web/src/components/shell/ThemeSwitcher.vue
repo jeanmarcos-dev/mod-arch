@@ -1,35 +1,40 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { usePreferencesStore, type Theme } from '../../stores/preferences';
 
+const { t } = useI18n();
 const prefs = usePreferencesStore();
 
 interface ThemeOption {
   id: Theme;
-  label: string;
+  labelKey: 'preferences.theme.amberLabel' | 'preferences.theme.greenLabel' | 'preferences.theme.darkLabel' | 'preferences.theme.accesibleLabel';
   swatch: string;
 }
 
 const themes: ThemeOption[] = [
-  { id: 'amber',     label: 'CRT ámbar',       swatch: '#ffb547' },
-  { id: 'green',     label: 'CRT verde',       swatch: '#7fff95' },
-  { id: 'dark',      label: 'Oscuro estándar', swatch: '#58a6ff' },
-  { id: 'accesible', label: 'Claro accesible', swatch: '#0049b0' },
+  { id: 'amber',     labelKey: 'preferences.theme.amberLabel',     swatch: '#ffb547' },
+  { id: 'green',     labelKey: 'preferences.theme.greenLabel',     swatch: '#7fff95' },
+  { id: 'dark',      labelKey: 'preferences.theme.darkLabel',      swatch: '#58a6ff' },
+  { id: 'accesible', labelKey: 'preferences.theme.accesibleLabel', swatch: '#0049b0' },
 ];
+
+const ariaGroup = computed(() => t('shell.themeSwitcher.aria'));
 </script>
 
 <template>
-  <div class="theme-switcher" role="group" aria-label="Cambiar tema visual">
+  <div class="theme-switcher" role="group" :aria-label="ariaGroup">
     <button
-      v-for="t in themes"
-      :key="t.id"
+      v-for="opt in themes"
+      :key="opt.id"
       type="button"
       class="theme-switcher__swatch"
-      :class="{ 'theme-switcher__swatch--on': prefs.theme === t.id }"
-      :style="{ '--swatch': t.swatch }"
-      :title="t.label"
-      :aria-label="t.label"
-      :aria-pressed="prefs.theme === t.id"
-      @click="prefs.setTheme(t.id)"
+      :class="{ 'theme-switcher__swatch--on': prefs.theme === opt.id }"
+      :style="{ '--swatch': opt.swatch }"
+      :title="t(opt.labelKey)"
+      :aria-label="t(opt.labelKey)"
+      :aria-pressed="prefs.theme === opt.id"
+      @click="prefs.setTheme(opt.id)"
     />
   </div>
 </template>

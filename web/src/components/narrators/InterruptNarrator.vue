@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useCpuStore } from '../../stores/cpu';
 import { useNarrators, type IrqFire, type ModeSwitch } from '../../lib/narratorBus';
 import { useNarratorAnimation } from './useNarratorAnimation';
+
+const { t } = useI18n();
 
 // InterruptNarrator stages the IRQ-enter / IRET-return arc. On irq_fire it
 // draws a curved arrow from the CPU anchor to the IDT entry whose vector was
@@ -324,7 +327,7 @@ function vecLabel(v: number): string {
         </li>
       </ul>
       <footer class="int-narrator__frame-foot">
-        {{ h.kind === 'enter' ? 'pushed → kernel stack' : 'popped ← kernel stack' }}
+        {{ h.kind === 'enter' ? t('shell.interruptNarrator.pushed') : t('shell.interruptNarrator.popped') }}
       </footer>
     </div>
   </div>

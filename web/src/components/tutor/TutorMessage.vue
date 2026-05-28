@@ -143,7 +143,7 @@ function decodeHtmlEntities(s: string): string {
                 Consulte Stallings <strong v-if="c.page">p. {{ c.page }}</strong> en su biblioteca.
               </span>
               <span v-else-if="c.source === 'isa'" class="extract-hint">
-                ISA propio del simulador modos-cpu.
+                ISA propio del simulador MODARCH.
               </span>
               <span v-else-if="c.source === 'docs'" class="extract-hint">
                 Documentación del proyecto.

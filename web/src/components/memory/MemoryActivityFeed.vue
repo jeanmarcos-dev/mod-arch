@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import Card from '../ui/Card.vue';
 import { fmtAddr, fmtByte, coreColorVar } from '../../lib/memoryLayout';
+
+const { t } = useI18n();
 
 export interface FeedEntry {
   id: number;
@@ -49,13 +52,13 @@ function styleFor(coreId: number) {
 </script>
 
 <template>
-  <Card title="Actividad" :elevation="1" class="feed-card">
-    <p v-if="isFiltered" class="feed-card__filter-note" :title="`Cambie el filtro en la barra superior (botones de núcleos)`">
-      mostrando sólo <strong>{{ visibleLabels }}</strong>
+  <Card :title="t('shell.memoryActivityFeed.title')" :elevation="1" class="feed-card">
+    <p v-if="isFiltered" class="feed-card__filter-note" :title="t('shell.memoryActivityFeed.filterNoteTitle')">
+      {{ t('shell.memoryActivityFeed.showingOnlyPrefix') }}<strong>{{ visibleLabels }}</strong>
     </p>
 
     <p v-if="!visible.length" class="feed-card__empty">
-      Cargue un demo y ejecute para ver el tráfico.
+      {{ t('shell.memoryActivityFeed.empty') }}
     </p>
     <ol v-else class="feed-card__list">
       <li
@@ -64,7 +67,7 @@ function styleFor(coreId: number) {
         :class="['feed-row', `feed-row--${e.kind}`]"
         :style="{ ...styleFor(e.coreId), opacity: Math.max(0.45, 1 - ageOf(e.ts) / 5000) }"
         role="button"
-        :title="`Saltar a ${fmtAddr(e.addr)}`"
+        :title="t('shell.memoryActivityFeed.jumpTo', { addr: fmtAddr(e.addr) })"
         @click="emit('jump', e.addr)"
       >
         <span class="feed-row__tag">[C{{ e.coreId }}/P{{ e.pid || '—' }}]</span>

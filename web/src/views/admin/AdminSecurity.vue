@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { apiFetch } from '../../lib/api';
 import { useToastStore } from '../../stores/toast';
 import Card from '../../components/ui/Card.vue';
+
+const { t } = useI18n();
 
 interface MaskedConfig {
   turnstile_sitekey: string;
@@ -100,7 +103,7 @@ onMounted(load);
 <template>
   <div class="sec-cfg">
     <header class="head">
-      <h1>Seguridad — configuración</h1>
+      <h1>{{ t('admin.security.title') }}</h1>
       <span class="badge" :class="config?.has_turnstile_secret ? 'on' : 'off'">
         {{ config?.has_turnstile_secret ? 'TURNSTILE ACTIVO' : 'TURNSTILE DESACTIVADO' }}
       </span>
@@ -176,9 +179,9 @@ onMounted(load);
     <Card title="Reglas anti-abuso ya activas" :elevation="0">
       <ul class="bullets">
         <li>Rate limit por IP en <code>POST /api/auth/login</code> (5 intentos / 15 min).</li>
-        <li>Rate limit por sesión en el tutor (20 preguntas / hora).</li>
+        <li>Rate limit por sesión en MODARCHI (20 preguntas / hora).</li>
         <li>Token bucket global del LLM configurable en <code>/admin/tutor/config</code>.</li>
-        <li>El panel del tutor exige usuario autenticado.</li>
+        <li>El panel de MODARCHI exige usuario autenticado.</li>
       </ul>
     </Card>
   </div>

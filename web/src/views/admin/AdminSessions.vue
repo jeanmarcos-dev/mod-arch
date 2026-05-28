@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { RotateCw, Monitor } from '@lucide/vue';
 import { useAdminStore, type SessionRow } from '../../stores/admin';
 import { useToastStore } from '../../stores/toast';
@@ -8,6 +9,7 @@ import Btn from '../../components/ui/Btn.vue';
 import DataTable, { type Column } from '../../components/ui/DataTable.vue';
 import { formatAgo } from './util';
 
+const { t } = useI18n();
 const admin = useAdminStore();
 const toast = useToastStore();
 
@@ -19,51 +21,51 @@ async function doRefresh() {
   try {
     await admin.refresh();
   } catch (e) {
-    toast.err(e instanceof Error ? e.message : 'Error al refrescar');
+    toast.err(e instanceof Error ? e.message : t('admin.sessions.refreshError'));
   } finally {
     setTimeout(() => { refreshing.value = false; }, 350);
   }
 }
 
-const columns: Column<SessionRow>[] = [
-  { id: 'id', label: 'ID' },
-  { id: 'mode', label: 'Modo' },
-  { id: 'label', label: 'Alias' },
-  { id: 'public', label: 'Compartir', accessor: (s) => (s.has_share ? (s.public ? 'pública' : 'privada') : '') },
-  { id: 'created_at', label: 'Creada', accessor: (s) => s.created_at, width: '110px' },
-  { id: 'last_active', label: 'Actividad', accessor: (s) => s.last_active, width: '110px' },
-];
+const columns = computed<Column<SessionRow>[]>(() => [
+  { id: 'id', label: t('admin.sessions.colId') },
+  { id: 'mode', label: t('admin.sessions.colMode') },
+  { id: 'label', label: t('admin.sessions.colLabel') },
+  { id: 'public', label: t('admin.sessions.colShare'), accessor: (s) => (s.has_share ? (s.public ? t('admin.sessions.sharePublic') : t('admin.sessions.sharePrivate')) : '') },
+  { id: 'created_at', label: t('admin.sessions.colCreated'), accessor: (s) => s.created_at, width: '110px' },
+  { id: 'last_active', label: t('admin.sessions.colActivity'), accessor: (s) => s.last_active, width: '110px' },
+]);
 
 async function run(fn: () => Promise<void>, okMsg: string) {
   try { await fn(); toast.ok(okMsg); }
-  catch (e) { toast.err(e instanceof Error ? e.message : 'Error'); }
+  catch (e) { toast.err(e instanceof Error ? e.message : t('admin.sessions.errorGeneric')); }
 }
 
 async function killSession(id: string) {
-  if (!confirm(`¿Cerrar la sesión ${id.slice(0, 8)}…?`)) return;
-  await run(() => admin.killSession(id), 'Sesión cerrada');
+  if (!confirm(t('admin.sessions.confirmClose', { id: id.slice(0, 8) }))) return;
+  await run(() => admin.killSession(id), t('admin.sessions.okClose'));
 }
 
 async function setLabel(id: string, current: string) {
-  const label = window.prompt('Nuevo alias para la sesión:', current);
+  const label = window.prompt(t('admin.sessions.promptAlias'), current);
   if (label === null) return;
-  await run(() => admin.setLabel(id, label.trim()), 'Alias actualizado');
+  await run(() => admin.setLabel(id, label.trim()), t('admin.sessions.okAlias'));
 }
 
 async function togglePublic(id: string, makePublic: boolean) {
   await run(
     () => admin.togglePublic(id, makePublic),
-    makePublic ? 'Marcada pública' : 'Marcada privada',
+    makePublic ? t('admin.sessions.okMarkedPublic') : t('admin.sessions.okMarkedPrivate'),
   );
 }
 </script>
 
 <template>
-  <Card title="Sesiones activas">
+  <Card :title="t('admin.sessions.title')">
     <template #header>
       <Btn variant="ghost" size="sm" :loading="refreshing" @click="doRefresh">
         <RotateCw :size="13" :stroke-width="2" :class="{ 'icon--spin': refreshing }" />
-        <span>Refrescar</span>
+        <span>{{ t('admin.sessions.refresh') }}</span>
       </Btn>
     </template>
 
@@ -71,10 +73,10 @@ async function togglePublic(id: string, makePublic: boolean) {
       :columns="columns"
       :rows="admin.sessions"
       initial-sort="last_active"
-      search-placeholder="Buscar por id, alias o modo…"
+      :search-placeholder="t('admin.sessions.searchPlaceholder')"
       :empty-icon="Monitor"
-      empty-title="Sin sesiones activas"
-      empty-message="Cuando un alumno abra el simulador aparecerá aquí en tiempo real."
+      :empty-title="t('admin.sessions.emptyTitle')"
+      :empty-message="t('admin.sessions.emptyMessage')"
     >
       <template #[`cell:id`]="{ row }">
         <span class="mono">{{ row.id.slice(0, 8) }}…</span>
@@ -84,31 +86,31 @@ async function togglePublic(id: string, makePublic: boolean) {
       </template>
       <template #[`cell:label`]="{ row }">
         <span v-if="row.label">{{ row.label }}</span>
-        <span v-else class="dim">(sin alias)</span>
+        <span v-else class="dim">{{ t('admin.sessions.noAlias') }}</span>
       </template>
       <template #[`cell:public`]="{ row }">
         <span v-if="row.has_share" :class="['pill', row.public ? 'pill--share' : 'pill--private']">
-          {{ row.public ? '◆ pública' : '◆ privada' }}
+          {{ row.public ? t('admin.sessions.pillPublic') : t('admin.sessions.pillPrivate') }}
         </span>
         <span v-else class="dim">—</span>
       </template>
       <template #[`cell:created_at`]="{ row }">
-        <span class="dim">hace {{ formatAgo(row.created_at) }}</span>
+        <span class="dim">{{ t('admin.sessions.ago', { time: formatAgo(row.created_at) }) }}</span>
       </template>
       <template #[`cell:last_active`]="{ row }">
-        <span class="dim">hace {{ formatAgo(row.last_active) }}</span>
+        <span class="dim">{{ t('admin.sessions.ago', { time: formatAgo(row.last_active) }) }}</span>
       </template>
       <template #actions="{ row }">
-        <Btn variant="ghost" size="sm" @click="setLabel(row.id, row.label)">alias</Btn>
+        <Btn variant="ghost" size="sm" @click="setLabel(row.id, row.label)">{{ t('admin.sessions.actionAlias') }}</Btn>
         <Btn
           v-if="row.has_share"
           variant="ghost"
           size="sm"
           @click="togglePublic(row.id, !row.public)"
         >
-          {{ row.public ? '→ privada' : '→ pública' }}
+          {{ row.public ? t('admin.sessions.actionMakePrivate') : t('admin.sessions.actionMakePublic') }}
         </Btn>
-        <Btn variant="danger" size="sm" @click="killSession(row.id)">cerrar</Btn>
+        <Btn variant="danger" size="sm" @click="killSession(row.id)">{{ t('admin.sessions.actionClose') }}</Btn>
       </template>
     </DataTable>
   </Card>

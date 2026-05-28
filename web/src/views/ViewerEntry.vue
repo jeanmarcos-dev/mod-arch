@@ -29,7 +29,7 @@ onMounted(async () => {
 <template>
   <div class="viewer-entry">
     <div class="viewer-entry__inner">
-      <span class="viewer-entry__brand">MODOS-CPU</span>
+      <span class="viewer-entry__brand">MODARCH</span>
       <span class="viewer-entry__msg">Conectando a la sesión del anfitrión…</span>
     </div>
   </div>

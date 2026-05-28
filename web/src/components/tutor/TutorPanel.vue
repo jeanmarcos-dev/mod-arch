@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { BotMessageSquare, Send, Trash2, Minus, Maximize2, Minimize2 } from '@lucide/vue';
+import { Send, Trash2, Minus, Maximize2, Minimize2 } from '@lucide/vue';
 
 import TutorMessage from './TutorMessage.vue';
 import TutorBotIcon from './TutorBotIcon.vue';
@@ -45,7 +45,7 @@ onMounted(scrollToBottom);
   <aside
     class="tutor-panel"
     :class="{ 'is-expanded': isExpanded }"
-    aria-label="Tutor de modos-cpu"
+    aria-label="Tutor MODARCHI"
   >
     <header class="head">
       <div class="title">
@@ -54,8 +54,8 @@ onMounted(scrollToBottom);
           <span class="status-led" aria-hidden="true" />
         </div>
         <div class="title-text">
-          <span class="title-main">TUTOR</span>
-          <span class="title-sub">agente de sistemas operativos</span>
+          <span class="title-main">MODARCHI</span>
+          <span class="title-sub">su guía en MODARCH</span>
         </div>
       </div>
       <div class="actions">

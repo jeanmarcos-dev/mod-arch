@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import VueTurnstile from 'vue-turnstile';
 import { useAuthStore } from '../stores/auth';
 import { useAppConfigStore } from '../stores/appConfig';
@@ -8,6 +9,7 @@ import Btn from '../components/ui/Btn.vue';
 import Card from '../components/ui/Card.vue';
 import Field from '../components/ui/Field.vue';
 
+const { t } = useI18n();
 const auth = useAuthStore();
 const appCfg = useAppConfigStore();
 const router = useRouter();
@@ -61,16 +63,14 @@ function continueAnonymous() {
   <div class="login-page">
     <Card class="login-page__card" :elevation="2">
       <header class="login-page__header">
-        <h1>MODOS-CPU</h1>
+        <h1>{{ t('topbar.brand') }}</h1>
         <p class="login-page__hint">
-          Identifíquese antes de iniciar la sesión. Si proporciona su correo
-          recibirá un enlace de acceso rápido para volver a entrar desde otro
-          dispositivo.
+          {{ t('login.hint') }}
         </p>
       </header>
 
       <form v-if="!showSent" class="login-page__form" @submit.prevent="submit">
-        <Field label="Nombre" required v-slot="{ id }">
+        <Field :label="t('login.fields.name')" required v-slot="{ id }">
           <input
             :id="id"
             v-model="name"
@@ -80,13 +80,13 @@ function continueAnonymous() {
             required
             maxlength="32"
             :disabled="busy"
-            placeholder="Cómo desea aparecer"
+            :placeholder="t('login.fields.namePlaceholder')"
           />
         </Field>
 
         <Field
-          label="Correo (opcional)"
-          help="Le enviaremos un enlace mágico para volver a entrar."
+          :label="t('login.fields.email')"
+          :help="t('login.fields.emailHelp')"
           v-slot="{ id }"
         >
           <input
@@ -97,11 +97,11 @@ function continueAnonymous() {
             autocomplete="email"
             maxlength="120"
             :disabled="busy"
-            placeholder="usted@correo.com"
+            :placeholder="t('login.fields.emailPlaceholder')"
           />
         </Field>
 
-        <Field label="ID de estudiante (opcional)" :error="auth.lastError ?? ''" v-slot="{ id }">
+        <Field :label="t('login.fields.studentId')" :error="auth.lastError ?? ''" v-slot="{ id }">
           <input
             :id="id"
             v-model="studentId"
@@ -109,7 +109,7 @@ function continueAnonymous() {
             autocomplete="off"
             maxlength="32"
             :disabled="busy"
-            placeholder="UCV-12345"
+            :placeholder="t('login.fields.studentIdPlaceholder')"
           />
         </Field>
 
@@ -127,28 +127,25 @@ function continueAnonymous() {
           :disabled="!canSubmit"
           block
         >
-          {{ busy ? 'Verificando…' : 'Ingresar' }}
+          {{ busy ? t('login.submitBusy') : t('login.submit') }}
         </Btn>
       </form>
 
       <div v-else-if="showSent" class="login-page__magic">
-        <p class="login-page__ok">
-          Hemos enviado un enlace de acceso a <strong>{{ auth.pendingEmail }}</strong>.
+        <i18n-t keypath="login.sent" tag="p" class="login-page__ok">
+          <template #email><strong>{{ auth.pendingEmail }}</strong></template>
+        </i18n-t>
+        <p class="login-page__hint">
+          {{ t('login.sentHint') }}
         </p>
         <p class="login-page__hint">
-          Abra ese correo y haga clic en el enlace para entrar al simulador.
-          El enlace caduca en 15 minutos. Si no lo recibe en un par de minutos,
-          revise la carpeta de spam.
+          {{ t('login.sentWait') }}
         </p>
-        <p class="login-page__hint">
-          Mientras tanto puede continuar como invitado y volver cuando reciba
-          el correo.
-        </p>
-        <Btn block variant="ghost" @click="continueAnonymous">Continuar como invitado →</Btn>
+        <Btn block variant="ghost" @click="continueAnonymous">{{ t('login.continueAsGuest') }}</Btn>
       </div>
 
       <footer class="login-page__footer">
-        <a href="#" @click.prevent="continueAnonymous">Continuar sin identificarse →</a>
+        <a href="#" @click.prevent="continueAnonymous">{{ t('login.continueAnon') }}</a>
       </footer>
     </Card>
   </div>

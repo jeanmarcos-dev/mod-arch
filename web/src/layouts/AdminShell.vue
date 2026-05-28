@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, onMounted, onUnmounted, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { Gauge, Monitor, Users, Mail, Lock, Send, ScrollText, ExternalLink, LogOut, ShieldUser, BotMessageSquare, SlidersHorizontal, ShieldCheck } from '@lucide/vue';
 import { useAdminStore } from '../stores/admin';
 import { useToastStore } from '../stores/toast';
@@ -9,25 +10,40 @@ import Topbar from '../components/shell/Topbar.vue';
 import ThemeSwitcher from '../components/shell/ThemeSwitcher.vue';
 import Toast from '../components/ui/Toast.vue';
 
+const { t, locale } = useI18n();
 const admin = useAdminStore();
 const router = useRouter();
+const route = useRoute();
 const toast = useToastStore();
+
+// Mirror AppShell: keep document.title in sync with the active admin route
+// (titleKey lookup) and refresh when the locale toggles.
+watch(
+  [() => route.meta.titleKey, locale],
+  ([titleKey]) => {
+    const label = typeof titleKey === 'string' && titleKey ? t(titleKey) : '';
+    const doc = label ? `${label} · MODARCH` : 'MODARCH';
+    if (typeof document !== 'undefined') document.title = doc;
+  },
+  { immediate: true },
+);
 
 // Items moderators can reach: dashboard + read tables + the kick action lives
 // inside /sesiones and /usuarios. Admin-only items (Invitaciones, Accesos)
 // are filtered out so the sidebar reflects the same gating the API enforces.
 const items = computed(() => {
+  const grp = t('shell.groups.admin');
   const baseAll = [
-    { to: '/admin', label: 'Resumen', icon: Gauge, group: 'ADMINISTRACIÓN' },
-    { to: '/admin/sesiones', label: 'Sesiones', icon: Monitor, group: 'ADMINISTRACIÓN' },
-    { to: '/admin/usuarios', label: 'Usuarios', icon: Users, group: 'ADMINISTRACIÓN' },
-    { to: '/admin/invitaciones', label: 'Invitaciones', icon: Mail, group: 'ADMINISTRACIÓN' },
-    { to: '/admin/accesos', label: 'Accesos', icon: Lock, group: 'ADMINISTRACIÓN' },
-    { to: '/admin/smtp', label: 'Correo', icon: Send, group: 'ADMINISTRACIÓN' },
-    { to: '/admin/auditoria', label: 'Auditoría', icon: ScrollText, group: 'ADMINISTRACIÓN' },
-    { to: '/admin/tutor', label: 'Tutor', icon: BotMessageSquare, group: 'ADMINISTRACIÓN' },
-    { to: '/admin/tutor/config', label: 'Tutor (config)', icon: SlidersHorizontal, group: 'ADMINISTRACIÓN' },
-    { to: '/admin/seguridad', label: 'Seguridad', icon: ShieldCheck, group: 'ADMINISTRACIÓN' },
+    { to: '/admin', label: t('router.titles.adminDashboard'), icon: Gauge, group: grp },
+    { to: '/admin/sesiones', label: t('router.titles.adminSessions'), icon: Monitor, group: grp },
+    { to: '/admin/usuarios', label: t('router.titles.adminUsers'), icon: Users, group: grp },
+    { to: '/admin/invitaciones', label: t('router.titles.adminInvites'), icon: Mail, group: grp },
+    { to: '/admin/accesos', label: t('router.titles.adminAccess'), icon: Lock, group: grp },
+    { to: '/admin/smtp', label: t('router.titles.adminSmtp'), icon: Send, group: grp },
+    { to: '/admin/auditoria', label: t('router.titles.adminAudit'), icon: ScrollText, group: grp },
+    { to: '/admin/tutor', label: t('router.titles.adminTutorMetrics'), icon: BotMessageSquare, group: grp },
+    { to: '/admin/tutor/config', label: t('router.titles.adminTutorConfig'), icon: SlidersHorizontal, group: grp },
+    { to: '/admin/seguridad', label: t('router.titles.adminSecurity'), icon: ShieldCheck, group: grp },
   ];
   if (admin.isModerator) {
     return baseAll.filter(item =>
@@ -47,7 +63,7 @@ async function refresh() {
   try {
     await admin.refresh();
   } catch (e) {
-    toast.err(e instanceof Error ? e.message : 'Error al refrescar');
+    toast.err(e instanceof Error ? e.message : t('shell.adminTopbar.refreshError'));
   }
 }
 
@@ -73,25 +89,25 @@ onUnmounted(() => {
       <Topbar>
         <template #actions>
           <ThemeSwitcher />
-          <RouterLink to="/" class="admin-shell__link" title="Volver al simulador">
+          <RouterLink to="/" class="admin-shell__link" :title="t('shell.adminTopbar.simulatorHint')">
             <ExternalLink :size="14" :stroke-width="2" />
-            <span>Simulador</span>
+            <span>{{ t('shell.adminTopbar.simulator') }}</span>
           </RouterLink>
           <button
             type="button"
             class="admin-shell__logout"
-            title="Cerrar sesión de admin"
+            :title="t('shell.adminTopbar.logoutHint')"
             @click="logout"
           >
             <LogOut :size="14" :stroke-width="2" />
-            <span>Salir</span>
+            <span>{{ t('shell.adminTopbar.logout') }}</span>
           </button>
         </template>
       </Topbar>
       <main class="admin-shell__content">
         <div v-if="admin.isModerator" class="admin-shell__mod-banner" role="status">
           <ShieldUser :size="14" :stroke-width="2" />
-          <span>Sesión de moderación — algunas acciones de gobierno quedan reservadas al administrador.</span>
+          <span>{{ t('shell.adminTopbar.modBanner') }}</span>
         </div>
         <!-- Plain RouterView without a Transition wrapper: the previous
              out-in transition could deadlock when a leaving view never

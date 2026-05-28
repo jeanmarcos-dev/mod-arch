@@ -1,18 +1,24 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import SectionPlaceholder from './SectionPlaceholder.vue';
+
+const { t } = useI18n();
+
+const preview = computed(() => [
+  t('sections.x86.preview1'),
+  t('sections.x86.preview2'),
+  t('sections.x86.preview3'),
+  t('sections.x86.preview4'),
+  t('sections.x86.preview5'),
+]);
 </script>
 
 <template>
   <SectionPlaceholder
-    title="x86 real"
-    tagline="Sub-fase futura: ejecutar binarios reales compilados con gcc-i686-linux-gnu sobre nuestro loader ELF, mostrando la traducción al ISA simplificado."
+    :title="t('sections.x86.title')"
+    :tagline="t('sections.x86.tagline')"
     status="soon"
-    :preview="[
-      'Editor de código C inline con compilación contra gcc',
-      'ELF parser visual: headers, secciones, símbolos',
-      'Vista lado a lado: C original ↔ x86 generado ↔ trace del simulador',
-      'Demos: hello world, fibonacci, syscall write',
-      'Stub minimal de libc con syscalls Linux compatibles',
-    ]"
+    :preview="preview"
   />
 </template>

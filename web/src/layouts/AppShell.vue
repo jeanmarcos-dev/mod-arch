@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import {
   LayoutDashboard,
   ListOrdered,
@@ -15,6 +16,8 @@ import {
 import { useCpuStore } from '../stores/cpu';
 import { usePreferencesStore } from '../stores/preferences';
 import { useAuthStore } from '../stores/auth';
+import { useAppConfigStore } from '../stores/appConfig';
+import { useIsStudent } from '../composables/useIsStudent';
 import Sidebar from '../components/shell/Sidebar.vue';
 import Topbar from '../components/shell/Topbar.vue';
 import SimBar from '../components/shell/SimBar.vue';
@@ -32,8 +35,11 @@ import { useWhiteboardStore } from '../stores/whiteboard';
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
 const auth = useAuthStore();
+const appCfg = useAppConfigStore();
+const isStudent = useIsStudent();
 const whiteboard = useWhiteboardStore();
 const route = useRoute();
+const { t, locale } = useI18n();
 const { visible: bannerVisible } = useConnectionBanner();
 
 // Any cpu.openGlossary('EIP') call from a panel opens the popup right where
@@ -55,16 +61,22 @@ onMounted(() => {
   // moderators / DB-admins on first load. If the user is anonymous fetchMe
   // returns false and the entry stays hidden.
   if (!auth.user) auth.fetchMe();
+  // Pull the admin-curated UI lockdowns so the sidebar and simulator can
+  // render the right padlocks on entry. Idempotent (the store guards
+  // against double-fetch via `loaded`).
+  appCfg.load();
 });
 
 // The breadcrumb was removed from the topbar, so the section name now lives
 // only in document.title (and in the active sidebar item). This avoids a
-// redundant chrome row.
+// redundant chrome row. Reacts both to navigation and to locale changes so a
+// user who switches ES → EN sees the tab title update immediately.
 watch(
-  () => route.meta.title,
-  (title) => {
-    const t = typeof title === 'string' && title ? `${title} · modos-cpu` : 'modos-cpu';
-    if (typeof document !== 'undefined') document.title = t;
+  [() => route.meta.titleKey, locale],
+  ([titleKey]) => {
+    const label = typeof titleKey === 'string' && titleKey ? t(titleKey) : '';
+    const doc = label ? `${label} · MODARCH` : 'MODARCH';
+    if (typeof document !== 'undefined') document.title = doc;
   },
   { immediate: true },
 );
@@ -80,19 +92,35 @@ watch(() => route.path, () => {
 // AdminShell handles its own gating, so this entry is purely a discovery
 // affordance, not the authorization boundary.
 const items = computed(() => {
-  const base = [
-    { to: '/', label: 'Vista general', icon: LayoutDashboard, group: 'SIMULACIÓN' },
-    { to: '/procesos', label: 'Procesos', icon: ListOrdered, group: 'SIMULACIÓN' },
-    { to: '/memoria', label: 'Memoria', icon: MemoryStick, group: 'SIMULACIÓN' },
-    { to: '/interrupciones', label: 'Interrupciones', icon: Zap, group: 'SIMULACIÓN' },
-    { to: '/concurrencia', label: 'Concurrencia', icon: Layers, group: 'SIMULACIÓN' },
-    { to: '/glosario', label: 'Glosario', icon: BookOpen, group: 'HERRAMIENTAS' },
-    { to: '/preferencias', label: 'Preferencias', icon: Settings, group: 'HERRAMIENTAS' },
-    { to: '/perfil', label: 'Perfil', icon: UserRound, group: 'HERRAMIENTAS' },
+  const sim = t('shell.groups.simulation');
+  const tools = t('shell.groups.tools');
+  // The route `name` here mirrors web/src/router/index.ts and the
+  // backend's uiValidRouteNames whitelist. Keep all three in sync.
+  const base: Array<{
+    to: string;
+    name: string;
+    label: string;
+    icon: typeof LayoutDashboard;
+    group: string;
+    locked?: boolean;
+  }> = [
+    { to: '/', name: 'overview', label: t('router.titles.overview'), icon: LayoutDashboard, group: sim },
+    { to: '/procesos', name: 'processes', label: t('router.titles.processes'), icon: ListOrdered, group: sim },
+    { to: '/memoria', name: 'memory', label: t('router.titles.memory'), icon: MemoryStick, group: sim },
+    { to: '/interrupciones', name: 'interrupts', label: t('router.titles.interrupts'), icon: Zap, group: sim },
+    { to: '/concurrencia', name: 'concurrency', label: t('router.titles.concurrency'), icon: Layers, group: sim },
+    { to: '/glosario', name: 'glossary', label: t('router.titles.glossary'), icon: BookOpen, group: tools },
+    { to: '/preferencias', name: 'preferences', label: t('router.titles.preferences'), icon: Settings, group: tools },
+    { to: '/perfil', name: 'profile', label: t('router.titles.profile'), icon: UserRound, group: tools },
   ];
+  if (isStudent.value) {
+    for (const item of base) {
+      if (appCfg.disabledRoutes.has(item.name)) item.locked = true;
+    }
+  }
   const role = auth.user?.role;
   if (role === 'admin' || role === 'moderator') {
-    base.push({ to: '/admin', label: 'Panel admin', icon: ShieldUser, group: 'HERRAMIENTAS' });
+    base.push({ to: '/admin', name: 'admin-dashboard', label: t('router.titles.adminPanel'), icon: ShieldUser, group: tools });
   }
   return base;
 });

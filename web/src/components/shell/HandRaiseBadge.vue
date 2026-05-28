@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Hand } from '@lucide/vue';
 import { useCpuStore } from '../../stores/cpu';
 import { useViewerStore } from '../../stores/viewer';
@@ -9,6 +10,7 @@ import { useToastStore } from '../../stores/toast';
 // cpu.handRaiseSignal counter (bumped by every 'hand_raise' WS event) and
 // translates each tick into a toast + a persistent badge that the owner can
 // click to acknowledge and reset.
+const { t } = useI18n();
 const cpu = useCpuStore();
 const viewer = useViewerStore();
 const toast = useToastStore();
@@ -17,9 +19,9 @@ watch(
   () => cpu.handRaiseSignal,
   (n, prev) => {
     if (n === prev) return;
-    const label = cpu.lastHandRaiseLabel || 'Un espectador';
+    const label = cpu.lastHandRaiseLabel || t('shell.handRaise.fallbackSpectator');
     viewer.noteHandRaise(label);
-    toast.push(`${label} levantó la mano`, 'info');
+    toast.push(t('shell.handRaise.toast', { label }), 'info');
   },
 );
 
@@ -33,7 +35,7 @@ function onClick() {
     v-if="viewer.handRaiseCount > 0"
     type="button"
     class="hand-badge"
-    :title="viewer.lastHandRaiseLabel ? `${viewer.lastHandRaiseLabel} pidió la palabra. Clic para limpiar.` : 'Espectadores con la mano levantada. Clic para limpiar.'"
+    :title="viewer.lastHandRaiseLabel ? t('shell.handRaise.titleSingle', { label: viewer.lastHandRaiseLabel }) : t('shell.handRaise.titleMany')"
     @click="onClick"
   >
     <Hand :size="14" :stroke-width="2" />

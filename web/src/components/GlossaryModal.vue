@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { BookOpen, X, ChevronDown, ChevronRight } from '@lucide/vue';
 import {
   GLOSSARY_ENTRIES,
@@ -7,6 +8,8 @@ import {
   filterEntries,
   groupByCategory,
 } from '../data/glossary';
+
+const { t, locale } = useI18n();
 
 const props = defineProps<{ open: boolean; initialSearch?: string }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -21,7 +24,7 @@ watch(() => [props.open, props.initialSearch], ([opening, term]) => {
 });
 
 const categories = computed(() => listCategories());
-const filtered = computed(() => filterEntries(search.value));
+const filtered = computed(() => filterEntries(search.value, locale.value));
 const grouped = computed(() => groupByCategory(filtered.value));
 
 const expanded = ref<Set<string>>(new Set());
@@ -39,22 +42,22 @@ void GLOSSARY_ENTRIES;
   <div v-if="open" class="backdrop" @click.self="emit('close')">
     <div class="modal">
       <div class="modal-head">
-        <h2><BookOpen :size="16" :stroke-width="2" /> GLOSARIO</h2>
+        <h2><BookOpen :size="16" :stroke-width="2" /> {{ t('glossary.modal.title') }}</h2>
         <input
           v-model="search"
           name="glossary_search"
-          aria-label="Buscar en el glosario"
+          :aria-label="t('glossary.modal.searchAria')"
           class="search"
-          placeholder="buscar (IRQ, PL, PCB, scheduler...)"
+          :placeholder="t('glossary.modal.searchPlaceholder')"
           autofocus
         />
-        <button class="close-btn" @click="emit('close')" aria-label="Cerrar"><X :size="16" :stroke-width="2" /></button>
+        <button class="close-btn" @click="emit('close')" :aria-label="t('glossary.modal.closeAria')"><X :size="16" :stroke-width="2" /></button>
       </div>
 
       <div class="modal-body">
         <div v-for="cat in categories" :key="cat">
           <template v-if="grouped[cat]">
-            <h3 class="cat-title">{{ cat }}</h3>
+            <h3 class="cat-title">{{ t(`glossary.categories.${cat}`) }}</h3>
             <div
               v-for="e in grouped[cat]"
               :key="e.term"
@@ -74,7 +77,7 @@ void GLOSSARY_ENTRIES;
           </template>
         </div>
         <div v-if="filtered.length === 0" class="no-results">
-          Sin resultados para "{{ search }}"
+          {{ t('glossary.modal.empty', { query: search }) }}
         </div>
       </div>
     </div>

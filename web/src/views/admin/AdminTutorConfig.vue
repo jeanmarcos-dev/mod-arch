@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { apiFetch } from '../../lib/api';
 import { useAdminStore } from '../../stores/admin';
 import { useToastStore } from '../../stores/toast';
 import Card from '../../components/ui/Card.vue';
+
+const { t } = useI18n();
 
 // API contract mirrors internal/tutor/config.go MaskedConfig.
 interface MaskedConfig {
@@ -133,9 +136,9 @@ async function save(reload = true) {
     config.value = data.config;
     tutorRunning.value = data.tutor_running;
     if (data.reload_error) {
-      toast.err('Configuración guardada pero el tutor no pudo recargar: ' + data.reload_error);
+      toast.err('Configuración guardada pero MODARCHI no pudo recargar: ' + data.reload_error);
     } else if (reload) {
-      toast.ok('Configuración guardada y tutor recargado.');
+      toast.ok('Configuración guardada y MODARCHI recargado.');
     } else {
       toast.ok('Configuración guardada (sin recargar).');
     }
@@ -163,9 +166,9 @@ async function reload() {
     const data = await r.json();
     tutorRunning.value = data.tutor_running;
     if (tutorRunning.value) {
-      toast.ok('Tutor recargado correctamente.');
+      toast.ok('MODARCHI recargado correctamente.');
     } else {
-      toast.err('El tutor no pudo arrancar — revise la configuración.');
+      toast.err('MODARCHI no pudo arrancar — revise la configuración.');
     }
   } catch (e) {
     toast.err('Error al recargar: ' + String(e));
@@ -193,7 +196,7 @@ onMounted(load);
 <template>
   <div class="tutor-cfg">
     <header class="head">
-      <h1>Tutor — configuración</h1>
+      <h1>{{ t('admin.tutorConfig.title') }}</h1>
       <div class="status">
         <span class="badge" :class="{ on: tutorRunning, off: !tutorRunning }">
           {{ tutorRunning ? 'EN MARCHA' : 'DETENIDO' }}
@@ -206,9 +209,9 @@ onMounted(load);
     <Card title="Maestro" :elevation="1">
       <label class="row toggle">
         <input type="checkbox" v-model="draft.enabled" />
-        <span>{{ draft.enabled ? 'Tutor habilitado' : 'Tutor deshabilitado' }}</span>
+        <span>{{ draft.enabled ? 'MODARCHI habilitado' : 'MODARCHI deshabilitado' }}</span>
       </label>
-      <p class="hint">Cuando está deshabilitado, el panel de tutor sigue visible pero responde "desactivado por el administrador" a toda pregunta.</p>
+      <p class="hint">Cuando está deshabilitado, el panel de MODARCHI sigue visible pero responde "desactivado por el administrador" a toda pregunta.</p>
     </Card>
 
     <Card title="Modelo de lenguaje (LLM)" :elevation="1">
@@ -236,7 +239,7 @@ onMounted(load);
           <small class="hint inline">0 desactiva el bucket. Gemini Flash-Lite: 15 RPM.</small>
         </label>
         <label class="field">
-          <span>Modo del tutor</span>
+          <span>Modo de MODARCHI</span>
           <select v-model="draft.mode">
             <option value="direct">Directo — responde con la solución</option>
             <option value="socratic">Socrático — responde con preguntas guiadas</option>
@@ -245,7 +248,7 @@ onMounted(load);
         <label class="field">
           <span>Memoria conversacional (turnos)</span>
           <input type="number" v-model.number="draft.history_window_turns" min="0" max="10" />
-          <small class="hint inline">Cantidad de turnos previos que el tutor recuerda. 0 desactiva el seguimiento y vuelve al modo por pregunta aislada.</small>
+          <small class="hint inline">Cantidad de turnos previos que MODARCHI recuerda. 0 desactiva el seguimiento y vuelve al modo por pregunta aislada.</small>
         </label>
       </div>
     </Card>

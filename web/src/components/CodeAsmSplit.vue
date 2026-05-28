@@ -1,11 +1,20 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { MousePointerClick } from '@lucide/vue';
-import { useCpuStore, type SourceLine } from '../stores/cpu';
+import { useCpuStore, type SourceLine, type PCBInfo } from '../stores/cpu';
 import { useViewerMirrorStore } from '../stores/viewerMirror';
 
 const cpu = useCpuStore();
 const mirror = useViewerMirrorStore();
+const { t } = useI18n();
+
+function tabTitle(p: PCBInfo): string {
+  const key = pinnedPID.value === p.pid
+    ? 'panels.codeAsm.tabTitlePinned'
+    : 'panels.codeAsm.tabTitleUnpinned';
+  return t(key, { pid: p.pid, name: p.name, state: p.state });
+}
 
 // PID actually being displayed: follows the focused core's current_pid unless
 // the user pins another tab. When a viewer is autofollowing, the mirror takes
@@ -152,15 +161,15 @@ function fmtHex(n: number): string {
 <template>
   <div class="panel code-asm" data-pizarra-anchor="code-panel">
     <div class="panel-title">
-      <span class="title-text">CÓDIGO · C ↔ ASSEMBLER</span>
+      <span class="title-text">{{ t('panels.codeAsm.title') }}</span>
       <span class="title-hint" v-if="cpu.procs.length > 1">
         <MousePointerClick :size="12" :stroke-width="2" />
-        click en una pestaña para fijar; en blanco sigue al RUN
+        {{ t('panels.codeAsm.titleHint') }}
       </span>
     </div>
 
     <div v-if="sortedProcs.length === 0" class="empty">
-      Cargue un demo para ver el código C y su traducción a assembler.
+      {{ t('panels.codeAsm.empty') }}
     </div>
 
     <template v-else>
@@ -175,7 +184,7 @@ function fmtHex(n: number): string {
             viewing: p.pid === viewingPID,
           }"
           @click="pickProc(p.pid)"
-          :title="`P${p.pid} · ${p.name}\nEstado: ${p.state}\n${pinnedPID === p.pid ? 'PINEADO — click para volver a auto' : 'click para pinear este proceso'}`"
+          :title="tabTitle(p)"
         >
           <span class="pt-pid">P{{ p.pid }}</span>
           <span class="pt-name">{{ p.name }}</span>
@@ -186,7 +195,7 @@ function fmtHex(n: number): string {
             v-if="multicore && coreOfPID[p.pid] !== undefined"
             class="pt-core"
             :style="{ background: `var(--core-${coreOfPID[p.pid] % 4})`, color: `var(--core-fg)` }"
-            :title="`Ejecutándose en el núcleo C${coreOfPID[p.pid]}`"
+            :title="t('panels.codeAsm.coreRunning', { core: coreOfPID[p.pid] })"
           >C{{ coreOfPID[p.pid] }}</span>
           <span v-if="runningOnVisibleCores.has(p.pid)" class="pt-current">●</span>
           <span v-if="pinnedPID === p.pid" class="pt-pin">📌</span>
@@ -194,14 +203,14 @@ function fmtHex(n: number): string {
       </div>
 
       <div class="code-meta" v-if="currentProc">
-        <span class="meta-tag" :title="'Estado actual del proceso seleccionado.'">{{ currentProc.state }}</span>
+        <span class="meta-tag" :title="t('panels.codeAsm.stateTitle')">{{ currentProc.state }}</span>
         <span class="meta-info">
-          {{ currentProc.name }} · cargado en
-          <span class="addr" :title="'Dirección base del código en memoria.'">0x{{ (currentProc.code_base || 0).toString(16).toUpperCase() }}</span>
-          · stack top
+          {{ currentProc.name }} · {{ t('panels.codeAsm.loadedAt') }}
+          <span class="addr" :title="t('panels.codeAsm.codeBaseAddrTitle')">0x{{ (currentProc.code_base || 0).toString(16).toUpperCase() }}</span>
+          · {{ t('panels.codeAsm.stackTop') }}
           <span class="addr">0x{{ (currentProc.stack_top || 0).toString(16).toUpperCase() }}</span>
           <template v-if="activeOffset !== null">
-            · ejecutando
+            · {{ t('panels.codeAsm.executing') }}
             <span class="addr">{{ fmtHex(activeOffset) }}</span>
           </template>
         </span>
@@ -210,8 +219,8 @@ function fmtHex(n: number): string {
       <div class="split" :class="{ 'split--no-asm': sourceMap.length === 0 }">
         <section class="pane pane--c">
           <header class="pane-head">
-            <span class="pane-title">C</span>
-            <span class="pane-sub">{{ sourceLines.length }} líneas</span>
+            <span class="pane-title">{{ t('panels.codeAsm.cTitle') }}</span>
+            <span class="pane-sub">{{ t('panels.codeAsm.cLinesCount', { n: sourceLines.length }) }}</span>
           </header>
           <ol v-if="source" ref="cListRef" class="c-list">
             <li
@@ -223,20 +232,20 @@ function fmtHex(n: number): string {
               <span class="line-text">{{ line || ' ' }}</span>
             </li>
           </ol>
-          <div v-else class="pane-empty">— sin código C asociado a este proceso —</div>
+          <div v-else class="pane-empty">{{ t('panels.codeAsm.emptyC') }}</div>
         </section>
 
         <section v-if="sourceMap.length > 0" class="pane pane--asm">
           <header class="pane-head">
-            <span class="pane-title">ASSEMBLER</span>
-            <span class="pane-sub">{{ sourceMap.length }} instr.</span>
+            <span class="pane-title">{{ t('panels.codeAsm.asmTitle') }}</span>
+            <span class="pane-sub">{{ t('panels.codeAsm.asmInstrCount', { n: sourceMap.length }) }}</span>
           </header>
           <ol ref="asmListRef" class="asm-list">
             <li
               v-for="(sl, i) in sourceMap"
               :key="`${sl.offset}-${i}`"
               :class="['asm-line', { 'asm-line--current': isActiveAsm(sl.offset) }]"
-              :title="`Línea C ${sl.c_line}`"
+              :title="t('panels.codeAsm.asmLineTitle', { n: sl.c_line })"
             >
               <span class="asm-off">{{ fmtHex(sl.offset) }}</span>
               <span class="asm-mnem">{{ sl.mnemonic }}</span>
@@ -247,12 +256,11 @@ function fmtHex(n: number): string {
 
         <section v-else class="pane pane--asm pane--asm-fallback">
           <header class="pane-head">
-            <span class="pane-title">ASSEMBLER</span>
-            <span class="pane-sub">sin mapping</span>
+            <span class="pane-title">{{ t('panels.codeAsm.asmTitle') }}</span>
+            <span class="pane-sub">{{ t('panels.codeAsm.noMappingSub') }}</span>
           </header>
           <div class="pane-empty">
-            Este demo no declara un mapping C ↔ ASM. El log de eventos muestra
-            cada instrucción a medida que se ejecuta.
+            {{ t('panels.codeAsm.noMappingBody') }}
           </div>
         </section>
       </div>
@@ -260,23 +268,16 @@ function fmtHex(n: number): string {
       <div class="explain">
         <details>
           <summary>
-            <span class="exp-q">⚠ ¿Por qué el C parece "raro"?</span>
+            <span class="exp-q">{{ t('panels.codeAsm.explainSummary') }}</span>
           </summary>
           <p>
-            En este simulador <strong>no hay un compilador C real</strong>.
-            Cada programa fue <em>compilado a mano</em>: el código C está como guía
-            pedagógica y los bytes x86 se encodearon en paralelo. El panel ASM
-            de la derecha refleja esa traducción manual.
+            {{ t('panels.codeAsm.explainP1Pre') }}<strong>{{ t('panels.codeAsm.explainP1Bold') }}</strong>{{ t('panels.codeAsm.explainP1Mid') }}<em>{{ t('panels.codeAsm.explainP1Em') }}</em>{{ t('panels.codeAsm.explainP1Post') }}
           </p>
           <p>
-            La línea resaltada en ambos paneles es la próxima a ejecutarse en el
-            CPU del núcleo enfocado. Use STEP para avanzar una instrucción y
-            verá cómo una línea de C suele expandirse en varias instrucciones.
+            {{ t('panels.codeAsm.explainP2') }}
           </p>
           <p>
-            El comportamiento <strong>SÍ es real</strong>: el simulador ejecuta los
-            bytes x86 reales, despacha IRQs como el HW lo haría, y el kernel
-            responde como un OS de verdad.
+            {{ t('panels.codeAsm.explainP3Pre') }}<strong>{{ t('panels.codeAsm.explainP3Bold') }}</strong>{{ t('panels.codeAsm.explainP3Post') }}
           </p>
         </details>
       </div>

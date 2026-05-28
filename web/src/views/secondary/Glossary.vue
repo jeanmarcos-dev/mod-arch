@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { Search } from '@lucide/vue';
 import {
   GLOSSARY_ENTRIES,
@@ -10,6 +11,7 @@ import {
   type GlossaryEntry,
 } from '../../data/glossary';
 
+const { t, locale } = useI18n();
 const route = useRoute();
 
 const search = ref('');
@@ -20,7 +22,7 @@ const expanded = ref<Set<string>>(new Set());
 // class — modos → registros → flags → interrupciones → procesos → ...
 const categories = computed<string[]>(() => listCategories());
 
-const filtered = computed<GlossaryEntry[]>(() => filterEntries(search.value));
+const filtered = computed<GlossaryEntry[]>(() => filterEntries(search.value, locale.value));
 const grouped = computed<Record<string, GlossaryEntry[]>>(() => groupByCategory(filtered.value));
 
 // Toggle a single entry. Clicking the row expands the detail; clicking again
@@ -72,12 +74,8 @@ const totalEntries = GLOSSARY_ENTRIES.length;
 <template>
   <div class="gloss-page">
     <header class="gloss-page__hero">
-      <h2 class="gloss-page__title">Glosario</h2>
-      <p class="gloss-page__tagline">
-        {{ totalEntries }} términos del simulador y de sistemas operativos.
-        Búsqueda en tiempo real, agrupados por tema. Haga clic en cada
-        entrada para abrir el detalle.
-      </p>
+      <h2 class="gloss-page__title">{{ t('glossary.title') }}</h2>
+      <p class="gloss-page__tagline">{{ t('glossary.tagline', { count: totalEntries }) }}</p>
       <div class="gloss-page__controls">
         <label class="gloss-page__search">
           <Search :size="14" :stroke-width="2" class="gloss-page__search-icon" aria-hidden="true" />
@@ -85,25 +83,25 @@ const totalEntries = GLOSSARY_ENTRIES.length;
             v-model="search"
             type="search"
             name="glossary_search"
-            aria-label="Buscar en el glosario"
-            placeholder="buscar (IRQ, PL, PCB, scheduler...)"
+            :aria-label="t('glossary.searchAria')"
+            :placeholder="t('glossary.searchPlaceholder')"
             autocomplete="off"
             spellcheck="false"
           />
         </label>
         <div class="gloss-page__actions">
-          <button type="button" class="gloss-page__btn" @click="expandAll">Expandir todo</button>
-          <button type="button" class="gloss-page__btn" @click="collapseAll">Colapsar todo</button>
+          <button type="button" class="gloss-page__btn" @click="expandAll">{{ t('glossary.expandAll') }}</button>
+          <button type="button" class="gloss-page__btn" @click="collapseAll">{{ t('glossary.collapseAll') }}</button>
         </div>
       </div>
     </header>
 
     <div class="gloss-page__layout">
-      <nav class="gloss-page__toc" aria-label="Índice del glosario">
-        <h3 class="gloss-page__toc-title">Índice</h3>
+      <nav class="gloss-page__toc" :aria-label="t('glossary.tocAria')">
+        <h3 class="gloss-page__toc-title">{{ t('glossary.tocTitle') }}</h3>
         <ul>
           <li v-for="cat in categories" :key="cat">
-            <a :href="`#${slug(cat)}`">{{ cat }}</a>
+            <a :href="`#${slug(cat)}`">{{ t(`glossary.categories.${cat}`) }}</a>
             <span
               :class="['gloss-page__toc-count', { 'gloss-page__toc-count--zero': !grouped[cat] }]"
             >{{ grouped[cat]?.length ?? 0 }}</span>
@@ -119,7 +117,7 @@ const totalEntries = GLOSSARY_ENTRIES.length;
           :id="slug(cat)"
           class="gloss-page__section"
         >
-          <h3 class="gloss-page__cat">{{ cat }}</h3>
+          <h3 class="gloss-page__cat">{{ t(`glossary.categories.${cat}`) }}</h3>
           <div
             v-for="e in (grouped[cat] ?? [])"
             :key="e.term"
@@ -139,7 +137,7 @@ const totalEntries = GLOSSARY_ENTRIES.length;
         </section>
 
         <div v-if="filtered.length === 0" class="gloss-page__empty">
-          Sin resultados para "{{ search }}".
+          {{ t('glossary.empty', { query: search }) }}
         </div>
       </main>
     </div>

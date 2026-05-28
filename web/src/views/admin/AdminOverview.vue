@@ -1,48 +1,50 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n';
 import { useAdminStore } from '../../stores/admin';
 import Card from '../../components/ui/Card.vue';
 
+const { t } = useI18n();
 const admin = useAdminStore();
 </script>
 
 <template>
   <div class="overview">
-    <h1 class="overview__title">Resumen</h1>
-    <p class="overview__subtitle">Conectado como <strong>{{ admin.user }}</strong></p>
+    <h1 class="overview__title">{{ t('admin.overview.title') }}</h1>
+    <p class="overview__subtitle">{{ t('admin.overview.connectedAs') }} <strong>{{ admin.user }}</strong></p>
 
     <div v-if="admin.stats" class="overview__stats">
       <Card :surface="2" :padded="false">
         <div class="stat">
-          <span class="stat__label">Públicas</span>
+          <span class="stat__label">{{ t('admin.overview.statPublic') }}</span>
           <span class="stat__value">{{ admin.stats.full }} / {{ admin.stats.max_public }}</span>
         </div>
       </Card>
       <Card :surface="2" :padded="false">
         <div class="stat">
-          <span class="stat__label">Privilegiadas</span>
+          <span class="stat__label">{{ t('admin.overview.statPrivileged') }}</span>
           <span class="stat__value">{{ admin.stats.privileged }} / {{ admin.stats.max_privileged }}</span>
         </div>
       </Card>
       <Card :surface="2" :padded="false">
         <div class="stat">
-          <span class="stat__label">Creadas (total)</span>
+          <span class="stat__label">{{ t('admin.overview.statTotalCreated') }}</span>
           <span class="stat__value">{{ admin.stats.total_created }}</span>
         </div>
       </Card>
       <Card :surface="2" :padded="false">
         <div class="stat">
-          <span class="stat__label">Pico simultáneo</span>
+          <span class="stat__label">{{ t('admin.overview.statPeak') }}</span>
           <span class="stat__value">{{ admin.stats.peak }}</span>
         </div>
       </Card>
     </div>
 
-    <Card title="Atajos">
+    <Card :title="t('admin.overview.shortcutsTitle')">
       <ul class="overview__shortcuts">
-        <li><RouterLink to="/admin/sesiones">▶ Ver sesiones activas</RouterLink></li>
-        <li><RouterLink to="/admin/invitaciones">✉ Generar invitación privilegiada</RouterLink></li>
-        <li><RouterLink to="/admin/accesos">⚿ Cambiar política de acceso</RouterLink></li>
-        <li><RouterLink to="/admin/auditoria">☰ Revisar auditoría</RouterLink></li>
+        <li><RouterLink to="/admin/sesiones">{{ t('admin.overview.shortcutSessions') }}</RouterLink></li>
+        <li><RouterLink to="/admin/invitaciones">{{ t('admin.overview.shortcutInvites') }}</RouterLink></li>
+        <li><RouterLink to="/admin/accesos">{{ t('admin.overview.shortcutAccess') }}</RouterLink></li>
+        <li><RouterLink to="/admin/auditoria">{{ t('admin.overview.shortcutAudit') }}</RouterLink></li>
       </ul>
     </Card>
   </div>

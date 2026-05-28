@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, type Component } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
-import { ChevronLeft, ChevronRight, UserRound } from '@lucide/vue';
+import { useI18n } from 'vue-i18n';
+import { ChevronLeft, ChevronRight, Lock } from '@lucide/vue';
 import { usePreferencesStore } from '../../stores/preferences';
-import { useAuthStore } from '../../stores/auth';
+
+const { t } = useI18n();
 
 interface NavItem {
   to: string;
@@ -11,6 +13,7 @@ interface NavItem {
   icon: Component;
   group?: string;
   soon?: boolean;
+  locked?: boolean;
 }
 
 const props = defineProps<{
@@ -19,7 +22,6 @@ const props = defineProps<{
 }>();
 
 const prefs = usePreferencesStore();
-const auth = useAuthStore();
 const route = useRoute();
 
 const collapsed = computed(() => prefs.sidebarCollapsed);
@@ -47,7 +49,7 @@ function isActive(to: string): boolean {
 }
 
 function onLinkClick(item: NavItem, e: MouseEvent) {
-  if (item.soon) {
+  if (item.soon || item.locked) {
     e.preventDefault();
     return;
   }
@@ -67,7 +69,7 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
     :class="{ 'sidebar--collapsed': collapsed, 'sidebar--mobile-open': mobileOpen }"
     data-pizarra-anchor="sidebar"
   >
-    <nav class="sidebar__nav" aria-label="Navegación principal">
+    <nav class="sidebar__nav" :aria-label="t('shell.sidebar.navAria')">
       <template v-for="(item, idx) in items" :key="item.to">
         <div
           v-if="item.group && (idx === 0 || items[idx - 1].group !== item.group)"
@@ -82,9 +84,12 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
           :class="{
             'sidebar__link--active': isActive(item.to),
             'sidebar__link--soon': item.soon,
+            'sidebar__link--locked': item.locked,
           }"
-          :title="collapsed ? item.label : undefined"
-          :aria-disabled="item.soon ? 'true' : undefined"
+          :title="item.locked
+            ? t('shell.sidebar.lockedTooltip')
+            : (collapsed ? item.label : undefined)"
+          :aria-disabled="(item.soon || item.locked) ? 'true' : undefined"
           @click="(e) => onLinkClick(item, e)"
         >
           <span class="sidebar__icon" aria-hidden="true">
@@ -92,28 +97,28 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
           </span>
           <span class="sidebar__label">
             {{ item.label }}
-            <span v-if="item.soon" class="sidebar__soon">Próx.</span>
+            <span v-if="item.soon" class="sidebar__soon">{{ t('shell.sidebar.soonBadge') }}</span>
+          </span>
+          <span v-if="item.locked" class="sidebar__lock" aria-hidden="true">
+            <Lock :size="12" :stroke-width="2.2" />
           </span>
         </RouterLink>
       </template>
     </nav>
 
     <footer class="sidebar__foot">
-      <div v-if="auth.user" class="sidebar__user">
-        <UserRound :size="14" :stroke-width="2" class="sidebar__user-icon" />
-        <span class="sidebar__user-name">{{ auth.user.name }}</span>
-      </div>
       <span class="sidebar__brand" :aria-hidden="collapsed ? 'true' : undefined">
-        <span class="sidebar__brand-full">MODOS-CPU</span>
-        <span class="sidebar__brand-mark">M·C</span>
+        <span class="sidebar__brand-full">MODARCH</span>
+        <span class="sidebar__brand-mark" title="MODARCH">M·A</span>
       </span>
+      <span class="sidebar__author" :aria-hidden="collapsed ? 'true' : undefined">Jeanmarcos Juárez</span>
     </footer>
 
     <button
       type="button"
       class="sidebar__toggle"
-      :title="collapsed ? 'Expandir menú' : 'Contraer menú'"
-      :aria-label="collapsed ? 'Expandir menú' : 'Contraer menú'"
+      :title="collapsed ? t('shell.sidebar.expandMenu') : t('shell.sidebar.collapseMenu')"
+      :aria-label="collapsed ? t('shell.sidebar.expandMenu') : t('shell.sidebar.collapseMenu')"
       @click="prefs.toggleSidebar()"
     >
       <component :is="collapsed ? ChevronRight : ChevronLeft" :size="16" :stroke-width="2.5" />
@@ -141,11 +146,12 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
 }
 
 /* Toggle handle straddles the right border so it sits on the seam between
-   sidebar and main content. Bottom-anchored as the user requested. */
+   sidebar and main content. Sits just above the foot so the user chip and
+   the toggle never collide. */
 .sidebar__toggle {
   position: absolute;
   right: -13px;
-  bottom: var(--space-4);
+  bottom: 68px;
   width: 26px;
   height: 26px;
   background: var(--surface-2);
@@ -283,6 +289,28 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
   color: var(--text-dim);
 }
 
+.sidebar__link--locked {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.sidebar__link--locked:hover {
+  background: transparent;
+  color: var(--text-dim);
+  text-shadow: none;
+}
+
+.sidebar__lock {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  padding-right: var(--space-2);
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
+.sidebar--collapsed .sidebar__lock { display: none; }
+
 .sidebar__icon {
   width: 22px;
   height: 20px;
@@ -343,9 +371,6 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
 .sidebar__foot {
   border-top: 1px dashed var(--border);
   padding: var(--space-3);
-  /* Leave room above the absolute-positioned toggle handle so the user chip
-     never overlaps it. */
-  padding-bottom: calc(var(--space-3) + 26px + var(--space-3));
   font-size: 11px;
   min-height: 36px;
   overflow: hidden;
@@ -354,43 +379,13 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
   gap: var(--space-3);
 }
 
-.sidebar__user {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--text-dim);
-  overflow: hidden;
-}
-
-.sidebar__user-icon {
-  color: var(--amber);
-  flex-shrink: 0;
-}
-
-.sidebar__user-name {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 160px;
-  opacity: 1;
-  transition:
-    max-width var(--transition-base),
-    opacity var(--transition-fast);
-}
-
-.sidebar--collapsed .sidebar__user-name {
-  max-width: 0;
-  opacity: 0;
-}
-
 .sidebar--collapsed .sidebar__foot {
   padding: var(--space-2) 0;
-  padding-bottom: calc(var(--space-2) + 26px + var(--space-3));
   align-items: center;
 }
 
 /* Subtle signature line at the very bottom of the sidebar. Full wordmark
-   when expanded; collapses to a short "M·C" monogram when the sidebar rail
+   when expanded; collapses to a short "M·A" monogram when the sidebar rail
    is in collapsed mode so it still anchors the brand without overflowing
    the narrow column. */
 .sidebar__brand {
@@ -413,6 +408,20 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
   display: inline;
   letter-spacing: 2px;
 }
+
+.sidebar__author {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  text-align: center;
+  opacity: 0.5;
+  white-space: nowrap;
+  user-select: none;
+  margin-top: -4px;
+}
+.sidebar--collapsed .sidebar__author { display: none; }
 
 @media (max-width: 768px) {
   /* On mobile the rail always behaves like the collapsed state — the

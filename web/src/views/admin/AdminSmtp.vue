@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Send, Mail, ShieldCheck, Eraser } from '@lucide/vue';
 import { useAdminStore } from '../../stores/admin';
 import { useToastStore } from '../../stores/toast';
@@ -7,6 +8,7 @@ import Card from '../../components/ui/Card.vue';
 import Btn from '../../components/ui/Btn.vue';
 import Field from '../../components/ui/Field.vue';
 
+const { t } = useI18n();
 const admin = useAdminStore();
 const toast = useToastStore();
 
@@ -73,7 +75,7 @@ async function load() {
     passwordSet.value = Boolean(v.password_set);
     passwordDirty.value = false;
   } catch (e) {
-    toast.err(e instanceof Error ? e.message : 'No se pudo cargar la configuración');
+    toast.err(e instanceof Error ? e.message : t('admin.smtp.errorLoad'));
   } finally {
     loading.value = false;
   }
@@ -82,7 +84,7 @@ async function load() {
 onMounted(load);
 
 const passwordPlaceholder = computed(() =>
-  passwordSet.value ? '(sin cambios)' : 'contraseña SMTP',
+  passwordSet.value ? t('admin.smtp.passwordNoChange') : t('admin.smtp.passwordPlaceholder'),
 );
 
 async function save() {
@@ -110,25 +112,25 @@ async function save() {
     passwordSet.value = Boolean(v.password_set);
     passwordDirty.value = false;
     form.value.password = '';
-    toast.ok('Configuración SMTP guardada');
+    toast.ok(t('admin.smtp.okSaved'));
   } catch (e) {
-    toast.err(e instanceof Error ? e.message : 'Error al guardar');
+    toast.err(e instanceof Error ? e.message : t('admin.smtp.errorSave'));
   } finally {
     saving.value = false;
   }
 }
 
 async function clearPassword() {
-  if (!confirm('¿Borrar la contraseña SMTP almacenada?')) return;
+  if (!confirm(t('admin.smtp.confirmClearPw'))) return;
   saving.value = true;
   try {
     await admin.saveSmtpSettings({ ...form.value, password: '' });
     passwordSet.value = false;
     passwordDirty.value = false;
     form.value.password = '';
-    toast.ok('Contraseña SMTP borrada');
+    toast.ok(t('admin.smtp.okClearPw'));
   } catch (e) {
-    toast.err(e instanceof Error ? e.message : 'Error');
+    toast.err(e instanceof Error ? e.message : t('admin.sessions.errorGeneric'));
   } finally {
     saving.value = false;
   }
@@ -136,18 +138,18 @@ async function clearPassword() {
 
 async function sendTest() {
   if (!testTo.value.trim()) {
-    testResult.value = { ok: false, message: 'Indique un destinatario.' };
+    testResult.value = { ok: false, message: t('admin.smtp.testNeedRecipient') };
     return;
   }
   testing.value = true;
   testResult.value = null;
   try {
     await admin.testSmtp(testTo.value.trim());
-    testResult.value = { ok: true, message: 'Correo de prueba enviado. Revise la bandeja del destinatario.' };
+    testResult.value = { ok: true, message: t('admin.smtp.testOk') };
   } catch (e) {
     testResult.value = {
       ok: false,
-      message: e instanceof Error ? e.message : 'Error al enviar la prueba',
+      message: e instanceof Error ? e.message : t('admin.smtp.testError'),
     };
   } finally {
     testing.value = false;
@@ -156,43 +158,39 @@ async function sendTest() {
 </script>
 
 <template>
-  <Card title="Correo (magic link)">
-    <p class="lead">
-      Configure el servidor SMTP que envía los enlaces de acceso por correo.
-      Mientras esté deshabilitado, el enlace aparece en pantalla al solicitar
-      el ingreso (modo de respaldo).
-    </p>
+  <Card :title="t('admin.smtp.title')">
+    <p class="lead">{{ t('admin.smtp.lead') }}</p>
 
     <div class="form-grid">
-      <Field label="Servidor SMTP" required>
+      <Field :label="t('admin.smtp.host')" required>
         <template #default="{ id }">
           <input :id="id" v-model="form.host" type="text" placeholder="smtp.gmail.com" />
         </template>
       </Field>
 
-      <Field label="Puerto" required>
+      <Field :label="t('admin.smtp.port')" required>
         <template #default="{ id }">
           <input :id="id" v-model.number="form.port" type="number" min="1" max="65535" />
         </template>
       </Field>
 
-      <Field label="Modo TLS" required>
+      <Field :label="t('admin.smtp.tlsMode')" required>
         <template #default="{ id }">
           <select :id="id" v-model="form.tls_mode">
-            <option value="starttls">STARTTLS (puerto 587)</option>
-            <option value="tls">TLS implícito (puerto 465)</option>
-            <option value="none">Sin cifrado (solo dev)</option>
+            <option value="starttls">{{ t('admin.smtp.tlsStarttls') }}</option>
+            <option value="tls">{{ t('admin.smtp.tlsImplicit') }}</option>
+            <option value="none">{{ t('admin.smtp.tlsNone') }}</option>
           </select>
         </template>
       </Field>
 
-      <Field label="Usuario">
+      <Field :label="t('admin.smtp.user')">
         <template #default="{ id }">
           <input :id="id" v-model="form.user" type="text" autocomplete="off" />
         </template>
       </Field>
 
-      <Field label="Contraseña" class="span-2">
+      <Field :label="t('admin.smtp.password')" class="span-2">
         <template #default="{ id }">
           <div class="pass-row">
             <input
@@ -208,52 +206,52 @@ async function sendTest() {
               variant="ghost"
               size="sm"
               type="button"
-              title="Borrar la contraseña almacenada"
+              :title="t('admin.smtp.passwordClearHint')"
               :disabled="saving"
               @click="clearPassword"
             >
               <Eraser :size="12" :stroke-width="2" />
-              <span>Borrar</span>
+              <span>{{ t('admin.smtp.passwordClear') }}</span>
             </Btn>
           </div>
         </template>
       </Field>
 
-      <Field label="Nombre del remitente">
+      <Field :label="t('admin.smtp.fromName')">
         <template #default="{ id }">
-          <input :id="id" v-model="form.from_name" type="text" maxlength="100" placeholder="MODOS-CPU" />
+          <input :id="id" v-model="form.from_name" type="text" maxlength="100" placeholder="MODARCH" />
         </template>
       </Field>
 
-      <Field label="Dirección del remitente" required>
+      <Field :label="t('admin.smtp.fromEmail')" required>
         <template #default="{ id }">
           <input :id="id" v-model="form.from_email" type="email" placeholder="noreply@ejemplo.com" />
         </template>
       </Field>
 
-      <Field label="Reply-To">
+      <Field :label="t('admin.smtp.replyTo')">
         <template #default="{ id }">
-          <input :id="id" v-model="form.reply_to" type="email" placeholder="(opcional)" />
+          <input :id="id" v-model="form.reply_to" type="email" :placeholder="t('admin.smtp.optional')" />
         </template>
       </Field>
 
-      <Field label="Prefijo del asunto">
+      <Field :label="t('admin.smtp.subjectPrefix')">
         <template #default="{ id }">
-          <input :id="id" v-model="form.subject_prefix" type="text" maxlength="64" placeholder="[MODOS-CPU]" />
+          <input :id="id" v-model="form.subject_prefix" type="text" maxlength="64" placeholder="[MODARCH]" />
         </template>
       </Field>
 
-      <Field label="Copia oculta (BCC)" class="span-2">
+      <Field :label="t('admin.smtp.bcc')" class="span-2">
         <template #default="{ id }">
-          <input :id="id" v-model="form.bcc" type="email" placeholder="(opcional) recibirá copia de cada magic link" />
+          <input :id="id" v-model="form.bcc" type="email" :placeholder="t('admin.smtp.bccPlaceholder')" />
         </template>
       </Field>
 
-      <Field label="Habilitado" class="span-2">
+      <Field :label="t('admin.smtp.enabled')" class="span-2">
         <template #default>
           <label class="checkbox">
             <input v-model="form.enabled" type="checkbox" />
-            <span>Enviar magic links por correo cuando esté seleccionado.</span>
+            <span>{{ t('admin.smtp.enabledHint') }}</span>
           </label>
         </template>
       </Field>
@@ -263,35 +261,30 @@ async function sendTest() {
       <div class="actions">
         <Btn variant="primary" :loading="saving" :disabled="loading" @click="save">
           <ShieldCheck :size="14" :stroke-width="2" />
-          <span>Guardar</span>
+          <span>{{ t('admin.smtp.save') }}</span>
         </Btn>
       </div>
     </template>
   </Card>
 
-  <Card title="Probar envío">
-    <p class="lead">
-      Envíe un correo de prueba para verificar el host, las credenciales y la
-      ruta TLS antes de depender de la SMTP en producción.
-    </p>
+  <Card :title="t('admin.smtp.testTitle')">
+    <p class="lead">{{ t('admin.smtp.testLead') }}</p>
     <div class="test-row">
-      <Field label="Destinatario" class="grow">
+      <Field :label="t('admin.smtp.testTo')" class="grow">
         <template #default="{ id }">
           <input :id="id" v-model="testTo" type="email" placeholder="usted@ejemplo.com" />
         </template>
       </Field>
       <Btn variant="primary" :loading="testing" :disabled="!form.enabled" @click="sendTest">
         <Send :size="14" :stroke-width="2" />
-        <span>Enviar prueba</span>
+        <span>{{ t('admin.smtp.testButton') }}</span>
       </Btn>
     </div>
     <p v-if="testResult" :class="['result', testResult.ok ? 'result--ok' : 'result--err']" role="status">
       <Mail :size="14" :stroke-width="2" />
       <span>{{ testResult.message }}</span>
     </p>
-    <p v-else-if="!form.enabled" class="note">
-      Habilite el envío y guarde antes de probar.
-    </p>
+    <p v-else-if="!form.enabled" class="note">{{ t('admin.smtp.testNote') }}</p>
   </Card>
 </template>
 

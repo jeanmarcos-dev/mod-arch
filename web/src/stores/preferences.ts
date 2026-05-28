@@ -184,11 +184,21 @@ export const usePreferencesStore = defineStore('preferences', () => {
   // setLocale is the canonical mutation point for switching languages. It
   // updates the persisted ref AND the live vue-i18n instance AND <html lang>
   // in one explicit step — preferable to a watcher because the order is
-  // obvious and there's no risk of stale renders.
+  // obvious and there's no risk of stale renders. The fire-and-forget POST
+  // to /api/i18n/lang persists the cookie the backend reads on the next
+  // server-rendered page, so the locale survives full reloads end-to-end.
   function setLocale(l: Locale) {
     if (!isLocale(l)) return;
     locale.value = l;
     setI18nLocale(l);
+    if (typeof window !== 'undefined') {
+      void fetch('/api/i18n/lang', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ locale: l }),
+      }).catch(() => undefined);
+    }
   }
 
   // Keep <html lang> in sync on store creation. main.ts already called

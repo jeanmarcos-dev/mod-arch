@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import type { CoreInfo } from '../../stores/cpu';
 import { fmtAddr, coreColorVar, coreGlowVar } from '../../lib/memoryLayout';
 import Term from '../glossary/Term.vue';
+
+const { t } = useI18n();
 
 const props = defineProps<{
   core: CoreInfo;
@@ -38,7 +41,7 @@ function jumpESP() {
     }]"
     :style="styleVars"
     :data-narrator-anchor="`cpu-${core.id}`"
-    :title="hiddenByFilter ? `C${core.id} oculto en el filtro de la barra superior — click para enfocar` : undefined"
+    :title="hiddenByFilter ? t('shell.memoryCoreChip.hiddenByFilter', { id: core.id }) : undefined"
     @click="emit('select', core.id)"
   >
     <header class="core-chip__head">
@@ -47,17 +50,17 @@ function jumpESP() {
         <Term term="PID" mode="label" class="core-chip__pid-k">PID</Term>
         <span class="core-chip__pid-v">{{ core.current_pid || '—' }}</span>
       </span>
-      <span class="core-chip__mode" :title="core.mode === 3 ? 'User mode (PL3)' : 'Kernel mode (PL0)'">
+      <span class="core-chip__mode" :title="core.mode === 3 ? t('shell.memoryCoreChip.modeUser') : t('shell.memoryCoreChip.modeKernel')">
         {{ core.mode === 3 ? 'USR' : 'KRN' }}
       </span>
     </header>
 
     <dl class="core-chip__regs">
-      <div class="core-chip__reg core-chip__reg--clickable" @click.stop="jumpEIP" title="Saltar la ventana de memoria a EIP">
+      <div class="core-chip__reg core-chip__reg--clickable" @click.stop="jumpEIP" :title="t('shell.memoryCoreChip.jumpEipHint')">
         <dt><Term term="EIP" mode="label">EIP</Term></dt>
         <dd>{{ fmtAddr(core.regs.EIP ?? 0) }}</dd>
       </div>
-      <div class="core-chip__reg core-chip__reg--clickable" @click.stop="jumpESP" title="Saltar la ventana al stack del proceso">
+      <div class="core-chip__reg core-chip__reg--clickable" @click.stop="jumpESP" :title="t('shell.memoryCoreChip.jumpEspHint')">
         <dt><Term term="ESP" mode="label">ESP</Term></dt>
         <dd>{{ fmtAddr(core.regs.ESP ?? 0) }}</dd>
       </div>

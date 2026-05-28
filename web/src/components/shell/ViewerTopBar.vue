@@ -1,21 +1,23 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { BookOpen, Hand, Eye, EyeOff, LogOut } from '@lucide/vue';
 import { useCpuStore } from '../../stores/cpu';
 import { useViewerStore } from '../../stores/viewer';
 
+const { t } = useI18n();
 const cpu = useCpuStore();
 const viewer = useViewerStore();
 const router = useRouter();
 
-// The host alias surfaces in the "Viendo a:" indicator. Falls back to the
+// The host alias surfaces in the "Watching:" indicator. Falls back to the
 // session id when the host has not set a label yet.
 const hostLabel = computed(() => {
   const lab = cpu.sessionInfo.label?.trim();
   if (lab) return lab;
   const id = cpu.sessionInfo.id;
-  return id ? `Sesión ${id.slice(0, 6)}` : 'la sesión';
+  return id ? t('shell.viewerTopBar.fallbackSession', { id: id.slice(0, 6) }) : t('shell.viewerTopBar.fallbackTheSession');
 });
 
 const handRaisePulse = ref(false);
@@ -53,58 +55,58 @@ async function onLeave() {
 
 <template>
   <header class="viewer-bar" role="banner" data-pizarra-anchor="viewer-topbar">
-    <span class="viewer-bar__brand">MODOS-CPU</span>
+    <span class="viewer-bar__brand">{{ t('topbar.brand') }}</span>
 
     <button
       type="button"
       class="viewer-bar__btn"
       :class="{ 'viewer-bar__btn--on': viewer.autofollow }"
       :title="viewer.autofollow
-        ? 'Autofollow activo — la vista sigue automáticamente al profesor. Clic para desactivarlo y navegar libremente.'
-        : 'Autofollow apagado — navega usted la sección. Clic para volver a seguir al profesor.'"
+        ? t('shell.viewerTopBar.autofollowOnHint')
+        : t('shell.viewerTopBar.autofollowOffHint')"
       :aria-pressed="viewer.autofollow"
       @click="onToggleFollow"
     >
       <component :is="viewer.autofollow ? Eye : EyeOff" :size="14" :stroke-width="2" />
-      <span>{{ viewer.autofollow ? 'Autofollow' : 'Libre' }}</span>
+      <span>{{ viewer.autofollow ? t('shell.viewerTopBar.autofollowLabel') : t('shell.viewerTopBar.freeLabel') }}</span>
     </button>
 
     <button
       type="button"
       class="viewer-bar__btn"
-      title="Abrir el glosario para consultar conceptos"
+      :title="t('shell.viewerTopBar.glossaryHint')"
       @click="onGlossary"
     >
       <BookOpen :size="14" :stroke-width="2" />
-      <span>Glosario</span>
+      <span>{{ t('shell.viewerTopBar.glossaryLabel') }}</span>
     </button>
 
     <button
       type="button"
       class="viewer-bar__btn viewer-bar__btn--hand"
       :class="{ 'viewer-bar__btn--pulse': handRaisePulse }"
-      title="Pedir la atención del anfitrión — le aparece un aviso al profesor"
+      :title="t('shell.viewerTopBar.handRaiseHint')"
       @click="onHandRaise"
     >
       <Hand :size="14" :stroke-width="2" />
-      <span>Levantar mano</span>
+      <span>{{ t('shell.viewerTopBar.handRaiseLabel') }}</span>
     </button>
 
     <span class="viewer-bar__spacer" />
 
-    <span class="viewer-bar__host" :title="`Está usted viendo en modo solo lectura la sesión de ${hostLabel}`">
+    <span class="viewer-bar__host" :title="t('shell.viewerTopBar.hostHint', { host: hostLabel })">
       <Eye :size="13" :stroke-width="2" class="viewer-bar__host-icon" />
-      <span class="viewer-bar__host-label">Viendo a <strong>{{ hostLabel }}</strong></span>
+      <span class="viewer-bar__host-label">{{ t('shell.viewerTopBar.watching') }} <strong>{{ hostLabel }}</strong></span>
     </span>
 
     <button
       type="button"
       class="viewer-bar__btn viewer-bar__btn--leave"
-      title="Abandonar la sesión y volver al inicio"
+      :title="t('shell.viewerTopBar.leaveHint')"
       @click="onLeave"
     >
       <LogOut :size="14" :stroke-width="2" />
-      <span>Salir</span>
+      <span>{{ t('shell.viewerTopBar.leaveLabel') }}</span>
     </button>
   </header>
 </template>

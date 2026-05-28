@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { BotMessageSquare, LogIn, Minus } from '@lucide/vue';
+import { LogIn, Minus } from '@lucide/vue';
 
 import TutorPanel from './TutorPanel.vue';
 import TutorBotIcon from './TutorBotIcon.vue';
@@ -114,10 +114,10 @@ function onBackdropClick() {
             <Minus :size="14" :stroke-width="2.5" />
           </button>
           <div class="gate-icon"><TutorBotIcon :size="32" :stroke-width="1.4" /></div>
-          <h3 class="gate-title">Tutor protegido</h3>
+          <h3 class="gate-title">MODARCHI protegido</h3>
           <p class="gate-text">
-            Para conversar con el tutor de Sistemas Operativos debe iniciar
-            sesión con su correo institucional.
+            Para conversar con MODARCHI sobre Sistemas Operativos debe
+            iniciar sesión con su correo institucional.
           </p>
           <button class="gate-cta" @click="goToLogin">
             <LogIn :size="14" :stroke-width="2" />
@@ -149,9 +149,9 @@ function onBackdropClick() {
                 <Minus :size="16" :stroke-width="2.5" />
               </button>
               <div class="gate-icon"><TutorBotIcon :size="44" :stroke-width="1.4" /></div>
-              <h3 class="gate-title">Tutor protegido</h3>
+              <h3 class="gate-title">MODARCHI protegido</h3>
               <p class="gate-text">
-                Para conversar con el tutor de Sistemas Operativos debe
+                Para conversar con MODARCHI sobre Sistemas Operativos debe
                 iniciar sesión con su correo institucional.
               </p>
               <button class="gate-cta" @click="goToLogin">
@@ -204,14 +204,27 @@ function onBackdropClick() {
   justify-content: center;
   cursor: pointer;
   box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.30);
-  transition: transform 140ms ease, box-shadow 140ms ease, color 140ms ease;
+  /* All three properties share the same curve and duration so transform,
+     shadow and stroke colour land together. Compositor-backed transform
+     and shadow feel snappier than the CPU-painted SVG stroke if timings
+     diverge — keeping them identical hides the difference. */
+  transition: transform 180ms ease-out,
+              box-shadow 180ms ease-out,
+              color 180ms ease-out;
+  /* Grow upward from the bottom edge so hover doesn't shift the hit target
+     and trigger a hover/unhover oscillation when the cursor approaches from
+     below. */
+  transform-origin: center bottom;
   animation: tutor-bounce 4.8s ease-in-out infinite;
 }
 .fab:hover {
-  transform: translateY(-3px) scale(1.04);
+  transform: scale(1.06);
   color: var(--text);
   box-shadow: 0 0 24px rgba(var(--accent-rgb), 0.45);
   animation: none;
+}
+.fab .tutor-bot-icon {
+  transition: stroke 180ms ease-out;
 }
 .fab:focus-visible {
   outline: 2px solid var(--accent);

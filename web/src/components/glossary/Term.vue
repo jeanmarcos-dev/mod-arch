@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, onBeforeUnmount, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useCpuStore } from '../../stores/cpu';
-import { findEntry } from '../../data/glossary';
+import { findEntry, localizeEntry } from '../../data/glossary';
 import GlossaryTooltip from './GlossaryTooltip.vue';
+
+const { locale } = useI18n();
 
 const props = withDefaults(
   defineProps<{
@@ -16,7 +19,10 @@ const props = withDefaults(
 );
 
 const cpu = useCpuStore();
-const entry = computed(() => findEntry(props.term));
+const entry = computed(() => {
+  const e = findEntry(props.term);
+  return e ? localizeEntry(e, locale.value) : null;
+});
 const interactive = computed(() => !props.disabled && entry.value !== null);
 
 if (import.meta.env.DEV && entry.value === null) {

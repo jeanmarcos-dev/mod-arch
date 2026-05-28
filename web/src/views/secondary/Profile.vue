@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { Copy, Share2, X, Check } from '@lucide/vue';
 import Card from '../../components/ui/Card.vue';
 import Btn from '../../components/ui/Btn.vue';
@@ -9,6 +10,7 @@ import { useAuthStore } from '../../stores/auth';
 import { useCpuStore } from '../../stores/cpu';
 import { useToastStore } from '../../stores/toast';
 
+const { t } = useI18n();
 const auth = useAuthStore();
 const cpu = useCpuStore();
 const toast = useToastStore();
@@ -64,55 +66,47 @@ async function copyViewURL() {
     copyConfirm.value = true;
     setTimeout(() => { copyConfirm.value = false; }, 1500);
   } catch {
-    toast.err('No se pudo copiar al portapapeles');
+    toast.err(t('profile.mySim.copyError'));
   }
 }
 </script>
 
 <template>
   <div class="profile">
-    <Card title="Perfil" :elevation="1" class="profile__card">
+    <Card :title="t('profile.title')" :elevation="1" class="profile__card">
       <div v-if="hasUser" class="profile__body">
-        <Field label="Nombre" v-slot="{ id }">
+        <Field :label="t('profile.fields.name')" v-slot="{ id }">
           <input :id="id" :value="auth.user?.name" readonly />
         </Field>
         <Field
           v-if="auth.user?.email"
-          label="Correo"
-          help="Use el correo para volver a entrar desde otro dispositivo via enlace mágico."
+          :label="t('profile.fields.email')"
+          :help="t('profile.fields.emailHelp')"
           v-slot="{ id }"
         >
           <input :id="id" :value="auth.user.email" readonly />
         </Field>
-        <Field label="ID interno" v-slot="{ id }">
+        <Field :label="t('profile.fields.internalId')" v-slot="{ id }">
           <input :id="id" :value="auth.user?.id" readonly />
         </Field>
 
         <div class="profile__actions">
-          <Btn variant="danger" @click="logout">Cerrar sesión</Btn>
+          <Btn variant="danger" @click="logout">{{ t('profile.logout') }}</Btn>
         </div>
       </div>
 
       <div v-else class="profile__empty">
-        <p>
-          No ha iniciado sesión. Identifíquese para que su simulador quede
-          asociado a su nombre y pueda recuperarlo desde otro dispositivo con
-          el enlace mágico.
-        </p>
-        <Btn @click="router.push('/login')">Identificarse</Btn>
+        <p>{{ t('profile.emptyHint') }}</p>
+        <Btn @click="router.push('/login')">{{ t('profile.identify') }}</Btn>
       </div>
     </Card>
 
-    <Card v-if="hasUser && isOwner" title="Mi simulador" :elevation="1" class="profile__card">
-      <p class="profile__hint">
-        Cada usuario identificado tiene un único simulador. Aquí puede
-        cambiarle el alias visible (lo verán quienes se conecten como
-        espectadores) y compartirlo con un enlace de solo lectura.
-      </p>
+    <Card v-if="hasUser && isOwner" :title="t('profile.mySim.title')" :elevation="1" class="profile__card">
+      <p class="profile__hint">{{ t('profile.mySim.hint') }}</p>
 
       <Field
-        label="Alias visible"
-        help="Aparece en la barra superior del simulador y en las pantallas de los espectadores."
+        :label="t('profile.mySim.aliasLabel')"
+        :help="t('profile.mySim.aliasHelp')"
         v-slot="{ id }"
       >
         <div class="profile__alias-row">
@@ -120,7 +114,7 @@ async function copyViewURL() {
             :id="id"
             v-model="aliasDraft"
             maxlength="32"
-            placeholder="Sin alias asignado"
+            :placeholder="t('profile.mySim.aliasPlaceholder')"
             @keydown.enter.prevent="saveAlias"
           />
           <Btn
@@ -129,7 +123,7 @@ async function copyViewURL() {
             @click="saveAlias"
           >
             <Check v-if="aliasJustSaved" :size="13" :stroke-width="2" />
-            <span>{{ aliasJustSaved ? 'Guardado' : 'Guardar' }}</span>
+            <span>{{ aliasJustSaved ? t('profile.mySim.saved') : t('profile.mySim.save') }}</span>
           </Btn>
         </div>
       </Field>
@@ -138,19 +132,16 @@ async function copyViewURL() {
         <div class="profile__share-row">
           <div>
             <strong class="profile__share-title">
-              {{ isShared ? 'Simulador compartido' : 'Simulador privado' }}
+              {{ isShared ? t('profile.mySim.sharedTitle') : t('profile.mySim.privateTitle') }}
             </strong>
             <p class="profile__share-desc">
-              {{ isShared
-                ? 'Cualquiera con el enlace puede ver su simulador en modo solo lectura.'
-                : 'Solo usted ve este simulador. Active el modo compartido para generar un enlace.'
-              }}
+              {{ isShared ? t('profile.mySim.sharedDesc') : t('profile.mySim.privateDesc') }}
             </p>
           </div>
           <Btn :variant="isShared ? 'danger' : 'primary'" size="sm" @click="toggleShare">
             <X v-if="isShared" :size="13" :stroke-width="2" />
             <Share2 v-else :size="13" :stroke-width="2" />
-            <span>{{ isShared ? 'Dejar de compartir' : 'Compartir' }}</span>
+            <span>{{ isShared ? t('profile.mySim.stopSharing') : t('profile.mySim.share') }}</span>
           </Btn>
         </div>
 
@@ -159,7 +150,7 @@ async function copyViewURL() {
           <Btn size="sm" variant="ghost" @click="copyViewURL">
             <Check v-if="copyConfirm" :size="13" :stroke-width="2" />
             <Copy v-else :size="13" :stroke-width="2" />
-            <span>{{ copyConfirm ? 'Copiado' : 'Copiar' }}</span>
+            <span>{{ copyConfirm ? t('profile.mySim.copied') : t('profile.mySim.copy') }}</span>
           </Btn>
         </div>
       </div>

@@ -1,5 +1,8 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n';
 import Card from '../../components/ui/Card.vue';
+
+const { t } = useI18n();
 
 defineProps<{
   title: string;
@@ -16,14 +19,14 @@ defineProps<{
     <Card class="placeholder__card" :elevation="1">
       <header class="placeholder__head">
         <span class="placeholder__status" :class="`placeholder__status--${status ?? 'soon'}`">
-          {{ status === 'wip' ? 'En curso' : status === 'ready' ? 'Disponible' : 'Próximamente' }}
+          {{ status === 'wip' ? t('sections.shared.placeholder.statusWip') : status === 'ready' ? t('sections.shared.placeholder.statusReady') : t('sections.shared.placeholder.statusSoon') }}
         </span>
         <h2 class="placeholder__title">{{ title }}</h2>
         <p class="placeholder__tagline">{{ tagline }}</p>
       </header>
 
       <section class="placeholder__body">
-        <h3 class="placeholder__preview-title">Lo que mostrará esta sección</h3>
+        <h3 class="placeholder__preview-title">{{ t('sections.shared.placeholder.previewTitle') }}</h3>
         <ul class="placeholder__list">
           <li v-for="(line, idx) in preview" :key="idx">{{ line }}</li>
         </ul>
@@ -31,9 +34,7 @@ defineProps<{
 
       <footer class="placeholder__foot">
         <p>
-          La simulación general continúa corriendo en segundo plano. Vuelva a
-          <RouterLink to="/" class="placeholder__back">Vista general</RouterLink>
-          para verla con todos los paneles.
+          {{ t('sections.shared.placeholder.footPrefix') }}<RouterLink to="/" class="placeholder__back">{{ t('sections.shared.placeholder.footLink') }}</RouterLink>{{ t('sections.shared.placeholder.footSuffix') }}
         </p>
       </footer>
     </Card>

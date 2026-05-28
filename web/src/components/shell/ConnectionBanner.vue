@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { X } from '@lucide/vue';
 import { useCpuStore } from '../../stores/cpu';
 import { useConnectionBanner } from '../../composables/useConnectionBanner';
 
+const { t } = useI18n();
 const cpu = useCpuStore();
 const { phase, visible, dismiss } = useConnectionBanner();
 
@@ -21,24 +23,24 @@ const secondsUntilRetry = computed(() => {
 
 const title = computed(() =>
   phase.value === 'connecting'
-    ? 'Conectando con el simulador'
-    : 'Conexión perdida con el simulador',
+    ? t('shell.connectionBanner.titleConnecting')
+    : t('shell.connectionBanner.titleLost'),
 );
 
 const statusLine = computed(() => {
   if (secondsUntilRetry.value === null) {
-    if (cpu.reconnectAttempts > 0) return 'Reintentando conexión…';
+    if (cpu.reconnectAttempts > 0) return t('shell.connectionBanner.retrying');
     return phase.value === 'connecting'
-      ? 'Estableciendo enlace…'
-      : 'Sin conexión con el servidor.';
+      ? t('shell.connectionBanner.establishing')
+      : t('shell.connectionBanner.offline');
   }
-  if (secondsUntilRetry.value === 0) return 'Reintentando ahora…';
-  return `Próximo intento en ${secondsUntilRetry.value}s.`;
+  if (secondsUntilRetry.value === 0) return t('shell.connectionBanner.retryingNow');
+  return t('shell.connectionBanner.nextRetryIn', { seconds: secondsUntilRetry.value });
 });
 
 const attemptsLine = computed(() => {
   if (cpu.reconnectAttempts === 0) return '';
-  return ` · intento #${cpu.reconnectAttempts}`;
+  return t('shell.connectionBanner.attempt', { n: cpu.reconnectAttempts });
 });
 </script>
 
@@ -59,12 +61,12 @@ const attemptsLine = computed(() => {
         type="button"
         class="conn-banner__btn"
         @click="cpu.reconnectNow()"
-      >Reconectar ahora</button>
+      >{{ t('shell.connectionBanner.reconnectNow') }}</button>
       <button
         type="button"
         class="conn-banner__close"
-        title="Ocultar este aviso hasta el próximo cambio de estado"
-        aria-label="Cerrar aviso de conexión"
+        :title="t('shell.connectionBanner.dismissHint')"
+        :aria-label="t('shell.connectionBanner.dismissAria')"
         @click="dismiss()"
       >
         <X :size="14" :stroke-width="2" />

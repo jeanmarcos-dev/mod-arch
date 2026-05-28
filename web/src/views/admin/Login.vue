@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { useAdminStore } from '../../stores/admin';
 import Btn from '../../components/ui/Btn.vue';
 import Card from '../../components/ui/Card.vue';
 import Field from '../../components/ui/Field.vue';
 
+const { t } = useI18n();
 const admin = useAdminStore();
 const router = useRouter();
 const route = useRoute();
@@ -33,12 +35,12 @@ async function submit() {
   <div class="admin-login">
     <Card class="admin-login__card" :elevation="2">
       <header class="admin-login__header">
-        <h1>ADMIN · MODOS-CPU</h1>
-        <p class="admin-login__hint">Acceso restringido al panel de administración.</p>
+        <h1>{{ t('admin.login.heading') }}</h1>
+        <p class="admin-login__hint">{{ t('admin.login.hint') }}</p>
       </header>
 
       <form class="admin-login__form" @submit.prevent="submit">
-        <Field label="Usuario" required v-slot="{ id }">
+        <Field :label="t('admin.login.userLabel')" required v-slot="{ id }">
           <input
             :id="id"
             v-model="user"
@@ -50,7 +52,7 @@ async function submit() {
           />
         </Field>
 
-        <Field label="Contraseña" required :error="admin.lastError ?? ''" v-slot="{ id }">
+        <Field :label="t('admin.login.passLabel')" required :error="admin.lastError ?? ''" v-slot="{ id }">
           <input
             :id="id"
             v-model="pass"
@@ -68,12 +70,12 @@ async function submit() {
           :disabled="!user || !pass"
           block
         >
-          {{ busy ? 'Verificando…' : 'Ingresar' }}
+          {{ busy ? t('admin.login.submitBusy') : t('admin.login.submit') }}
         </Btn>
       </form>
 
       <footer class="admin-login__footer">
-        <a href="/">← Volver al simulador</a>
+        <a href="/">{{ t('admin.login.backToSim') }}</a>
       </footer>
     </Card>
   </div>

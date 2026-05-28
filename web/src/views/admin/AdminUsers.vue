@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Users, ShieldCheck, ShieldUser, GraduationCap, UserPlus, Pencil, Trash2, Lock } from '@lucide/vue';
 import { useAdminStore, type UserRow, type UserRole, ENV_ADMIN_USER_ID } from '../../stores/admin';
 import { useToastStore } from '../../stores/toast';
@@ -9,23 +10,24 @@ import DataTable, { type Column } from '../../components/ui/DataTable.vue';
 import UserFormModal from '../../components/admin/UserFormModal.vue';
 import { formatTimestamp } from './util';
 
+const { t } = useI18n();
 const admin = useAdminStore();
 const toast = useToastStore();
 
-const columns: Column<UserRow>[] = [
-  { id: 'name', label: 'Nombre' },
-  { id: 'email', label: 'Correo', accessor: (u) => u.email || '' },
-  { id: 'student_id', label: 'ID estudiante', accessor: (u) => u.student_id || '' },
-  { id: 'role', label: 'Rol', accessor: (u) => u.role, width: '140px' },
-  { id: 'last_login_at', label: 'Último ingreso', accessor: (u) => u.last_login_at, width: '170px' },
-  { id: 'sessions', label: 'Activas', accessor: (u) => u.sessions.length, align: 'right' },
-];
+const columns = computed<Column<UserRow>[]>(() => [
+  { id: 'name', label: t('admin.users.colName') },
+  { id: 'email', label: t('admin.users.colEmail'), accessor: (u) => u.email || '' },
+  { id: 'student_id', label: t('admin.users.colStudentId'), accessor: (u) => u.student_id || '' },
+  { id: 'role', label: t('admin.users.colRole'), accessor: (u) => u.role, width: '140px' },
+  { id: 'last_login_at', label: t('admin.users.colLastLogin'), accessor: (u) => u.last_login_at, width: '170px' },
+  { id: 'sessions', label: t('admin.users.colSessions'), accessor: (u) => u.sessions.length, align: 'right' },
+]);
 
-const ROLE_LABEL: Record<UserRole, string> = {
-  admin: 'Administrador',
-  moderator: 'Moderador',
-  student: 'Estudiante',
-};
+const roleLabel = computed<Record<UserRole, string>>(() => ({
+  admin: t('admin.users.roleAdmin'),
+  moderator: t('admin.users.roleModerator'),
+  student: t('admin.users.roleStudent'),
+}));
 
 function roleIcon(r: UserRole) {
   if (r === 'admin') return ShieldCheck;
@@ -52,12 +54,12 @@ function canChangeRoleFor(row: UserRow): boolean {
 }
 
 async function kickUser(id: string, name: string) {
-  if (!confirm(`¿Expulsar al usuario ${name}? Sus sesiones activas se cerrarán.`)) return;
+  if (!confirm(t('admin.users.confirmKick', { name }))) return;
   try {
     await admin.kickUser(id);
-    toast.ok('Usuario expulsado');
+    toast.ok(t('admin.users.okKick'));
   } catch (e) {
-    toast.err(e instanceof Error ? e.message : 'Error');
+    toast.err(e instanceof Error ? e.message : t('admin.sessions.errorGeneric'));
   }
 }
 
@@ -65,16 +67,16 @@ async function changeRole(row: UserRow, next: UserRole) {
   openRoleMenu.value = null;
   if (row.role === next) return;
   const verb = next === 'admin'
-    ? 'promover a administrador'
+    ? t('admin.users.verbPromoteAdmin')
     : next === 'moderator'
-      ? 'promover a moderador'
-      : 'degradar a estudiante';
-  if (!confirm(`¿Confirma ${verb} a ${row.name}?`)) return;
+      ? t('admin.users.verbPromoteModerator')
+      : t('admin.users.verbDemoteStudent');
+  if (!confirm(t('admin.users.confirmRoleChange', { verb, name: row.name }))) return;
   try {
     await admin.setUserRole(row.id, next);
-    toast.ok(`Rol actualizado: ${ROLE_LABEL[next]}`);
+    toast.ok(t('admin.users.okRoleUpdated', { role: roleLabel.value[next] }));
   } catch (e) {
-    toast.err(e instanceof Error ? e.message : 'Error');
+    toast.err(e instanceof Error ? e.message : t('admin.sessions.errorGeneric'));
   }
 }
 
@@ -105,10 +107,10 @@ function canDelete(row: UserRow): boolean {
 async function onCreateSubmit(payload: { name: string; email: string; student_id: string; role: UserRole }) {
   try {
     await admin.createUser(payload);
-    toast.ok('Usuario creado');
+    toast.ok(t('admin.users.okCreated'));
     createOpen.value = false;
   } catch (e) {
-    createModalRef.value?.showError(e instanceof Error ? e.message : 'Error al crear');
+    createModalRef.value?.showError(e instanceof Error ? e.message : t('admin.users.errorCreate'));
   }
 }
 
@@ -127,45 +129,45 @@ async function onEditSubmit(payload: { name: string; email: string; student_id: 
       return;
     }
     await admin.updateUser(target.id, patch);
-    toast.ok('Usuario actualizado');
+    toast.ok(t('admin.users.okUpdated'));
     editTarget.value = null;
   } catch (e) {
-    editModalRef.value?.showError(e instanceof Error ? e.message : 'Error al actualizar');
+    editModalRef.value?.showError(e instanceof Error ? e.message : t('admin.users.errorUpdate'));
   }
 }
 
 async function deleteUser(row: UserRow) {
   const sessionsNote = row.sessions.length
-    ? `\n\nSus ${row.sessions.length} sesión(es) activa(s) se cerrarán.`
+    ? t('admin.users.sessionsNote', { count: row.sessions.length })
     : '';
-  if (!confirm(`¿Eliminar al usuario ${row.name}?${sessionsNote}\n\nEsta acción libera su correo e ID de estudiante para reuso.`)) {
+  if (!confirm(t('admin.users.confirmDeleteBase', { name: row.name, sessionsNote }))) {
     return;
   }
   try {
     await admin.deleteUser(row.id);
-    toast.ok('Usuario eliminado');
+    toast.ok(t('admin.users.okDeleted'));
   } catch (e) {
-    toast.err(e instanceof Error ? e.message : 'Error al eliminar');
+    toast.err(e instanceof Error ? e.message : t('admin.users.errorDelete'));
   }
 }
 </script>
 
 <template>
-  <Card title="Usuarios identificados">
+  <Card :title="t('admin.users.title')">
     <template v-if="admin.canChangeRoles" #header>
       <Btn variant="primary" size="sm" @click="createOpen = true">
         <UserPlus :size="12" :stroke-width="2" />
-        <span>Nuevo usuario</span>
+        <span>{{ t('admin.users.newUser') }}</span>
       </Btn>
     </template>
     <DataTable
       :columns="columns"
       :rows="admin.users"
       initial-sort="last_login_at"
-      search-placeholder="Buscar por nombre, correo o ID estudiante…"
+      :search-placeholder="t('admin.users.searchPlaceholder')"
       :empty-icon="Users"
-      empty-title="Sin usuarios identificados"
-      empty-message="Cuando un alumno se identifique con su nombre y correo aparecerá aquí."
+      :empty-title="t('admin.users.emptyTitle')"
+      :empty-message="t('admin.users.emptyMessage')"
     >
       <template #[`cell:name`]="{ row }">
         <span class="name-cell">
@@ -173,7 +175,7 @@ async function deleteUser(row: UserRow) {
           <span
             v-if="row.id === ENV_ADMIN_USER_ID"
             class="env-badge"
-            title="Administrador configurado por variables de entorno (irrevocable)"
+            :title="t('admin.users.envBadgeTitle')"
           >
             <Lock :size="10" :stroke-width="2" />
             <span>env</span>
@@ -187,9 +189,9 @@ async function deleteUser(row: UserRow) {
         <span class="dim">{{ value || '—' }}</span>
       </template>
       <template #[`cell:role`]="{ row }">
-        <span :class="['role-chip', `role-chip--${row.role}`]" :title="ROLE_LABEL[row.role]">
+        <span :class="['role-chip', `role-chip--${row.role}`]" :title="roleLabel[row.role]">
           <component :is="roleIcon(row.role)" :size="12" :stroke-width="2" />
-          <span>{{ ROLE_LABEL[row.role] }}</span>
+          <span>{{ roleLabel[row.role] }}</span>
         </span>
       </template>
       <template #[`cell:last_login_at`]="{ row }">
@@ -207,7 +209,7 @@ async function deleteUser(row: UserRow) {
               size="sm"
               :aria-expanded="openRoleMenu === row.id"
               @click="toggleRoleMenu(row.id)"
-            >rol…</Btn>
+            >{{ t('admin.users.actionRole') }}</Btn>
             <ul v-if="openRoleMenu === row.id" class="role-menu" role="menu">
               <li v-for="r in (['student', 'moderator', 'admin'] as UserRole[])" :key="r">
                 <button
@@ -219,7 +221,7 @@ async function deleteUser(row: UserRow) {
                   @click="changeRole(row, r)"
                 >
                   <component :is="roleIcon(r)" :size="12" :stroke-width="2" />
-                  <span>{{ ROLE_LABEL[r] }}</span>
+                  <span>{{ roleLabel[r] }}</span>
                 </button>
               </li>
             </ul>
@@ -228,23 +230,23 @@ async function deleteUser(row: UserRow) {
             variant="ghost"
             size="sm"
             :disabled="!canEdit(row)"
-            title="Editar nombre, correo o ID de estudiante"
+            :title="t('admin.users.actionEditHint')"
             @click="editTarget = row"
           >
             <Pencil :size="12" :stroke-width="2" />
-            <span>editar</span>
+            <span>{{ t('admin.users.actionEdit') }}</span>
           </Btn>
           <Btn
             variant="danger"
             size="sm"
             :disabled="!row.sessions.length"
             @click="kickUser(row.id, row.name)"
-          >expulsar</Btn>
+          >{{ t('admin.users.actionKick') }}</Btn>
           <Btn
             variant="danger"
             size="sm"
             :disabled="!canDelete(row)"
-            title="Eliminar usuario (soft delete)"
+            :title="t('admin.users.actionDeleteHint')"
             @click="deleteUser(row)"
           >
             <Trash2 :size="12" :stroke-width="2" />

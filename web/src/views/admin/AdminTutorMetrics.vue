@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { apiFetch } from '../../lib/api';
 import Card from '../../components/ui/Card.vue';
+
+const { t } = useI18n();
 
 interface HourBucket { hour_start: string; count: number }
 interface ErrorEntry { ts: string; session_id: string; error: string }
@@ -79,18 +82,17 @@ function pct(v: number): string {
 <template>
   <div class="metrics">
     <header class="head">
-      <h1>Tutor — métricas</h1>
+      <h1>{{ t('admin.tutorMetrics.title') }}</h1>
       <div class="controls">
         <label>
-          Ventana:
           <select v-model.number="hours" @change="load">
-            <option :value="1">Última hora</option>
-            <option :value="6">Últimas 6 h</option>
-            <option :value="24">Últimas 24 h</option>
-            <option :value="168">Últimos 7 días</option>
+            <option :value="1">{{ t('admin.tutorMetrics.windowLastHour') }}</option>
+            <option :value="6">{{ t('admin.tutorMetrics.windowLast6h') }}</option>
+            <option :value="24">{{ t('admin.tutorMetrics.windowLast24h') }}</option>
+            <option :value="168">{{ t('admin.tutorMetrics.windowLast7d') }}</option>
           </select>
         </label>
-        <button class="refresh" @click="load" :disabled="loading">↻ Recargar</button>
+        <button class="refresh" @click="load" :disabled="loading">↻</button>
       </div>
     </header>
 
@@ -99,31 +101,31 @@ function pct(v: number): string {
     <div v-if="summary" class="stats">
       <Card :surface="2" :padded="false">
         <div class="stat">
-          <span class="stat__label">Preguntas totales</span>
+          <span class="stat__label">{{ t('admin.tutorMetrics.totalQueries') }}</span>
           <span class="stat__value">{{ summary.total_queries }}</span>
         </div>
       </Card>
       <Card :surface="2" :padded="false">
         <div class="stat">
-          <span class="stat__label">Sesiones únicas</span>
+          <span class="stat__label">{{ t('admin.tutorMetrics.uniqueAskers') }}</span>
           <span class="stat__value">{{ summary.unique_askers }}</span>
         </div>
       </Card>
       <Card :surface="2" :padded="false">
         <div class="stat">
-          <span class="stat__label">Hit-rate de caché</span>
+          <span class="stat__label">{{ t('admin.tutorMetrics.cacheHitRate') }}</span>
           <span class="stat__value">{{ pct(summary.cache_hit_rate) }}</span>
         </div>
       </Card>
       <Card :surface="2" :padded="false">
         <div class="stat">
-          <span class="stat__label">Respuestas degradadas</span>
+          <span class="stat__label">{{ t('admin.tutorMetrics.degradedCount') }}</span>
           <span class="stat__value">{{ summary.degraded_count }}</span>
         </div>
       </Card>
       <Card :surface="2" :padded="false">
         <div class="stat">
-          <span class="stat__label">Latencia p50 / p95 / p99</span>
+          <span class="stat__label">{{ t('admin.tutorMetrics.latency') }}</span>
           <span class="stat__value small">
             {{ summary.latency_p50_ms }} / {{ summary.latency_p95_ms }} / {{ summary.latency_p99_ms }} ms
           </span>
@@ -131,21 +133,21 @@ function pct(v: number): string {
       </Card>
       <Card :surface="2" :padded="false">
         <div class="stat">
-          <span class="stat__label">Tokens promedio</span>
+          <span class="stat__label">{{ t('admin.tutorMetrics.avgTokens') }}</span>
           <span class="stat__value">{{ summary.avg_tokens.toFixed(0) }}</span>
         </div>
       </Card>
     </div>
 
-    <Card v-if="summary" title="Volumen por hora">
-      <div v-if="hourBuckets.length === 0" class="empty">Sin datos en la ventana seleccionada.</div>
+    <Card v-if="summary" :title="t('admin.tutorMetrics.volumeByHour')">
+      <div v-if="hourBuckets.length === 0" class="empty">{{ t('admin.tutorMetrics.emptyVolume') }}</div>
       <div v-else class="bars">
         <div v-for="b in hourBuckets" :key="b.hour_start" class="bar-col">
           <div class="bar-track">
             <div
               class="bar-fill"
               :style="{ height: ((b.count / maxHourCount) * 100) + '%' }"
-              :title="b.count + ' preguntas'"
+              :title="b.count + ' ' + t('admin.tutorMetrics.questions')"
             />
           </div>
           <span class="bar-label">{{ formatHour(b.hour_start) }}</span>
@@ -154,11 +156,11 @@ function pct(v: number): string {
       </div>
     </Card>
 
-    <Card v-if="summary" title="Uso de herramientas">
-      <div v-if="sortedTools.length === 0" class="empty">Ninguna tool invocada todavía.</div>
+    <Card v-if="summary" :title="t('admin.tutorMetrics.toolUsage')">
+      <div v-if="sortedTools.length === 0" class="empty">{{ t('admin.tutorMetrics.emptyTools') }}</div>
       <table v-else class="tools-table">
         <thead>
-          <tr><th>Tool</th><th>Invocaciones</th></tr>
+          <tr><th>{{ t('admin.tutorMetrics.colTool') }}</th><th>{{ t('admin.tutorMetrics.colInvocations') }}</th></tr>
         </thead>
         <tbody>
           <tr v-for="[name, n] in sortedTools" :key="name">
@@ -169,7 +171,7 @@ function pct(v: number): string {
       </table>
     </Card>
 
-    <Card v-if="summary && recentErrors.length" title="Errores recientes">
+    <Card v-if="summary && recentErrors.length" :title="t('admin.tutorMetrics.recentErrors')">
       <ul class="errors">
         <li v-for="(e, i) in recentErrors" :key="i">
           <span class="err-time">{{ formatTime(e.ts) }}</span>

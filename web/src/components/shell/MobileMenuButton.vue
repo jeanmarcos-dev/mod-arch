@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Menu, X } from '@lucide/vue';
 import { usePreferencesStore } from '../../stores/preferences';
 import { useConnectionBanner } from '../../composables/useConnectionBanner';
 
+const { t } = useI18n();
 const prefs = usePreferencesStore();
 const { visible: bannerVisible } = useConnectionBanner();
 
@@ -16,7 +18,7 @@ const shiftedDown = computed(() => bannerVisible.value);
     type="button"
     class="mobile-menu-btn"
     :class="{ 'mobile-menu-btn--open': open, 'mobile-menu-btn--shifted': shiftedDown }"
-    :aria-label="open ? 'Cerrar menú' : 'Abrir menú'"
+    :aria-label="open ? t('shell.mobileMenu.close') : t('shell.mobileMenu.open')"
     :aria-expanded="open"
     @click="prefs.toggleSidebarMobile()"
   >

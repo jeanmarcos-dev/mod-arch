@@ -49,3 +49,9 @@ state-dump-*.db
 
 # Local Claude Code skill artifacts (brainstorm scratchpads, etc.).
 .superpowers/
+
+# Local-only workspace (screenshots, scratch notes). Lives on disk but never tracked.
+/.local/
+
+# Playwright MCP browser session artifacts (console logs, traces).
+/.playwright-mcp/

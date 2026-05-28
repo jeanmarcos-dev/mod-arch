@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Mail } from '@lucide/vue';
 import { useAdminStore } from '../../stores/admin';
 import { useToastStore } from '../../stores/toast';
@@ -9,6 +10,7 @@ import Field from '../../components/ui/Field.vue';
 import EmptyState from '../../components/ui/EmptyState.vue';
 import { formatAgo } from './util';
 
+const { t } = useI18n();
 const admin = useAdminStore();
 const toast = useToastStore();
 
@@ -23,12 +25,12 @@ async function createInvite() {
     inviteLabel.value = '';
     try {
       await navigator.clipboard.writeText(inv.url);
-      toast.ok('Invitación creada y URL copiada al portapapeles');
+      toast.ok(t('admin.invites.okCreatedCopied'));
     } catch {
-      toast.ok('Invitación creada: ' + inv.url);
+      toast.ok(t('admin.invites.okCreated', { url: inv.url }));
     }
   } catch (e) {
-    toast.err(e instanceof Error ? e.message : 'Error al crear');
+    toast.err(e instanceof Error ? e.message : t('admin.invites.errorCreate'));
   } finally {
     busy.value = false;
   }
@@ -37,45 +39,45 @@ async function createInvite() {
 async function copyInvite(url: string) {
   try {
     await navigator.clipboard.writeText(url);
-    toast.ok('URL copiada');
+    toast.ok(t('admin.invites.okCopied'));
   } catch {
-    toast.err('No se pudo copiar al portapapeles');
+    toast.err(t('admin.invites.copyError'));
   }
 }
 
 async function revokeInvite(token: string) {
-  if (!confirm('¿Revocar esta invitación? No podrá reutilizarse.')) return;
+  if (!confirm(t('admin.invites.confirmRevoke'))) return;
   try {
     await admin.revokeInvite(token);
-    toast.ok('Invitación revocada');
+    toast.ok(t('admin.invites.okRevoked'));
   } catch (e) {
-    toast.err(e instanceof Error ? e.message : 'Error');
+    toast.err(e instanceof Error ? e.message : t('admin.sessions.errorGeneric'));
   }
 }
 </script>
 
 <template>
-  <Card title="Invitaciones privilegiadas">
+  <Card :title="t('admin.invites.title')">
     <form class="invite-form" @submit.prevent="createInvite">
-      <Field label="Alias del invitado (opcional)" v-slot="{ id }">
+      <Field :label="t('admin.invites.labelField')" v-slot="{ id }">
         <input
           :id="id"
           v-model="inviteLabel"
           name="invite_label"
-          placeholder="ej. Profesor Pérez"
+          :placeholder="t('admin.invites.labelPlaceholder')"
           maxlength="32"
           :disabled="busy"
         />
       </Field>
-      <Btn type="submit" :loading="busy">+ Generar invitación</Btn>
+      <Btn type="submit" :loading="busy">{{ t('admin.invites.submit') }}</Btn>
     </form>
 
     <table v-if="admin.invites.length" class="grid">
       <thead>
         <tr>
-          <th>Token</th>
-          <th>Alias</th>
-          <th>Creada</th>
+          <th>{{ t('admin.invites.colToken') }}</th>
+          <th>{{ t('admin.invites.colLabel') }}</th>
+          <th>{{ t('admin.invites.colCreated') }}</th>
           <th></th>
         </tr>
       </thead>
@@ -84,12 +86,12 @@ async function revokeInvite(token: string) {
           <td class="mono">{{ inv.token.slice(0, 10) }}…</td>
           <td>
             <span v-if="inv.label">{{ inv.label }}</span>
-            <span v-else class="dim">(sin alias)</span>
+            <span v-else class="dim">{{ t('admin.invites.noAlias') }}</span>
           </td>
-          <td class="dim">hace {{ formatAgo(inv.created_at) }}</td>
+          <td class="dim">{{ t('admin.invites.ago', { time: formatAgo(inv.created_at) }) }}</td>
           <td class="row-actions">
-            <Btn variant="ghost" size="sm" @click="copyInvite(inv.url)">copiar URL</Btn>
-            <Btn variant="danger" size="sm" @click="revokeInvite(inv.token)">revocar</Btn>
+            <Btn variant="ghost" size="sm" @click="copyInvite(inv.url)">{{ t('admin.invites.actionCopy') }}</Btn>
+            <Btn variant="danger" size="sm" @click="revokeInvite(inv.token)">{{ t('admin.invites.actionRevoke') }}</Btn>
           </td>
         </tr>
       </tbody>
@@ -97,8 +99,8 @@ async function revokeInvite(token: string) {
     <EmptyState
       v-else
       :icon="Mail"
-      title="Sin invitaciones pendientes"
-      message="Genere un enlace privilegiado para que un colaborador externo abra una sesión con permisos elevados."
+      :title="t('admin.invites.emptyTitle')"
+      :message="t('admin.invites.emptyMessage')"
     />
   </Card>
 </template>

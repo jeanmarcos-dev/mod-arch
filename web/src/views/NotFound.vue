@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { ArrowLeft, LogIn } from '@lucide/vue';
 
+const { t } = useI18n();
 const route = useRoute();
 </script>
 
@@ -10,10 +12,10 @@ const route = useRoute();
     <div class="card">
       <h1>404</h1>
       <p class="path">{{ route.fullPath }}</p>
-      <p class="hint">La página que buscaba no existe.</p>
+      <p class="hint">{{ t('notFound.hint') }}</p>
       <div class="links">
-        <a href="/"><ArrowLeft :size="12" :stroke-width="2" /><span>ir al simulador</span></a>
-        <a href="/login"><LogIn :size="12" :stroke-width="2" /><span>iniciar sesión</span></a>
+        <a href="/"><ArrowLeft :size="12" :stroke-width="2" /><span>{{ t('notFound.goSim') }}</span></a>
+        <a href="/login"><LogIn :size="12" :stroke-width="2" /><span>{{ t('notFound.goLogin') }}</span></a>
       </div>
     </div>
   </div>

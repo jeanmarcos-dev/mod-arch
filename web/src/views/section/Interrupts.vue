@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useCpuStore, type CpuEvent } from '../../stores/cpu';
 import { usePreferencesStore } from '../../stores/preferences';
 import ModeFlipNarrator from '../../components/narrators/ModeFlipNarrator.vue';
 import InterruptNarrator from '../../components/narrators/InterruptNarrator.vue';
 import Term from '../../components/glossary/Term.vue';
 
+const { t } = useI18n();
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
 
@@ -16,23 +18,29 @@ const modeKey = computed<'user' | 'kernel'>(() => (cpu.mode === 3 ? 'user' : 'ke
 // IDT entries. We hard-code the well-known vectors the simulator implements
 // so the table is meaningful even before a program runs. Each entry remembers
 // the timestamp of its last activation so the row pulses briefly.
+type IdtNameKey = 'divide' | 'gp' | 'pageFault' | 'irqTimer' | 'irqKeyboard' | 'syscall' | 'mutexSem';
+
 interface IDTRow {
   vec: number;
   hex: string;
-  name: string;
+  nameKey: IdtNameKey;
   source: 'HW' | 'SW' | 'fault';
   lastFired: number;
 }
 
 const idt = reactive<IDTRow[]>([
-  { vec: 0x00, hex: '0x00', name: 'Divide error',       source: 'fault', lastFired: 0 },
-  { vec: 0x0d, hex: '0x0D', name: 'General protection', source: 'fault', lastFired: 0 },
-  { vec: 0x0e, hex: '0x0E', name: 'Page fault',         source: 'fault', lastFired: 0 },
-  { vec: 0x20, hex: '0x20', name: 'IRQ timer',          source: 'HW',    lastFired: 0 },
-  { vec: 0x21, hex: '0x21', name: 'IRQ keyboard',       source: 'HW',    lastFired: 0 },
-  { vec: 0x80, hex: '0x80', name: 'System call',        source: 'SW',    lastFired: 0 },
-  { vec: 0x81, hex: '0x81', name: 'Mutex/semáforo',     source: 'SW',    lastFired: 0 },
+  { vec: 0x00, hex: '0x00', nameKey: 'divide',      source: 'fault', lastFired: 0 },
+  { vec: 0x0d, hex: '0x0D', nameKey: 'gp',          source: 'fault', lastFired: 0 },
+  { vec: 0x0e, hex: '0x0E', nameKey: 'pageFault',   source: 'fault', lastFired: 0 },
+  { vec: 0x20, hex: '0x20', nameKey: 'irqTimer',    source: 'HW',    lastFired: 0 },
+  { vec: 0x21, hex: '0x21', nameKey: 'irqKeyboard', source: 'HW',    lastFired: 0 },
+  { vec: 0x80, hex: '0x80', nameKey: 'syscall',     source: 'SW',    lastFired: 0 },
+  { vec: 0x81, hex: '0x81', nameKey: 'mutexSem',    source: 'SW',    lastFired: 0 },
 ]);
+
+function idtName(r: IDTRow): string {
+  return t(`sections.interrupts.idtNames.${r.nameKey}`);
+}
 
 // Recent mode switches feed. We could parse the log but a structured ring
 // buffer is cheaper and keeps the markup clean. coreId tracks which core
@@ -94,9 +102,9 @@ function rowActive(r: IDTRow): boolean {
 
 function timeAgo(ts: number): string {
   const diff = Math.max(0, now.value - ts);
-  if (diff < 1000) return 'ahora';
-  if (diff < 60_000) return `${Math.floor(diff / 1000)}s`;
-  return `${Math.floor(diff / 60_000)}m`;
+  if (diff < 1000) return t('sections.shared.timeAgoNow');
+  if (diff < 60_000) return t('sections.shared.timeAgoSec', { n: Math.floor(diff / 1000) });
+  return t('sections.shared.timeAgoMin', { n: Math.floor(diff / 60_000) });
 }
 
 function hex(n: number, width = 8): string {
@@ -124,7 +132,7 @@ function activeFrame(coreId: number) {
 const narratorHint = computed(() =>
   prefs.narratorsEnabled
     ? null
-    : 'Active los narradores en Preferencias para ver el banner de transición.',
+    : t('sections.interrupts.narratorHint'),
 );
 </script>
 
@@ -139,7 +147,7 @@ const narratorHint = computed(() =>
           :class="['ints-page__mode-chip', `ints-page__mode-chip--${modeKey}`]"
           data-narrator-anchor="cpu"
         >
-          <span class="ints-page__mode-caption">CPU en</span>
+          <span class="ints-page__mode-caption">{{ t('sections.interrupts.cpuIn') }}</span>
           <Term
             :term="cpu.mode === 3 ? 'USER MODE (PL3)' : 'KERNEL MODE (PL0)'"
             mode="label"
@@ -148,18 +156,9 @@ const narratorHint = computed(() =>
         </div>
         <div class="ints-page__hero-text">
           <h2 class="ints-page__title">
-            <Term term="IRQ" mode="title">Interrupciones</Term>
+            <Term term="IRQ" mode="title">{{ t('sections.interrupts.title') }}</Term>
           </h2>
-          <p class="ints-page__tagline">
-            La CPU vive en <Term term="USER MODE (PL3)"><strong>USER</strong></Term>
-            hasta que algo la fuerza a entrar al <Term term="KERNEL MODE (PL0)">kernel</Term>:
-            un <Term term="INT N" as="code">int 0x80</Term> (<Term term="Syscall">syscall</Term>),
-            el <Term term="IRQ 0x20">timer</Term> del PIT, una
-            <Term term="IRQ 0x21">tecla</Term> o una
-            <Term term="Page fault">falla</Term>.
-            Cargue un programa con syscalls (hello, syscall_test, sleep) y avance paso a paso
-            para ver el salto.
-          </p>
+          <p class="ints-page__tagline">{{ t('sections.interrupts.tagline') }}</p>
           <p v-if="narratorHint" class="ints-page__hint">{{ narratorHint }}</p>
         </div>
       </header>
@@ -167,18 +166,18 @@ const narratorHint = computed(() =>
       <div class="ints-page__grid">
         <section class="ints-page__panel">
           <header class="ints-page__panel-head">
-            <h3><Term term="IDT" mode="title">IDT</Term></h3>
-            <span class="ints-page__panel-hint">Tabla de descriptores de interrupción</span>
+            <h3><Term term="IDT" mode="title">{{ t('sections.interrupts.idtTitle') }}</Term></h3>
+            <span class="ints-page__panel-hint">{{ t('sections.interrupts.idtHint') }}</span>
           </header>
           <div class="ints-page__panel-body">
           <table class="ints-table">
             <thead>
               <tr>
-                <th><Term term="INT N" mode="label">Vec</Term></th>
-                <th>Nombre</th>
-                <th><Term term="IRQ" mode="label">Origen</Term></th>
-                <th>Handler @</th>
-                <th>Último disparo</th>
+                <th><Term term="INT N" mode="label">{{ t('sections.interrupts.colVec') }}</Term></th>
+                <th>{{ t('sections.interrupts.colName') }}</th>
+                <th><Term term="IRQ" mode="label">{{ t('sections.interrupts.colSource') }}</Term></th>
+                <th>{{ t('sections.interrupts.colHandler') }}</th>
+                <th>{{ t('sections.interrupts.colLast') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -191,7 +190,7 @@ const narratorHint = computed(() =>
                 <td class="ints-table__vec">
                   <Term :term="`IRQ ${r.hex}`" as="code">{{ r.hex }}</Term>
                 </td>
-                <td>{{ r.name }}</td>
+                <td>{{ idtName(r) }}</td>
                 <td>
                   <span :class="['ints-table__src', `ints-table__src--${r.source.toLowerCase()}`]">
                     {{ r.source }}
@@ -201,7 +200,7 @@ const narratorHint = computed(() =>
                   <template v-if="handlerHitForRow(r)">
                     <code
                       class="ints-table__handler-addr"
-                      :title="`Salto del CPU a la dirección del handler. Disparado por C${handlerHitForRow(r)!.coreId} hace ${timeAgo(handlerHitForRow(r)!.ts)}.`"
+                      :title="t('sections.interrupts.handlerTooltip', { core: handlerHitForRow(r)!.coreId, time: timeAgo(handlerHitForRow(r)!.ts) })"
                     >{{ hex(handlerHitForRow(r)!.handler) }}</code>
                     <span v-if="cpu.numCores > 1" class="ints-table__handler-core">C{{ handlerHitForRow(r)!.coreId }}</span>
                   </template>
@@ -218,17 +217,14 @@ const narratorHint = computed(() =>
 
         <section class="ints-page__panel">
           <header class="ints-page__panel-head">
-            <h3><Term term="Mode switch" mode="title">Últimas transiciones</Term></h3>
-            <span class="ints-page__panel-hint">
-              <Term term="USER MODE (PL3)">USER</Term> ↔
-              <Term term="KERNEL MODE (PL0)">KERNEL</Term> en vivo
-            </span>
+            <h3><Term term="Mode switch" mode="title">{{ t('sections.interrupts.transitionsTitle') }}</Term></h3>
+            <span class="ints-page__panel-hint">{{ t('sections.interrupts.transitionsHint') }}</span>
           </header>
           <div class="ints-page__panel-body">
           <div v-if="visibleSwitches.length === 0" class="ints-feed__empty">
             {{ switches.length === 0
-              ? 'Sin transiciones aún. Avance la simulación con un programa que invoque syscalls.'
-              : 'Sin transiciones de los núcleos visibles. Active más núcleos en la SimBar para verlas.' }}
+              ? t('sections.interrupts.transitionsEmpty')
+              : t('sections.interrupts.transitionsEmptyVisible') }}
           </div>
           <ol v-else :class="['ints-feed', { 'ints-feed--multi': cpu.numCores > 1 }]">
             <li v-for="s in visibleSwitches" :key="s.id" class="ints-feed__row">
@@ -254,12 +250,8 @@ const narratorHint = computed(() =>
 
       <section class="ints-page__panel ints-page__stacks">
         <header class="ints-page__panel-head">
-          <h3><Term term="Interrupt frame" mode="title">Stack de retorno por core</Term></h3>
-          <span class="ints-page__panel-hint">
-            Frame que la CPU pushea al kernel stack al entrar desde
-            <Term term="USER MODE (PL3)">user</Term>.
-            <Term term="IRET" as="code">iret</Term> lo restaura y vuelve a USER.
-          </span>
+          <h3><Term term="Interrupt frame" mode="title">{{ t('sections.interrupts.stackTitle') }}</Term></h3>
+          <span class="ints-page__panel-hint">{{ t('sections.interrupts.stackHint') }}</span>
         </header>
         <div class="ints-stacks__grid">
           <article
@@ -271,10 +263,10 @@ const narratorHint = computed(() =>
             <header class="ints-stack__head">
               <span class="ints-stack__core">C{{ c.id }}</span>
               <template v-if="activeFrame(c.id)">
-                <span class="ints-stack__vec">Vector {{ hex(activeFrame(c.id)!.vector, 2) }}</span>
-                <span class="ints-stack__handler" :title="'Dirección del handler al que saltó el CPU.'">handler {{ hex(activeFrame(c.id)!.handler) }}</span>
+                <span class="ints-stack__vec">{{ t('sections.interrupts.stackVector', { hex: hex(activeFrame(c.id)!.vector, 2) }) }}</span>
+                <span class="ints-stack__handler" :title="t('sections.interrupts.stackHandlerHint')">{{ t('sections.interrupts.stackHandler', { hex: hex(activeFrame(c.id)!.handler) }) }}</span>
               </template>
-              <span v-else class="ints-stack__idle-tag">— sin handler activo —</span>
+              <span v-else class="ints-stack__idle-tag">{{ t('sections.interrupts.stackIdleTag') }}</span>
             </header>
             <ol v-if="activeFrame(c.id)" class="ints-stack__rows">
               <li class="ints-stack__row" data-stack-slot="eip">
@@ -294,9 +286,7 @@ const narratorHint = computed(() =>
               </li>
             </ol>
             <div v-else class="ints-stack__empty">
-              El núcleo está en
-              <Term :term="c.mode === 3 ? 'USER MODE (PL3)' : 'KERNEL MODE (PL0)'">{{ c.mode === 3 ? 'USER' : 'KERNEL' }}</Term>;
-              ningún handler corre ahora mismo.
+              {{ t('sections.interrupts.stackEmptyPrefix') }}<Term :term="c.mode === 3 ? 'USER MODE (PL3)' : 'KERNEL MODE (PL0)'">{{ c.mode === 3 ? 'USER' : 'KERNEL' }}</Term>{{ t('sections.interrupts.stackEmptySuffix') }}
             </div>
           </article>
         </div>

@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useCpuStore } from '../../stores/cpu';
 import { usePreferencesStore } from '../../stores/preferences';
+
+const { t } = useI18n();
 import { useViewerMirrorStore } from '../../stores/viewerMirror';
 import { useNarrators, type MemWrite, type MemRead } from '../../lib/narratorBus';
 import ByteFlightNarrator from '../../components/narrators/ByteFlightNarrator.vue';
@@ -292,9 +295,9 @@ cpu.subscribe((ev) => {
 
     <header class="memory-page__head">
       <div class="memory-page__title">
-        <Term term="MMU" mode="title" class="memory-page__title-main">Memoria</Term>
+        <Term term="MMU" mode="title" class="memory-page__title-main">{{ t('sections.memory.title') }}</Term>
         <span class="memory-page__title-sub">
-          Ventana <code>{{ fmtAddr(baseAddr) }}</code> · <code>{{ WND_SIZE }} B</code>
+          {{ t('sections.memory.windowLabel') }} <code>{{ fmtAddr(baseAddr) }}</code> · <code>{{ WND_SIZE }} B</code>
           <template v-if="currentRegion">
             · <span class="memory-page__title-region">{{ currentRegion.label }}</span>
             <span class="memory-page__title-perm">user {{ currentRegion.userPerm }} · kernel {{ currentRegion.kernPerm }}</span>
@@ -335,12 +338,12 @@ cpu.subscribe((ev) => {
             type="button"
             :class="['memory-page__follow', { 'memory-page__follow--on': autoFollow }]"
             :title="autoFollow
-              ? 'Autofoco activo — la ventana de memoria salta sola al lugar donde el simulador escribe o lee. Toque para fijarla.'
-              : 'Autofoco — toque para que la ventana de memoria salte sola al lugar donde el simulador escribe o lee.'"
+              ? t('sections.memory.autofocusOnHint')
+              : t('sections.memory.autofocusOffHint')"
             @click="autoFollow = !autoFollow"
           >
             <component :is="autoFollow ? Target : PinIcon" :size="13" :stroke-width="2" />
-            <span>Autofoco</span>
+            <span>{{ t('sections.memory.autofocusLabel') }}</span>
           </button>
         </div>
       </div>
@@ -349,9 +352,9 @@ cpu.subscribe((ev) => {
     <div
       v-if="!prefs.narratorsEnabled"
       class="memory-page__hint"
-      title="Active 'Narradores visuales' en Preferencias para ver los bytes viajando"
+      :title="t('sections.memory.narratorsOffTitle')"
     >
-      Narradores apagados — actívelos en Preferencias para ver los bytes viajando.
+      {{ t('sections.memory.narratorsOff') }}
     </div>
 
     <div class="memory-page__body">
