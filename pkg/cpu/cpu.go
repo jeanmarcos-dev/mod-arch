@@ -21,8 +21,14 @@ type Registers struct {
 }
 
 // EFLAGS bits used by the subset.
+//
+// AF (bit 4), DF (bit 10) and TF (bit 8) are intentionally omitted: the demo
+// has no BCD adjustments (DAA/DAS need AF), no string ops (MOVSB/LODSB/STOSB
+// need DF), and no single-step debugging (TF). PF is modeled because the Jcc
+// pair JP/JNP reads it.
 const (
 	FlagCF uint32 = 1 << 0  // Carry
+	FlagPF uint32 = 1 << 2  // Parity (even number of 1 bits in low byte)
 	FlagZF uint32 = 1 << 6  // Zero
 	FlagSF uint32 = 1 << 7  // Sign
 	FlagIF uint32 = 1 << 9  // Interrupt enable
@@ -41,6 +47,13 @@ const (
 // selectors carry RPL=3 (0b11) hardcoded in the low bits, kernel selectors carry
 // RPL=0. That convention is what lets the CPU tell, when popping a CS from the
 // kernel stack, whether it is returning to user or not.
+//
+// There is no actual GDT in memory. Real x86 looks up each loaded selector in
+// a descriptor table to read its base (32 bits), limit (20 bits), DPL (2 bits)
+// and type flags. Here selectors are constants only — the effective base is 0
+// (flat model), the limit is the full address space, and DPL checks collapse
+// to comparing CPL against the Mode field. See doc.go ("NOT implemented") for
+// the rationale.
 const (
 	SelKernelCode uint16 = 0x08 // GDT idx 1, RPL 0
 	SelKernelData uint16 = 0x10 // GDT idx 2, RPL 0
@@ -253,14 +266,19 @@ func (c *CPU) Step() ([]Event, error) {
 
 	if err := c.execNext(); err != nil {
 		// A memory violation MUST be converted by the HW (MMU) into a page
-		// fault: emit the event, dispatch IRQ 0x0E with source "fault", and
-		// return without error (the kernel handles cleanup).
+		// fault: synthesize the x86 #PF error code, expose it (and CR2)
+		// through the mirror addresses, emit the event, dispatch IRQ 0x0E
+		// with source "fault", and return without error (the kernel handles
+		// cleanup).
 		if mf, ok := errors.AsType[*MemFault](err); ok {
+			errorCode := faultErrorCode(mf)
+			writeFaultMirror(c.Mem, mf.Addr, errorCode)
 			c.Emit(EventPageFault{
 				CoreID:     c.CoreID,
 				Addr:       mf.Addr,
 				Mode:       mf.Mode,
 				PermNeeded: mf.PermNeeded,
+				ErrorCode:  errorCode,
 			})
 			if disp := c.dispatchFault(0x0E); disp != nil {
 				return c.DrainEvents(), disp

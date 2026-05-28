@@ -444,6 +444,176 @@ func TestISA_JE_NotTaken_NoEIPRegWrite(t *testing.T) {
 	}
 }
 
+func TestISA_CLI_ClearsIFInKernel(t *testing.T) {
+	c := newTestCPU(t, []byte{0xFA, 0xF4})
+	c.R.EFLAGS = FlagIF
+	if _, err := c.Step(); err != nil {
+		t.Fatalf("step CLI: %v", err)
+	}
+	if c.FlagOn(FlagIF) {
+		t.Error("IF should be cleared by CLI in PL0")
+	}
+}
+
+func TestISA_STI_SetsIFInKernel(t *testing.T) {
+	c := newTestCPU(t, []byte{0xFB, 0xF4})
+	c.R.EFLAGS = 0
+	if _, err := c.Step(); err != nil {
+		t.Fatalf("step STI: %v", err)
+	}
+	if !c.FlagOn(FlagIF) {
+		t.Error("IF should be set by STI in PL0")
+	}
+}
+
+func TestISA_CLI_InUserRaisesGP(t *testing.T) {
+	c := newTestCPU(t, []byte{0xFA, 0xF4})
+	c.Mode = ModeUser
+	c.R.CS = SelUserCode
+	c.R.DS = SelUserData
+	c.R.SS = SelUserData
+	c.SavedUserESP = c.R.ESP
+	c.SavedUserSS = c.R.SS
+
+	const gpHandlerAddr = AddrKernelText + 0x60
+	installHandler(t, c, 0x0D, gpHandlerAddr, []byte{0xCF})
+
+	preEIP := c.R.EIP
+	evs, err := c.Step()
+	if err != nil {
+		t.Fatalf("step CLI in PL3: %v", err)
+	}
+	if c.Mode != ModeKernel {
+		t.Errorf("mode after CLI in PL3: PL%d, want PL0", c.Mode)
+	}
+	if c.R.EIP != gpHandlerAddr {
+		t.Errorf("EIP after #GP: 0x%X, want 0x%X (handler)", c.R.EIP, gpHandlerAddr)
+	}
+	fire := findIRQFire(evs)
+	if fire == nil {
+		t.Fatal("no IRQFire emitted")
+	}
+	if fire.Vector != 0x0D {
+		t.Errorf("vector = 0x%X, want 0x0D (#GP)", fire.Vector)
+	}
+	if fire.SavedEIP != preEIP {
+		t.Errorf("saved_eip = 0x%X, want 0x%X (CLI offset, not next byte)",
+			fire.SavedEIP, preEIP)
+	}
+}
+
+func TestISA_STI_InUserRaisesGP(t *testing.T) {
+	c := newTestCPU(t, []byte{0xFB, 0xF4})
+	c.Mode = ModeUser
+	c.R.CS = SelUserCode
+	c.R.DS = SelUserData
+	c.R.SS = SelUserData
+	c.SavedUserESP = c.R.ESP
+	c.SavedUserSS = c.R.SS
+
+	const gpHandlerAddr = AddrKernelText + 0x60
+	installHandler(t, c, 0x0D, gpHandlerAddr, []byte{0xCF})
+
+	if _, err := c.Step(); err != nil {
+		t.Fatalf("step STI in PL3: %v", err)
+	}
+	if c.Mode != ModeKernel {
+		t.Errorf("mode after STI in PL3: PL%d, want PL0", c.Mode)
+	}
+}
+
+// TestISA_Jcc_FullTable exercises each conditional short jump (0x70..0x7F) by
+// preloading EFLAGS with the exact mask the SDM lists for that opcode and
+// verifying both directions (condition true -> taken, condition false -> not
+// taken). The flag combos are hand-picked: e.g. for JL we need SF != OF, so the
+// "taken" row sets SF only and the "not taken" row sets OF only.
+func TestISA_Jcc_FullTable(t *testing.T) {
+	tests := []struct {
+		name     string
+		opcode   byte
+		takeEFL  uint32 // flags that should cause the jump
+		skipEFL  uint32 // flags that should NOT cause the jump
+	}{
+		{"JO", 0x70, FlagOF, 0},
+		{"JNO", 0x71, 0, FlagOF},
+		{"JB", 0x72, FlagCF, 0},
+		{"JAE", 0x73, 0, FlagCF},
+		{"JE", 0x74, FlagZF, 0},
+		{"JNE", 0x75, 0, FlagZF},
+		{"JBE_cf", 0x76, FlagCF, 0},
+		{"JBE_zf", 0x76, FlagZF, 0},
+		{"JA", 0x77, 0, FlagCF},
+		{"JS", 0x78, FlagSF, 0},
+		{"JNS", 0x79, 0, FlagSF},
+		{"JP", 0x7A, FlagPF, 0},
+		{"JNP", 0x7B, 0, FlagPF},
+		{"JL", 0x7C, FlagSF, FlagSF | FlagOF},  // SF!=OF taken; SF==OF not
+		{"JGE", 0x7D, FlagSF | FlagOF, FlagSF}, // SF==OF taken; SF!=OF not
+		{"JLE_zf", 0x7E, FlagZF, 0},
+		{"JLE_sf_xor_of", 0x7E, FlagSF, FlagSF | FlagOF},
+		{"JG", 0x7F, FlagSF | FlagOF, FlagSF},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name+"_taken", func(t *testing.T) {
+			c := newTestCPU(t, []byte{tc.opcode, 0x05, 0xF4})
+			c.R.EFLAGS = tc.takeEFL
+			if _, err := c.Step(); err != nil {
+				t.Fatalf("step: %v", err)
+			}
+			want := AddrUserBase + 2 + 0x05
+			if c.R.EIP != want {
+				t.Errorf("EIP = 0x%X, want 0x%X (taken)", c.R.EIP, want)
+			}
+		})
+		t.Run(tc.name+"_not_taken", func(t *testing.T) {
+			c := newTestCPU(t, []byte{tc.opcode, 0x05, 0xF4})
+			c.R.EFLAGS = tc.skipEFL
+			if _, err := c.Step(); err != nil {
+				t.Fatalf("step: %v", err)
+			}
+			want := uint32(AddrUserBase + 2)
+			if c.R.EIP != want {
+				t.Errorf("EIP = 0x%X, want 0x%X (fall through)", c.R.EIP, want)
+			}
+		})
+	}
+}
+
+// TestISA_PF_OnXOR verifies the new PF flag is set when a result's low byte
+// has even parity. XOR EAX, EAX -> result 0 -> 0 ones (even) -> PF=1.
+func TestISA_PF_OnXOR(t *testing.T) {
+	c := newTestCPU(t, []byte{
+		0xB8, 0x00, 0x00, 0x00, 0x00,
+		0x31, 0xC0,
+		0xF4,
+	})
+	for !c.Halted {
+		if _, err := c.Step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !c.FlagOn(FlagPF) {
+		t.Error("PF should be set (low byte 0 has even parity)")
+	}
+}
+
+func TestISA_PF_OddParityClear(t *testing.T) {
+	// INC EAX from 0 -> 1: low byte 0x01 has 1 one (odd) -> PF=0.
+	c := newTestCPU(t, []byte{
+		0xB8, 0x00, 0x00, 0x00, 0x00,
+		0x40,
+		0xF4,
+	})
+	for !c.Halted {
+		if _, err := c.Step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c.FlagOn(FlagPF) {
+		t.Error("PF should be clear (low byte 0x01 has odd parity)")
+	}
+}
+
 func TestISA_UnknownOpcodeErrors(t *testing.T) {
 	// 0xFE is not implemented.
 	c := newTestCPU(t, []byte{0xFE, 0xF4})

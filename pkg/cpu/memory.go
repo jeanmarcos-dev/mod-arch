@@ -60,6 +60,15 @@ const (
 	AddrIDT        uint32 = 0x100000 // base of the IDT (256 * 4 = 1024 bytes)
 	AddrKernelText uint32 = 0x101000 // where the kernel handlers start
 	KernelStackTop uint32 = 0x1FFFF0 // top of the kernel stack; grows downward
+
+	// Page-fault mirrors. Real x86 puts the faulting address in CR2 and pushes
+	// the error code onto the kernel stack right after EIP. The simulator has
+	// no control registers and avoids the stack push (to keep IRET frames
+	// uniform across vectors); a handler reads these two words instead. They
+	// live in the gap between the IDT (0x100000..0x1003FF) and the handlers
+	// (0x101000+), inside the kernel-only region.
+	AddrCR2Mirror     uint32 = 0x100400 // faulting linear address
+	AddrErrCodeMirror uint32 = 0x100404 // P/W/U/I-D bits (see EventPageFault doc)
 )
 
 // DefaultMemSize is the default physical memory size: 4 MB.
@@ -266,6 +275,33 @@ func (m *Memory) Write32(cpu *CPU, addr uint32, val uint32, mode uint8) error {
 		cpu.Emit(EventMemWrite{CoreID: cpu.CoreID, Addr: addr, Old: old, New: val, Size: 4})
 	}
 	return nil
+}
+
+// faultErrorCode synthesizes the 32-bit value that real x86 would push after
+// EIP on a #PF. P/W/U/I-D bits follow Intel SDM Vol 3 §6.15.
+func faultErrorCode(mf *MemFault) uint32 {
+	var code uint32
+	if mf.PermNeeded != "" {
+		code |= 0x1 // P: a region exists, this is a protection violation
+	}
+	if mf.PermNeeded == "W" {
+		code |= 0x2 // W
+	}
+	if mf.Mode == ModeUser {
+		code |= 0x4 // U
+	}
+	if mf.PermNeeded == "X" {
+		code |= 0x10 // I-D
+	}
+	return code
+}
+
+// writeFaultMirror updates the CR2 and error-code mirror words. The write
+// bypasses permission checks because the MMU itself is doing it before any
+// handler runs (equivalent to the CPU loading CR2 in real x86).
+func writeFaultMirror(m *Memory, faultAddr, errorCode uint32) {
+	binary.LittleEndian.PutUint32(m.Bytes[AddrCR2Mirror:], faultAddr)
+	binary.LittleEndian.PutUint32(m.Bytes[AddrErrCodeMirror:], errorCode)
 }
 
 // LoadBytes copies a byte slice to addr without checking permissions. It is

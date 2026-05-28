@@ -219,6 +219,12 @@ func (k *Kernel) resolveCloneMemory(parent *PCB, parentMem *AddressSpace, childS
 		codeBase := processCodeBase(childSlot)
 		stackTop := processStackTop(childSlot)
 		stackBase := stackTop + 0x10 - ProcStackSize
+		// Eager copy of the parent's code and stack. Linux fork uses
+		// copy-on-write (clone shares the page tables and only duplicates a
+		// page on first write); we copy up front because there is no paging
+		// here and the page-table walk is exactly what the demo skips. The
+		// behavior visible to user code is identical — only the cost differs.
+		//
 		// Zero the child's new code region and copy the parent's bytes
 		// into it. The rest stays zero so stale data from a previous
 		// incarnation cannot leak in.

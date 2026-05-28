@@ -108,11 +108,25 @@ func (EventIRQFire) Tag() string { return "irq_fire" }
 // EventPageFault is emitted when a memory access violates the region's
 // permissions. Unlike a failed mem_read/mem_write, this event triggers
 // INT 0x0E and may cause the kernel to kill the process.
+//
+// ErrorCode mirrors the 32-bit value that real x86 hardware pushes onto the
+// kernel stack after EIP. The bits follow Intel SDM Vol 3 §6.15:
+//
+//	bit 0 P    1 = page-level protection violation, 0 = no region present
+//	bit 1 W    1 = write access, 0 = read
+//	bit 2 U    1 = fault from PL3, 0 = from PL0
+//	bit 4 I-D  1 = instruction fetch
+//
+// The simulator does not push the error code onto the stack (that would
+// require every fault handler to manage an asymmetric frame layout); instead
+// it writes it to AddrErrCodeMirror so a handler can read it with a plain
+// `mov eax, [AddrErrCodeMirror]`. CR2 (faulting address) goes to AddrCR2Mirror.
 type EventPageFault struct {
 	CoreID     int    `json:"core_id"`
 	Addr       uint32 `json:"addr"`
 	Mode       uint8  `json:"mode"`
 	PermNeeded string `json:"perm_needed"` // "R", "W", "X"
+	ErrorCode  uint32 `json:"error_code"`
 }
 
 // Tag returns the event tag.

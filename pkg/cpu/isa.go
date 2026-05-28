@@ -3,6 +3,7 @@ package cpu
 import (
 	"encoding/binary"
 	"fmt"
+	"math/bits"
 )
 
 // regNames maps indices 0-7 of the ModR/M reg/rm fields (and of the +rd embedded
@@ -110,6 +111,8 @@ const (
 func (c *CPU) updateArithFlags(op arithOp, a, b, result uint32) {
 	c.FlagSet(FlagZF, result == 0)
 	c.FlagSet(FlagSF, result&0x80000000 != 0)
+	// PF reflects the parity of the low 8 bits of the result (even -> 1).
+	c.FlagSet(FlagPF, bits.OnesCount8(uint8(result))%2 == 0)
 	switch op {
 	case opADD:
 		c.FlagSet(FlagCF, result < a)
@@ -299,29 +302,16 @@ func execInstruction(c *CPU) error {
 		c.updateArithFlags(op, dst, imm, result)
 
 	// Short relative jumps (1-byte signed offset)
-	//   EB rel8   JMP
-	//   74 rel8   JE / JZ   (taken when ZF=1)
-	//   75 rel8   JNE / JNZ (taken when ZF=0)
-	case opcode == 0xEB || opcode == 0x74 || opcode == 0x75:
+	//   EB         JMP rel8 (unconditional)
+	//   70..7F     Jcc rel8 (full Intel set: JO/JNO, JB/JAE, JE/JNE, JBE/JA,
+	//              JS/JNS, JP/JNP, JL/JGE, JLE/JG)
+	case opcode == 0xEB || (opcode >= 0x70 && opcode <= 0x7F):
 		off, err := c.fetch8()
 		if err != nil {
 			return err
 		}
 		rel := int32(int8(off))
-		var mnem string
-		var take bool
-		switch opcode {
-		case 0xEB:
-			mnem = "JMP"
-			take = true
-		case 0x74:
-			mnem = "JE"
-			take = c.FlagOn(FlagZF)
-		case 0x75:
-			mnem = "JNE"
-			take = !c.FlagOn(FlagZF)
-		}
-		// EIP already points at the next instruction (zero offset).
+		mnem, take := branchCondition(opcode, c)
 		target := uint32(int32(c.R.EIP) + rel)
 		c.emitInstr(startEIP, fmt.Sprintf("%s 0x%X", mnem, target))
 		if take {
@@ -422,6 +412,22 @@ func execInstruction(c *CPU) error {
 	case opcode == 0x90:
 		c.emitInstr(startEIP, "NOP")
 
+	// FA  CLI  — clear IF (privileged)
+	// FB  STI  — set IF   (privileged)
+	// In real x86 both raise #GP if CPL > IOPL; here, with IOPL not modeled,
+	// the rule collapses to "user must not touch IF". PL3 attempt raises #GP
+	// with EIP rewinded to the offending opcode, just like HLT.
+	case opcode == 0xFA || opcode == 0xFB:
+		mnem := "CLI"
+		if opcode == 0xFB {
+			mnem = "STI"
+		}
+		c.emitInstr(startEIP, mnem)
+		if c.Mode == ModeUser {
+			return c.dispatchFault(0x0D)
+		}
+		c.FlagSet(FlagIF, opcode == 0xFB)
+
 	default:
 		return fmt.Errorf("opcode 0x%02X not implemented at EIP=0x%08X", opcode, startEIP)
 	}
@@ -435,6 +441,55 @@ func decodeModRM(b uint8) (mod, reg, rm uint8) {
 	reg = (b >> 3) & 0b111
 	rm = b & 0b111
 	return
+}
+
+// branchCondition decodes opcodes 0xEB / 0x70..0x7F into a mnemonic and a
+// taken/not-taken decision derived from EFLAGS. The condition table follows
+// Intel SDM Vol 1, Appendix B (Jcc) verbatim; pairs like JB/JNAE/JC are listed
+// under the canonical name only.
+func branchCondition(opcode uint8, c *CPU) (string, bool) {
+	cf := c.FlagOn(FlagCF)
+	pf := c.FlagOn(FlagPF)
+	zf := c.FlagOn(FlagZF)
+	sf := c.FlagOn(FlagSF)
+	of := c.FlagOn(FlagOF)
+	switch opcode {
+	case 0xEB:
+		return "JMP", true
+	case 0x70:
+		return "JO", of
+	case 0x71:
+		return "JNO", !of
+	case 0x72:
+		return "JB", cf
+	case 0x73:
+		return "JAE", !cf
+	case 0x74:
+		return "JE", zf
+	case 0x75:
+		return "JNE", !zf
+	case 0x76:
+		return "JBE", cf || zf
+	case 0x77:
+		return "JA", !cf && !zf
+	case 0x78:
+		return "JS", sf
+	case 0x79:
+		return "JNS", !sf
+	case 0x7A:
+		return "JP", pf
+	case 0x7B:
+		return "JNP", !pf
+	case 0x7C:
+		return "JL", sf != of
+	case 0x7D:
+		return "JGE", sf == of
+	case 0x7E:
+		return "JLE", zf || sf != of
+	case 0x7F:
+		return "JG", !zf && sf == of
+	}
+	return "", false
 }
 
 // emitInstr is a shortcut for EventInstruction that gathers the bytes read.

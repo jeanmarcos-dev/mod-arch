@@ -25,6 +25,16 @@ import "fmt"
 // The handler, now running in PL0, eventually executes `iret`, which calls
 // handleIRET and reverses everything.
 func (c *CPU) dispatchIRQ(vector uint8, source string) error {
+	// Gate DPL check. In real x86 every IDT entry has a DPL; an `INT N` from
+	// CPL=3 succeeds only if gate.DPL >= 3. We do not store per-gate DPL, so
+	// we keep an allow-list of vectors meant to be user-invocable. Anything
+	// else attempted from user space raises #GP exactly as the HW would.
+	// HW IRQs (source "HW") and CPU exceptions ("fault") bypass the check —
+	// they are CPU-generated, not user-requested.
+	if source == "SW" && c.Mode == ModeUser && !isUserInvocableVector(vector) {
+		return c.dispatchFault(0x0D)
+	}
+
 	// Read the handler from the IDT. The HW always reads it in kernel mode
 	// (the IDT lives in kernel memory and only the CPU accesses it directly).
 	idtEntryAddr := AddrIDT + uint32(vector)*4
@@ -131,7 +141,10 @@ func (c *CPU) handleIRET() error {
 
 	c.setEIP(eip)
 	c.R.CS = uint16(cs)
-	// Restored verbatim, IF included.
+	// Restored verbatim, IF included. Real x86 masks some bits when IRET drops
+	// to a lower CPL (PL3 cannot set IOPL/IF/VIF/VIP freely); we do not — the
+	// kernel is trusted to push a sane EFLAGS and no user code can craft its
+	// own IRET frame (the kernel stack is unreachable from PL3).
 	c.R.EFLAGS = eflags
 
 	if returningToUser {
@@ -167,15 +180,26 @@ func (c *CPU) popKernel() (uint32, error) {
 }
 
 // dispatchFault is the entry point for CPU-generated exceptions (page fault,
-// #GP, divide error, ...). Unlike traps (INT N) and HW IRQs — which save the
-// next EIP because the trapped instruction has already completed — faults
-// must save the EIP of the offending instruction so the kernel and the UI
-// see the actual fault site. fetch8/fetch32 have already advanced EIP past
-// the opcode by the time a fault fires; rewind it to lastInstrStart before
-// the standard dispatch captures the kernel-stack frame.
+// #GP, divide error, ...). The trap-vs-fault distinction is encoded by the
+// caller, not the vector: traps (INT N via dispatchIRQ "SW") and HW IRQs
+// ("HW") save the EIP they already advanced past, which lines up with x86's
+// "trap saves next EIP". dispatchFault rewinds EIP to lastInstrStart before
+// the standard dispatch so the kernel-stack frame points at the offending
+// byte itself — that is x86's "fault saves offending EIP" rule and is what
+// the UI relies on to highlight the right instruction.
 func (c *CPU) dispatchFault(vector uint8) error {
 	c.R.EIP = c.lastInstrStart
 	return c.dispatchIRQ(vector, "fault")
+}
+
+// isUserInvocableVector reports whether `INT N` from PL3 is allowed for the
+// given vector. It substitutes the real gate.DPL field of the IDT; vectors
+// outside this set behave as if their gate.DPL=0, raising #GP on user attempt.
+//
+//	0x80  Linux syscall convention
+//	0x81  mutex/semaphore sub-syscall used by the sync subsystem
+func isUserInvocableVector(v uint8) bool {
+	return v == 0x80 || v == 0x81
 }
 
 // causeOf maps the dispatch source to the string surfaced in EventModeSwitch.
