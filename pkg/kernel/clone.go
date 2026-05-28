@@ -143,7 +143,7 @@ func (k *Kernel) Clone(core *Core, parent *PCB, flags CloneFlags, opts cloneOpti
 	if flags&CloneThread != 0 {
 		// Sibling thread: the UI groups it under its leader (TGID) rather
 		// than tacking it on the fork tree. EventFork is suppressed in
-		// favour of the dedicated event so a panel that listens only for
+		// favor of the dedicated event so a panel that listens only for
 		// fork transitions does not draw a process-tree branch for a
 		// thread.
 		head = cpu.EventThreadCreate{

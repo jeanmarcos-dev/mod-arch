@@ -8,7 +8,10 @@ import (
 	"github.com/jeanmarcos/modos-cpu/pkg/kernel"
 )
 
-const sharedCounterAddr = 0x3FFFE0
+const (
+	sharedCounterAddr = 0x3FFFE0
+	threadCounterAddr = 0x3F0000
+)
 
 // loadDemo wires a Demo's procs into a fresh single-core kernel and triggers
 // the boot dispatch the simulator would normally run on RUN/STEP. If the
@@ -422,5 +425,94 @@ func TestSafeCounter_OnTwoCoresStillReaches400(t *testing.T) {
 	got := binary.LittleEndian.Uint32(k.Mem.Bytes[sharedCounterAddr : sharedCounterAddr+4])
 	if got != 400 {
 		t.Errorf("counter = %d, want 400 (mutex on 2 cores must still serialize)", got)
+	}
+}
+
+// runUntilDrained drives the kernel while it still has work to do. Unlike
+// runToHalt this keeps stepping when the boot core happens to halt but a
+// PCB sits on the ready queue waiting to be re-dispatched — the moment a
+// parent's wait() reaps a thread, the next Step picks the parent off
+// the queue and resumes it. Plain runToHalt would exit at the first
+// "all cores halted" check and miss that resume.
+func runUntilDrained(t *testing.T, k *kernel.Kernel, budget int) {
+	t.Helper()
+	for step := 0; step < budget && k.HasWork(); step++ {
+		if _, err := k.Step(); err != nil {
+			t.Fatalf("step %d: %v", step, err)
+		}
+	}
+	if k.HasWork() {
+		t.Fatalf("kernel still has work after %d steps", budget)
+	}
+}
+
+// TestThreadsJoin_LeaderReapsThreadAndExits drives the threads_join demo to
+// completion: the leader (PID 1) spawns one sibling thread (PID 2) via
+// sys_clone with CLONE_VM|CLONE_FILES|CLONE_THREAD, the thread writes
+// "T2 done\n" to stdout and exits with retval 123, the leader's
+// sys_waitpid reaps it and the leader exits with the reaped TID as its
+// own exit code.
+func TestThreadsJoin_LeaderReapsThreadAndExits(t *testing.T) {
+	demo := findDemo(t, "threads_join")
+	k := kernel.New(cpu.DefaultMemSize)
+	k.TimerQuantum = 8
+	loadDemo(t, k, demo)
+	runUntilDrained(t, k, 5000)
+
+	const (
+		leaderPID = 1
+		threadTID = 2
+	)
+	leader := k.Processes[leaderPID]
+	if leader == nil {
+		t.Fatal("leader (pid 1) missing from process table")
+	}
+	if leader.ExitCode != threadTID {
+		t.Errorf("leader exit code = %d, want %d (the reaped thread TID)", leader.ExitCode, threadTID)
+	}
+	if leader.TGID != leaderPID {
+		t.Errorf("leader TGID = %d, want %d (leader of its own group)", leader.TGID, leaderPID)
+	}
+
+	if _, alive := k.Processes[threadTID]; alive {
+		t.Errorf("thread pid %d still in process table — should have been reaped", threadTID)
+	}
+}
+
+// TestThreadsRace_ProducesObservableLostUpdates drives threads_race to
+// completion and verifies the counter ended in [1, 400]. A bound below 400
+// proves the race actually fired; the precise value depends on quantum vs
+// loop alignment, so the test only asserts the visible-race property.
+func TestThreadsRace_ProducesObservableLostUpdates(t *testing.T) {
+	demo := findDemo(t, "threads_race")
+	k := kernel.New(cpu.DefaultMemSize)
+	k.TimerQuantum = 8
+	loadDemo(t, k, demo)
+	runUntilDrained(t, k, 30000)
+
+	got := binary.LittleEndian.Uint32(k.Mem.Bytes[threadCounterAddr : threadCounterAddr+4])
+	if got == 0 {
+		t.Fatal("counter = 0 — neither thread ran")
+	}
+	if got > 400 {
+		t.Errorf("counter = %d, want <= 400 (cannot exceed total increments)", got)
+	}
+	t.Logf("threads_race ended at %d (max=400, lost updates=%d)", got, 400-int(got))
+}
+
+// TestThreadsSafe_AlwaysReachesFourHundred drives threads_safe and asserts
+// the counter ends at exactly 400. The mutex around the load-inc-store
+// must serialize the critical section regardless of how the scheduler
+// interleaves the two threads.
+func TestThreadsSafe_AlwaysReachesFourHundred(t *testing.T) {
+	demo := findDemo(t, "threads_safe")
+	k := kernel.New(cpu.DefaultMemSize)
+	k.TimerQuantum = 8
+	loadDemo(t, k, demo)
+	runUntilDrained(t, k, 60000)
+
+	got := binary.LittleEndian.Uint32(k.Mem.Bytes[threadCounterAddr : threadCounterAddr+4])
+	if got != 400 {
+		t.Errorf("counter = %d, want 400 (mutex must serialize the critical section)", got)
 	}
 }
