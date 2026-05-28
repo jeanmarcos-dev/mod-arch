@@ -16,6 +16,7 @@ interface MaskedConfig {
   embedder_provider: string;
   ollama_host: string;
   ollama_embed_model: string;
+  history_window_turns: number;
   gemini_api_key: string;        has_gemini_key: boolean;
   deepseek_api_key: string;      has_deepseek_key: boolean;
   groq_api_key: string;          has_groq_key: boolean;
@@ -50,6 +51,7 @@ const draft = ref({
   embedder_provider: 'ollama',
   ollama_host: 'http://localhost:11434',
   ollama_embed_model: 'bge-m3',
+  history_window_turns: 3,
   gemini_api_key: '',
   deepseek_api_key: '',
   groq_api_key: '',
@@ -80,6 +82,8 @@ async function load() {
       embedder_provider: data.config.embedder_provider || 'ollama',
       ollama_host: data.config.ollama_host || 'http://localhost:11434',
       ollama_embed_model: data.config.ollama_embed_model || 'bge-m3',
+      history_window_turns:
+        typeof data.config.history_window_turns === 'number' ? data.config.history_window_turns : 3,
       gemini_api_key: '',
       deepseek_api_key: '',
       groq_api_key: '',
@@ -108,6 +112,7 @@ async function save(reload = true) {
       embedder_provider: draft.value.embedder_provider,
       ollama_host: draft.value.ollama_host,
       ollama_embed_model: draft.value.ollama_embed_model,
+      history_window_turns: draft.value.history_window_turns,
     };
     if (draft.value.gemini_api_key)        patch.gemini_api_key = draft.value.gemini_api_key;
     if (draft.value.deepseek_api_key)      patch.deepseek_api_key = draft.value.deepseek_api_key;
@@ -236,6 +241,11 @@ onMounted(load);
             <option value="direct">Directo — responde con la solución</option>
             <option value="socratic">Socrático — responde con preguntas guiadas</option>
           </select>
+        </label>
+        <label class="field">
+          <span>Memoria conversacional (turnos)</span>
+          <input type="number" v-model.number="draft.history_window_turns" min="0" max="10" />
+          <small class="hint inline">Cantidad de turnos previos que el tutor recuerda. 0 desactiva el seguimiento y vuelve al modo por pregunta aislada.</small>
         </label>
       </div>
     </Card>

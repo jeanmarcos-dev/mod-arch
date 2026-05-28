@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Cpu, Code2, ListTree, MemoryStick, Boxes, Terminal } from '@lucide/vue';
 import { useCpuStore } from '../stores/cpu';
 import { useViewerMirrorStore } from '../stores/viewerMirror';
@@ -15,6 +16,7 @@ import PCBCopyNarrator from '../components/narrators/PCBCopyNarrator.vue';
 
 const cpu = useCpuStore();
 const mirror = useViewerMirrorStore();
+const { t } = useI18n();
 
 // Tab state lives locally as the source of truth for the user that owns the
 // tab UI. Viewers receive overrides through the focus mirror: when the host
@@ -123,12 +125,12 @@ onUnmounted(() => {
   <div :class="{ shake: cpu.faultShake }" class="root" data-pizarra-anchor="view-overview">
     <!-- Tab bar mobile-only — controla todo el layout. Sólo visible <= 768px (CSS) -->
     <nav class="mobile-tabs" :aria-hidden="!isMobile">
-      <button :class="{ active: activeMobileTab === 'cpu' }" @click="setMobileTab('cpu')" title="Registros del CPU"><Cpu :size="14" :stroke-width="2" /><span>CPU</span></button>
-      <button :class="{ active: activeMobileTab === 'code' }" @click="setMobileTab('code')" title="Código C"><Code2 :size="14" :stroke-width="2" /><span>CÓD</span></button>
-      <button :class="{ active: activeMobileTab === 'events' }" @click="setMobileTab('events')" title="Log de eventos"><ListTree :size="14" :stroke-width="2" /><span>LOG</span></button>
-      <button :class="{ active: activeMobileTab === 'memory' }" @click="setMobileTab('memory')" title="Memoria"><MemoryStick :size="14" :stroke-width="2" /><span>MEM</span></button>
-      <button :class="{ active: activeMobileTab === 'procs' }" @click="setMobileTab('procs')" title="Procesos y PCB"><Boxes :size="14" :stroke-width="2" /><span>PROC</span></button>
-      <button :class="{ active: activeMobileTab === 'console' }" @click="setMobileTab('console')" title="Consola + teclado"><Terminal :size="14" :stroke-width="2" /><span>CONS</span></button>
+      <button :class="{ active: activeMobileTab === 'cpu' }" @click="setMobileTab('cpu')" :title="t('tabs.cpuTitle')"><Cpu :size="14" :stroke-width="2" /><span>{{ t('tabs.cpu') }}</span></button>
+      <button :class="{ active: activeMobileTab === 'code' }" @click="setMobileTab('code')" :title="t('tabs.codeTitle')"><Code2 :size="14" :stroke-width="2" /><span>{{ t('tabs.cod') }}</span></button>
+      <button :class="{ active: activeMobileTab === 'events' }" @click="setMobileTab('events')" :title="t('tabs.eventsTitle')"><ListTree :size="14" :stroke-width="2" /><span>{{ t('tabs.log') }}</span></button>
+      <button :class="{ active: activeMobileTab === 'memory' }" @click="setMobileTab('memory')" :title="t('tabs.memoryTitle')"><MemoryStick :size="14" :stroke-width="2" /><span>{{ t('tabs.mem') }}</span></button>
+      <button :class="{ active: activeMobileTab === 'procs' }" @click="setMobileTab('procs')" :title="t('tabs.procsTitle')"><Boxes :size="14" :stroke-width="2" /><span>{{ t('tabs.proc') }}</span></button>
+      <button :class="{ active: activeMobileTab === 'console' }" @click="setMobileTab('console')" :title="t('tabs.consoleTitle')"><Terminal :size="14" :stroke-width="2" /><span>{{ t('tabs.cons') }}</span></button>
     </nav>
 
     <main class="layout">
@@ -139,20 +141,20 @@ onUnmounted(() => {
             class="tab"
             :class="{ active: activeMiddleTab === 'code' }"
             @click="setMiddleTab('code')"
-            title="Código fuente C de los procesos cargados. El kernel los compiló (manualmente) a binarios x86 antes de cargarlos."
-          ><Code2 :size="14" :stroke-width="2" /><span>CÓDIGO C</span></button>
+            :title="t('tabs.codeC_long')"
+          ><Code2 :size="14" :stroke-width="2" /><span>{{ t('tabs.codeC') }}</span></button>
           <button
             class="tab"
             :class="{ active: activeMiddleTab === 'events' }"
             @click="setMiddleTab('events')"
-            title="Stream cronológico de eventos del simulador: instrucciones, mode switches, syscalls, etc."
-          ><ListTree :size="14" :stroke-width="2" /><span>EVENT LOG</span></button>
+            :title="t('tabs.eventsLong')"
+          ><ListTree :size="14" :stroke-width="2" /><span>{{ t('tabs.eventLog') }}</span></button>
           <button
             class="tab"
             :class="{ active: activeMiddleTab === 'memory' }"
             @click="setMiddleTab('memory')"
-            title="Vista hex dump de la memoria física. Puede saltar al EIP, al stack, o a cualquier dirección."
-          ><MemoryStick :size="14" :stroke-width="2" /><span>MEMORIA</span></button>
+            :title="t('tabs.memoryLong')"
+          ><MemoryStick :size="14" :stroke-width="2" /><span>{{ t('tabs.memory') }}</span></button>
         </div>
         <CodeAsmSplit v-show="visible.code" />
         <EventsLog v-show="visible.events" />
@@ -173,9 +175,9 @@ onUnmounted(() => {
     <ModeFlipNarrator />
     <PCBCopyNarrator />
 
-    <div class="credit" title="Demo de Sistemas Operativos">
-      <span class="credit-tag">DEMO_SO · UCV</span>
-      <span class="credit-name">jeanmarcos Juárez</span>
+    <div class="credit" :title="t('credit.hint')">
+      <span class="credit-tag">{{ t('credit.tag') }}</span>
+      <span class="credit-name">{{ t('credit.name') }}</span>
     </div>
   </div>
 </template>

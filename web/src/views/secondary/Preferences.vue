@@ -1,95 +1,89 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n';
 import Card from '../../components/ui/Card.vue';
-import { usePreferencesStore, type Theme } from '../../stores/preferences';
+import { usePreferencesStore, type Theme, type Locale } from '../../stores/preferences';
 
 const prefs = usePreferencesStore();
+const { t } = useI18n();
 
 interface ThemeOption {
   id: Theme;
-  label: string;
-  desc: string;
-  swatch: string; // hex of the accent color, used to paint the mini preview
+  labelKey: 'amberLabel' | 'greenLabel' | 'darkLabel' | 'accesibleLabel';
+  descKey: 'amberDesc' | 'greenDesc' | 'darkDesc' | 'accesibleDesc';
+  swatch: string;
 }
 
 const themes: ThemeOption[] = [
-  {
-    id: 'amber',
-    label: 'CRT ámbar',
-    desc: 'Fósforo ámbar clásico estilo VT220.',
-    swatch: '#ffb547',
-  },
-  {
-    id: 'green',
-    label: 'CRT verde',
-    desc: 'Fósforo verde estilo VT100.',
-    swatch: '#7fff95',
-  },
-  {
-    id: 'dark',
-    label: 'Oscuro estándar',
-    desc: 'Paleta neutral estilo IDE para sesiones largas.',
-    swatch: '#58a6ff',
-  },
-  {
-    id: 'accesible',
-    label: 'Claro accesible',
-    desc: 'Alto contraste con tipografía Atkinson Hyperlegible.',
-    swatch: '#0049b0',
-  },
+  { id: 'amber', labelKey: 'amberLabel', descKey: 'amberDesc', swatch: '#ffb547' },
+  { id: 'green', labelKey: 'greenLabel', descKey: 'greenDesc', swatch: '#7fff95' },
+  { id: 'dark', labelKey: 'darkLabel', descKey: 'darkDesc', swatch: '#58a6ff' },
+  { id: 'accesible', labelKey: 'accesibleLabel', descKey: 'accesibleDesc', swatch: '#0049b0' },
+];
+
+const locales: { id: Locale; labelKey: 'es' | 'en' }[] = [
+  { id: 'es', labelKey: 'es' },
+  { id: 'en', labelKey: 'en' },
 ];
 </script>
 
 <template>
   <div class="prefs">
-    <Card title="Tema visual" :elevation="1" class="prefs__card">
-      <p class="prefs__hint">
-        El tema cambia la paleta del simulador completo: paneles, narradores,
-        gráficos y la SimBar. Los dos temas CRT conservan la tipografía retro;
-        el oscuro estándar usa sans-serif para sesiones largas y el claro
-        accesible está pensado para aulas con luz natural y baja visión.
-      </p>
+    <Card :title="t('preferences.language.title')" :elevation="1" class="prefs__card">
+      <p class="prefs__hint">{{ t('preferences.language.hint') }}</p>
+      <div class="prefs__lang-switch" role="radiogroup" :aria-label="t('preferences.language.title')">
+        <button
+          v-for="l in locales"
+          :key="l.id"
+          type="button"
+          role="radio"
+          :aria-checked="prefs.locale === l.id"
+          class="prefs__lang-pick"
+          :class="{ 'prefs__lang-pick--active': prefs.locale === l.id }"
+          @click="prefs.setLocale(l.id)"
+        >{{ t(`preferences.language.${l.labelKey}`) }}</button>
+      </div>
+    </Card>
+
+    <Card :title="t('preferences.theme.title')" :elevation="1" class="prefs__card">
+      <p class="prefs__hint">{{ t('preferences.theme.hint') }}</p>
       <div class="prefs__options">
         <button
-          v-for="t in themes"
-          :key="t.id"
+          v-for="th in themes"
+          :key="th.id"
           type="button"
           class="prefs__option prefs__option--theme"
-          :class="{ 'prefs__option--on': prefs.theme === t.id }"
-          @click="prefs.setTheme(t.id)"
+          :class="{ 'prefs__option--on': prefs.theme === th.id }"
+          @click="prefs.setTheme(th.id)"
         >
           <span class="prefs__theme-row">
-            <span class="prefs__theme-swatch" :style="{ background: t.swatch }" aria-hidden="true"></span>
-            <span class="prefs__option-label">{{ t.label }}</span>
+            <span class="prefs__theme-swatch" :style="{ background: th.swatch }" aria-hidden="true"></span>
+            <span class="prefs__option-label">{{ t(`preferences.theme.${th.labelKey}`) }}</span>
           </span>
-          <span class="prefs__option-desc">{{ t.desc }}</span>
+          <span class="prefs__option-desc">{{ t(`preferences.theme.${th.descKey}`) }}</span>
         </button>
       </div>
     </Card>
 
-    <Card title="Narradores visuales" :elevation="1" class="prefs__card">
-      <p class="prefs__hint">
-        Activa overlays animados sobre los paneles del simulador: bytes
-        viajando entre CPU y memoria, copia de PCB en cambio de contexto,
-        cambios de modo USER ↔ KERNEL. Coste de rendimiento bajo a moderado.
-      </p>
+    <Card :title="t('preferences.narrators.title')" :elevation="1" class="prefs__card">
+      <p class="prefs__hint">{{ t('preferences.narrators.hint') }}</p>
       <label class="prefs__toggle">
         <input
           type="checkbox"
           :checked="prefs.narratorsEnabled"
           @change="(ev) => (prefs.narratorsEnabled = (ev.target as HTMLInputElement).checked)"
         />
-        <span>{{ prefs.narratorsEnabled ? 'Activados' : 'Desactivados' }}</span>
+        <span>{{ prefs.narratorsEnabled ? t('preferences.narrators.on') : t('preferences.narrators.off') }}</span>
       </label>
     </Card>
 
-    <Card title="Sidebar" :elevation="1" class="prefs__card">
+    <Card :title="t('preferences.sidebar.title')" :elevation="1" class="prefs__card">
       <label class="prefs__toggle">
         <input
           type="checkbox"
           :checked="prefs.sidebarCollapsed"
           @change="prefs.toggleSidebar()"
         />
-        <span>Iniciar contraído (sólo íconos)</span>
+        <span>{{ t('preferences.sidebar.startCollapsed') }}</span>
       </label>
     </Card>
 
@@ -200,5 +194,48 @@ const themes: ThemeOption[] = [
   width: 16px;
   height: 16px;
   accent-color: var(--accent);
+}
+
+/* Segmented control for the language switch: visually distinct from the
+   large theme cards so the user reads it as a quick toggle, not a deep
+   choice. Matches the CRT button geometry from SimBar so the page hangs
+   together. */
+.prefs__lang-switch {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-0);
+  width: fit-content;
+}
+
+.prefs__lang-pick {
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  padding: 8px 22px;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  min-width: 88px;
+}
+
+.prefs__lang-pick + .prefs__lang-pick {
+  border-left: 1px solid var(--border);
+}
+
+.prefs__lang-pick:hover {
+  background: rgba(var(--accent-rgb), 0.06);
+  color: var(--text);
+}
+
+.prefs__lang-pick--active {
+  background: rgba(var(--accent-rgb), 0.18);
+  color: var(--accent);
+  text-shadow: var(--shadow-glow-amber);
 }
 </style>
