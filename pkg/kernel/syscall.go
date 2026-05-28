@@ -28,6 +28,27 @@ const (
 	SysVfork   uint32 = 190
 )
 
+// sysClone implements sys_clone(flags, child_stack, child_eip).
+//
+// Linux's real ABI exposes more arguments (parent_tid, tls, child_tid); the
+// simulator collapses them because none are observable at this layer of the
+// stack. arg3 (EDX) carries the child entry-point EIP — glibc fills it with
+// the function passed to pthread_create.
+//
+// Returns the child PID to the parent (Clone() stamps EAX=0 on the child).
+// Failure returns ^uint32(0).
+func (k *Kernel) sysClone(core *Core, flags, childStack, childEIP uint32) (uint32, []cpu.Event) {
+	parent := k.Processes[core.CurrentPID]
+	child, events, err := k.Clone(core, parent, CloneFlags(flags), cloneOptions{
+		childStackTop: childStack,
+		childEIP:      childEIP,
+	})
+	if err != nil {
+		return ^uint32(0), nil
+	}
+	return uint32(child.PID), events
+}
+
 // Standard file descriptors.
 const (
 	FdStdin  uint32 = 0
@@ -88,6 +109,11 @@ func (k *Kernel) handleSyscall(core *Core) []cpu.Event {
 			}
 			return append([]cpu.Event{syscallEv}, out...)
 		}
+	case SysClone:
+		name = "clone"
+		var subEvs []cpu.Event
+		result, subEvs = k.sysClone(core, arg1, arg2, arg3)
+		out = append(out, subEvs...)
 	case SysPipe:
 		name = "pipe"
 		var subEvs []cpu.Event

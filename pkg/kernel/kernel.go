@@ -278,6 +278,7 @@ func (k *Kernel) AddProcess(name string, code []byte) (int, error) {
 
 	codeBase := processCodeBase(pid)
 	stackTop := processStackTop(pid)
+	stackBase := stackTop + 0x10 - ProcStackSize
 
 	// Zero the region before loading to avoid leftovers from a prior program.
 	for i := codeBase; i < codeBase+ProcCodeSize; i++ {
@@ -295,7 +296,7 @@ func (k *Kernel) AddProcess(name string, code []byte) (int, error) {
 		StackTop: stackTop,
 		Core:     -1,
 		TGID:     pid,
-		memSpace: k.newMemSpace(codeBase, uint32(len(code))),
+		memSpace: k.newMemSpace(codeBase, uint32(len(code)), stackBase),
 		fdSpace:  k.newFDSpace(),
 	}
 	// Initial state: as if the process were saved right before its first
