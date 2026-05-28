@@ -9,11 +9,13 @@ import { usePreferencesStore } from '../../stores/preferences';
 // the simulator is ticking faster than the eye can resolve, so play() returns
 // null and the caller skips the animation entirely.
 //
-// When the run loop pauses (cpu.running === false) every live animation is
-// frozen mid-flight via WAAPI's Animation.pause(); resume continues from the
-// exact same frame. This is the freeze-in-the-air behavior the design calls
-// for, and it works whether the event was kept alive by a long tick interval
-// or by the user pausing midway through it.
+// When the user explicitly pauses (cpu.paused === true) every live animation
+// is frozen mid-flight via WAAPI's Animation.pause(); resume continues from
+// the exact same frame. This is the freeze-in-the-air behavior the design
+// calls for. The flag is distinct from cpu.running because the run loop also
+// stops when every core enters HALT waiting for an IRQ — that idle state
+// should let animations complete naturally, since the events they narrate
+// (PCB save, mode switch, byte flight) already happened semantically.
 
 export interface PlayOptions {
   fill?: FillMode;
@@ -59,14 +61,14 @@ export function useNarratorAnimation() {
     anim.finished
       .catch(() => { /* cancelled — still want to clear the set */ })
       .finally(() => { liveAnimations.delete(anim); });
-    if (!cpu.running) anim.pause();
+    if (cpu.paused) anim.pause();
     return anim;
   }
 
   const stopWatch = watch(
-    () => cpu.running,
-    (on) => {
-      liveAnimations.forEach((a) => (on ? a.play() : a.pause()));
+    () => cpu.paused,
+    (p) => {
+      liveAnimations.forEach((a) => (p ? a.pause() : a.play()));
     },
   );
 

@@ -128,12 +128,14 @@ function launch(kind: 'save' | 'restore', payload: PcbSave | PcbRestore) {
 }
 
 // Toggle a custom property on the root so all in-flight CSS animations honor
-// the sim's running flag. Without this the pcb-fly / pcb-trail keyframes would
-// keep racing through wall-clock even when the simulator is paused.
+// the sim's user-pause flag. We deliberately ignore !cpu.running here so that
+// idle autostop (every core HALT waiting for IRQ) lets the trail and card
+// finish their wall-clock fly-out — the PCB save they narrate has already
+// completed by then. Only explicit user pause freezes them.
 watch(
-  () => cpu.running,
-  (on) => {
-    if (root.value) root.value.style.setProperty('--anim-state', on ? 'running' : 'paused');
+  () => cpu.paused,
+  (p) => {
+    if (root.value) root.value.style.setProperty('--anim-state', p ? 'paused' : 'running');
   },
   { immediate: true },
 );

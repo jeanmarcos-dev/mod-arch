@@ -373,7 +373,7 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 	case "set_speed_mul":
 		sess.Sim.SetSpeedMul(cmd.SpeedMul)
 	case "pause":
-		sess.Sim.StopRun()
+		sess.Sim.Pause()
 	case "reset":
 		sess.Sim.Reset()
 	case "snapshot":

@@ -53,6 +53,12 @@ const en: MessageSchema = {
       pause: 'Pause continuous mode',
       reset: 'Reset kernel, processes and log',
       clear: 'Clear the event log and console, without touching the loaded program',
+      viewerLocked: 'Viewer mode: read-only',
+      runResumeFromPause: 'Resume continuous execution',
+      runDisabledDead: 'System finished: no READY processes nor pending IRQs',
+      pauseDuringIdleWait: 'Mark as paused: keys will buffer without auto-resuming the simulator',
+      stepWhileRunning: 'Pause the simulator to step one instruction at a time',
+      stepDisabledDead: 'No pending instructions to execute',
     },
     settings: {
       clockHz: 'CLOCK Hz',
@@ -90,6 +96,7 @@ const en: MessageSchema = {
       soonBadge: 'Soon',
       expandMenu: 'Expand menu',
       collapseMenu: 'Collapse menu',
+      lockedTooltip: 'Section disabled by the administrator.',
     },
     connectionBanner: {
       titleConnecting: 'Connecting to the simulator',
@@ -241,6 +248,48 @@ const en: MessageSchema = {
     },
   },
   admin: {
+    simulator: {
+      title: 'Simulator configuration',
+      intro: 'Control which screens, panels and demos the student audience can reach. Changes apply only to users with the "student" role; you and the moderators always see everything.',
+      errorLoadDemos: 'Could not load the demo catalog.',
+      routes: {
+        heading: 'Menu screens',
+        hint: 'Tick the screens students can open. Unticked ones show in the menu with a padlock and stay unreachable by direct URL.',
+        okToggled: 'Screen list updated.',
+      },
+      panels: {
+        heading: 'Simulator panels',
+        hint: 'Tick the internal panels visible when students enter the simulator. Unticked ones are replaced by a padlock placeholder.',
+        okToggled: 'Panel list updated.',
+        labels: {
+          cpu: 'CPU',
+          code: 'Code',
+          events: 'Log',
+          memory: 'Memory',
+          procs: 'Processes',
+          ipc: 'IPC',
+          console: 'Console',
+        },
+      },
+      default: {
+        heading: 'Default landing screen',
+        hint: 'Screen the student audience lands on after signing in. Only enabled screens are offered.',
+        tag: 'default',
+        okUpdated: 'Default screen updated.',
+      },
+      demos: {
+        heading: 'Available demos',
+        hint: 'Tick the demos students can load. Unticked ones show in the picker with a padlock and the server rejects them if invoked directly.',
+        searchPlaceholder: 'Search by name, description or category…',
+        reload: 'Reload catalog',
+        loading: 'Loading…',
+        colName: 'Name',
+        colDescription: 'Description',
+        colCategory: 'Category',
+        empty: 'No demos matched the filter.',
+        okToggled: 'Demo list updated.',
+      },
+    },
     login: {
       heading: 'ADMIN · MODARCH',
       hint: 'Restricted access to the administration panel.',
@@ -488,6 +537,7 @@ const en: MessageSchema = {
       adminTutorConfig: 'MODARCHI (config)',
       adminTutorConfigLong: 'MODARCHI — configuration',
       adminSecurity: 'Security',
+      adminSimulator: 'Simulator',
     },
   },
   tabs: {
@@ -613,6 +663,69 @@ const en: MessageSchema = {
       placeholderActive: 'click here and type to send keys to the simulator...',
       kbdAria: 'Simulated keyboard (each key generates IRQ 0x21)',
       coreOutTitle: 'Output from core C{core}',
+      groupHeader: 'PID {pid} · {prog}',
+      kernelLabel: 'kernel',
+      pidUnknown: '(unnamed)',
+      tag: {
+        in: '[in]',
+        out: '[out]',
+        inTitle: 'Bytes coming in: the kernel is echoing the keyboard as it copies them into the reader buffer.',
+        outTitle: 'Bytes going out: the process called sys_write and the kernel will deliver them to the monitor.',
+      },
+      actions: {
+        hexToggle: 'show bytes as hex',
+        hexHide: 'hide hex',
+        clear: 'clear screen',
+        copy: 'copy all output',
+        copied: 'output copied to clipboard',
+      },
+      kbuf: {
+        label: 'KBuf {used}/{cap}',
+        labelOver: 'KBuf {used} ⚠',
+        title: 'Kernel keyboard buffer: {used} of {cap} bytes pending.',
+        glossary: 'KeyboardBuf',
+      },
+      readers: {
+        waiting: 'awaiting read:',
+        none: '(none) — bytes will pile up in the buffer',
+        item: 'PID {pid} ({prog}) BLOCKED',
+        itemUnknown: 'PID {pid} BLOCKED',
+      },
+      narrator: {
+        title: 'NARRATOR · IRQ 0x21',
+        idle: '(press a key and follow the flow)',
+        keyAsHex: "‘{char}’ ({hex}) → IRQ 0x21",
+        kernelHandler: 'kernel.handleKeyboard()',
+        delivered: 'PID {pid} ({prog}): BLOCKED → READY',
+        buffered: 'KBuf push · no reader (queue: {n})',
+      },
+      keyCap: {
+        idle: '_',
+        ariaPressed: 'last key sent: ‘{char}’ (code {hex})',
+      },
+      specialKeys: {
+        ariaLabel: 'special keys',
+        esc: 'Esc',
+        ctrlC: 'Ctrl+C',
+        enter: '⏎ Enter',
+        backspace: '⌫ Bksp',
+        escTitle: 'send Escape (0x1B) to the simulator',
+        ctrlCTitle: 'send Ctrl+C (0x03) — used to interrupt processes',
+        enterTitle: 'send Enter (0x0A) — newline',
+        backspaceTitle: 'send Backspace (0x08)',
+      },
+    },
+    queues: {
+      title: 'QUEUES',
+      titleHint: 'Combined view of the ready queue (READY) and the wait queue (BLOCKED): which processes compete for the CPU and which are blocked waiting for a resource.\n\n— click for more info —',
+    },
+    collapse: {
+      collapse: 'Collapse panel',
+      expand: 'Expand panel',
+    },
+    resizer: {
+      label: 'Resize column',
+      rowLabel: 'Resize panels',
     },
     ipc: {
       title: 'IPC',
@@ -821,6 +934,17 @@ const en: MessageSchema = {
       copied: 'Copied',
       copy: 'Copy',
       copyError: "Couldn't copy to clipboard",
+    },
+  },
+  simulator: {
+    lockedPanel: {
+      title: 'Panel disabled',
+      body: 'The administrator has turned this panel off. Contact your instructor if you need access.',
+    },
+  },
+  programs: {
+    locked: {
+      tooltip: 'This demo has been disabled by the administrator.',
     },
   },
   sections: {

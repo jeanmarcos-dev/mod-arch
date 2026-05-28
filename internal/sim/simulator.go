@@ -95,6 +95,12 @@ type Simulator struct {
 	clientMu sync.RWMutex
 
 	running         bool
+	// userPaused tracks whether the most recent stop was an explicit user
+	// pause (cmd:pause) as opposed to an idle autostop (HasWork=false). It is
+	// emitted alongside running in state events so the UI can distinguish
+	// "frozen on purpose" from "system idle waiting for IRQ" and only freeze
+	// visual narrators in the former case.
+	userPaused      bool
 	runStop         chan struct{}
 	clockHz         int
 	speedMul        float64
@@ -253,6 +259,9 @@ func (s *Simulator) StartRun(hz int) {
 		s.clockHz = clampClockHz(hz)
 	}
 	s.running = true
+	// Starting the loop clears any sticky user-pause flag so a fresh run is
+	// always emitted as paused:false even if the previous stop was manual.
+	s.userPaused = false
 	s.runStop = make(chan struct{})
 	s.intervalChange = make(chan time.Duration, 1)
 	stop := s.runStop
@@ -271,7 +280,7 @@ func (s *Simulator) StartRun(hz int) {
 		s.events.push(e, tick)
 		s.Broadcast(EventToWire(e))
 	}
-	s.broadcastSpeedState(true, clockHz, speedMul, interval)
+	s.broadcastSpeedState(true, false, clockHz, speedMul, interval)
 
 	go func() {
 		ticker := time.NewTicker(interval)
@@ -321,6 +330,7 @@ func (s *Simulator) SetClockHz(hz int) {
 	interval := tickInterval(hz, mul)
 	ch := s.intervalChange
 	running := s.running
+	paused := s.userPaused
 	s.mu.Unlock()
 	if running && ch != nil {
 		// Non-blocking send: the loop drains one value per iteration, and a
@@ -330,7 +340,7 @@ func (s *Simulator) SetClockHz(hz int) {
 		default:
 		}
 	}
-	s.broadcastSpeedState(running, hz, mul, interval)
+	s.broadcastSpeedState(running, paused, hz, mul, interval)
 }
 
 // SetSpeedMul changes the wall-clock multiplier (float, clamped to
@@ -347,6 +357,7 @@ func (s *Simulator) SetSpeedMul(mul float64) {
 	interval := tickInterval(hz, mul)
 	ch := s.intervalChange
 	running := s.running
+	paused := s.userPaused
 	s.mu.Unlock()
 	if running && ch != nil {
 		select {
@@ -354,7 +365,7 @@ func (s *Simulator) SetSpeedMul(mul float64) {
 		default:
 		}
 	}
-	s.broadcastSpeedState(running, hz, mul, interval)
+	s.broadcastSpeedState(running, paused, hz, mul, interval)
 }
 
 // SetSpeed is the legacy entry point kept around so the WS handler keeps
@@ -368,18 +379,19 @@ func (s *Simulator) SetSpeed(hz int) {
 // rounded to an int so the wire format stays small; the legacy `hz` field is
 // the effective rate (clockHz × speedMul) so old clients still see something
 // sensible without knowing about the multiplier.
-func (s *Simulator) broadcastSpeedState(running bool, hz int, mul float64, interval time.Duration) {
+func (s *Simulator) broadcastSpeedState(running, paused bool, hz int, mul float64, interval time.Duration) {
 	tickMs := int(interval / time.Millisecond)
 	if tickMs <= 0 {
 		tickMs = 1
 	}
 	effective := float64(hz) * mul
 	state := map[string]any{
-		"type":             "state",
-		"clockHz":          hz,
-		"speedMul":         mul,
-		"tickIntervalMs":   tickMs,
-		"hz":               effective,
+		"type":           "state",
+		"clockHz":        hz,
+		"speedMul":       mul,
+		"tickIntervalMs": tickMs,
+		"hz":             effective,
+		"paused":         paused,
 	}
 	if running {
 		state["running"] = true
@@ -418,7 +430,11 @@ func clampSpeedMul(mul float64) float64 {
 	return mul
 }
 
-// StopRun stops the run loop.
+// StopRun stops the run loop. It is used both for the user-driven cmd:pause
+// path (via Pause) and the run-loop's own idle autostop (HasWork=false).
+// The emitted state event carries the current userPaused flag so the UI can
+// distinguish the two: Pause sets userPaused=true beforehand; autostop leaves
+// it at the value StartRun cleared to false.
 func (s *Simulator) StopRun() {
 	s.mu.Lock()
 	if !s.running {
@@ -429,8 +445,32 @@ func (s *Simulator) StopRun() {
 	close(s.runStop)
 	s.runStop = nil
 	s.intervalChange = nil
+	paused := s.userPaused
 	s.mu.Unlock()
-	s.Broadcast(map[string]any{"type": "state", "running": false})
+	s.Broadcast(map[string]any{"type": "state", "running": false, "paused": paused})
+}
+
+// Pause is the explicit user-initiated pause (cmd:pause). It marks the
+// simulator as user-paused and then stops the run loop; the resulting state
+// event broadcasts paused:true so the frontend freezes visual narrators
+// mid-animation. Idle autostops go through StopRun directly and keep
+// paused:false so animations complete naturally during HALT-waiting-IRQ.
+//
+// Pause can also be invoked while the simulator is already stopped — for
+// example when the user presses PAUSE during idle-wait (every core HALT,
+// blocked on a key). In that case StopRun is a no-op, but we still need
+// to broadcast the paused transition so the UI flips from "running, will
+// resume on key" to "user-paused, key buffers without resuming".
+func (s *Simulator) Pause() {
+	s.mu.Lock()
+	wasRunning := s.running
+	s.userPaused = true
+	s.mu.Unlock()
+	if wasRunning {
+		s.StopRun()
+		return
+	}
+	s.Broadcast(map[string]any{"type": "state", "running": false, "paused": true})
 }
 
 // PushKey injects the first byte of key into the kernel keyboard buffer.
@@ -439,19 +479,41 @@ func (s *Simulator) StopRun() {
 // is idle (all cores parked in HLT waiting for input), the IRQ would sit in
 // PendingIRQs forever because no ticker is firing. We drive one StepOnce
 // inline so the boot core dispatches the interrupt immediately, the blocked
-// reader wakes up, and — if the simulation had work queued — the loop
-// restarts naturally on the next user action.
+// reader wakes up, and — if the simulation has work queued and the user did
+// not explicitly pause — the loop is resumed so the wakened process keeps
+// executing without a second click on RUN. When the user did pause, the
+// byte and IRQ stay buffered and the sim remains frozen.
 func (s *Simulator) PushKey(key string) {
 	if key == "" {
 		return
 	}
 	b := key[0]
 	s.mu.Lock()
-	s.kernel.PushKey(b)
+	evs := s.kernel.PushKey(b)
+	tick := s.kernel.BootCPU().Tick
 	running := s.running
+	userPaused := s.userPaused
 	s.mu.Unlock()
-	if !running {
-		_ = s.StepOnce()
+	for _, e := range evs {
+		s.events.push(e, tick)
+		s.Broadcast(EventToWire(e))
+	}
+	if running || userPaused {
+		return
+	}
+	// Idle autostop case: step once so the IRQ dispatches immediately and
+	// the wake transitions are visible, then resume the run loop if there
+	// is still work to do (a tight readkey loop keeps HasWork true; a
+	// program that exits after reading one byte will not).
+	if err := s.StepOnce(); err != nil {
+		return
+	}
+	s.mu.Lock()
+	hasWork := s.kernel.HasWork()
+	alreadyRunning := s.running
+	s.mu.Unlock()
+	if hasWork && !alreadyRunning {
+		s.StartRun(0)
 	}
 }
 

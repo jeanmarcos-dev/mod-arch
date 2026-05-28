@@ -50,6 +50,12 @@ const es = {
       pause: 'Pausar el modo continuo',
       reset: 'Reiniciar kernel, procesos y registro de eventos',
       clear: 'Limpiar el registro de eventos y la consola, sin tocar el programa cargado',
+      viewerLocked: 'Modo visor: solo visualización',
+      runResumeFromPause: 'Reanudar la ejecución continua',
+      runDisabledDead: 'El sistema terminó: no hay procesos READY ni en espera de IRQ',
+      pauseDuringIdleWait: 'Marcar como pausado: las teclas entrarán al buffer sin reanudar el simulador',
+      stepWhileRunning: 'Pause el simulador para hacer paso a paso',
+      stepDisabledDead: 'No hay instrucciones pendientes que ejecutar',
     },
     settings: {
       clockHz: 'CLOCK Hz',
@@ -87,6 +93,7 @@ const es = {
       soonBadge: 'Próx.',
       expandMenu: 'Expandir menú',
       collapseMenu: 'Contraer menú',
+      lockedTooltip: 'Sección deshabilitada por el administrador.',
     },
     connectionBanner: {
       titleConnecting: 'Conectando con el simulador',
@@ -238,6 +245,48 @@ const es = {
     },
   },
   admin: {
+    simulator: {
+      title: 'Configuración del simulador',
+      intro: 'Desde aquí usted controla qué pantallas, paneles y demos puede ver el estudiantado. Los cambios aplican sólo a usuarios con rol "student"; usted y los moderadores siempre ven todo.',
+      errorLoadDemos: 'No se pudo cargar el catálogo de demos.',
+      routes: {
+        heading: 'Pantallas del menú',
+        hint: 'Marque las pantallas que el estudiantado podrá abrir. Las desmarcadas aparecen en el menú con un candado y no son accesibles por URL directa.',
+        okToggled: 'Lista de pantallas actualizada.',
+      },
+      panels: {
+        heading: 'Paneles del simulador',
+        hint: 'Marque los paneles internos que estarán visibles cuando el estudiantado entre al simulador. Los desmarcados se reemplazan por un marcador con candado.',
+        okToggled: 'Lista de paneles actualizada.',
+        labels: {
+          cpu: 'CPU',
+          code: 'Código',
+          events: 'Bitácora',
+          memory: 'Memoria',
+          procs: 'Procesos',
+          ipc: 'IPC',
+          console: 'Consola',
+        },
+      },
+      default: {
+        heading: 'Pantalla por defecto',
+        hint: 'Pantalla a la que aterriza el estudiantado después de iniciar sesión. Sólo se ofrecen pantallas habilitadas.',
+        tag: 'por defecto',
+        okUpdated: 'Pantalla por defecto actualizada.',
+      },
+      demos: {
+        heading: 'Demos disponibles',
+        hint: 'Marque las demos que el estudiantado podrá cargar. Las desmarcadas aparecen en el selector con un candado y son rechazadas por el servidor si se invocan directamente.',
+        searchPlaceholder: 'Buscar por nombre, descripción o categoría…',
+        reload: 'Recargar catálogo',
+        loading: 'Cargando…',
+        colName: 'Nombre',
+        colDescription: 'Descripción',
+        colCategory: 'Categoría',
+        empty: 'No se encontraron demos con esos criterios.',
+        okToggled: 'Lista de demos actualizada.',
+      },
+    },
     login: {
       heading: 'ADMIN · MODARCH',
       hint: 'Acceso restringido al panel de administración.',
@@ -485,6 +534,7 @@ const es = {
       adminTutorConfig: 'MODARCHI (config)',
       adminTutorConfigLong: 'MODARCHI — configuración',
       adminSecurity: 'Seguridad',
+      adminSimulator: 'Simulador',
     },
   },
   tabs: {
@@ -610,6 +660,69 @@ const es = {
       placeholderActive: 'haga clic aquí y escriba para enviar teclas al simulador...',
       kbdAria: 'Teclado simulado (cada tecla genera IRQ 0x21)',
       coreOutTitle: 'Salida del núcleo C{core}',
+      groupHeader: 'PID {pid} · {prog}',
+      kernelLabel: 'kernel',
+      pidUnknown: '(sin nombre)',
+      tag: {
+        in: '[in]',
+        out: '[out]',
+        inTitle: 'Bytes entrando: el kernel hace eco del teclado al copiarlos al buffer del lector.',
+        outTitle: 'Bytes saliendo: el proceso llamó sys_write y el kernel los enviará al monitor.',
+      },
+      actions: {
+        hexToggle: 'ver bytes en hex',
+        hexHide: 'ocultar hex',
+        clear: 'limpiar pantalla',
+        copy: 'copiar todo el output',
+        copied: 'output copiado al portapapeles',
+      },
+      kbuf: {
+        label: 'KBuf {used}/{cap}',
+        labelOver: 'KBuf {used} ⚠',
+        title: 'Buffer del teclado del kernel: {used} bytes pendientes de {cap}.',
+        glossary: 'KeyboardBuf',
+      },
+      readers: {
+        waiting: 'esperan lectura:',
+        none: '(ninguno) — los bytes se acumularán en el buffer',
+        item: 'PID {pid} ({prog}) BLOCKED',
+        itemUnknown: 'PID {pid} BLOCKED',
+      },
+      narrator: {
+        title: 'NARRADOR · IRQ 0x21',
+        idle: '(presione una tecla y siga el flujo)',
+        keyAsHex: "‘{char}’ ({hex}) → IRQ 0x21",
+        kernelHandler: 'kernel.handleKeyboard()',
+        delivered: 'PID {pid} ({prog}): BLOCKED → READY',
+        buffered: 'KBuf push · sin lector (cola: {n})',
+      },
+      keyCap: {
+        idle: '_',
+        ariaPressed: 'última tecla enviada: ‘{char}’ (código {hex})',
+      },
+      specialKeys: {
+        ariaLabel: 'teclas especiales',
+        esc: 'Esc',
+        ctrlC: 'Ctrl+C',
+        enter: '⏎ Enter',
+        backspace: '⌫ Borrar',
+        escTitle: 'enviar Escape (0x1B) al simulador',
+        ctrlCTitle: 'enviar Ctrl+C (0x03) — usado para interrumpir procesos',
+        enterTitle: 'enviar Enter (0x0A) — salto de línea',
+        backspaceTitle: 'enviar Backspace (0x08)',
+      },
+    },
+    queues: {
+      title: 'COLAS',
+      titleHint: 'Vista combinada de la cola de listos (READY) y la cola de espera (BLOCKED): qué procesos compiten por el CPU y cuáles están bloqueados esperando un recurso.\n\n— clic para más info —',
+    },
+    collapse: {
+      collapse: 'Colapsar panel',
+      expand: 'Expandir panel',
+    },
+    resizer: {
+      label: 'Redimensionar columna',
+      rowLabel: 'Redimensionar paneles',
     },
     ipc: {
       title: 'IPC',
@@ -818,6 +931,17 @@ const es = {
       copied: 'Copiado',
       copy: 'Copiar',
       copyError: 'No se pudo copiar al portapapeles',
+    },
+  },
+  simulator: {
+    lockedPanel: {
+      title: 'Panel deshabilitado',
+      body: 'El administrador ha desactivado este panel. Contacte con el equipo docente si necesita acceso.',
+    },
+  },
+  programs: {
+    locked: {
+      tooltip: 'Esta demo está deshabilitada por el administrador.',
     },
   },
   sections: {

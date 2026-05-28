@@ -86,6 +86,53 @@ function dockHeaderDblClick() {
 const visibleCores = computed<CoreInfo[]>(() =>
   cpu.cores.filter((c) => cpu.isCoreVisible(c.id)).slice().sort((a, b) => a.id - b.id),
 );
+
+// Idle-wait: every core HALT but at least one process is parked in I/O
+// (today only sys_read on stdin). The run loop autostops in this state to
+// avoid a spinning ticker, yet semantically the simulation is still alive —
+// a keypress wakes it up. The user must be able to PAUSE it explicitly so
+// the byte sits in the buffer instead of auto-resuming, hence the PAUSE
+// button has to stay visible here even though cpu.running is false.
+const idleWait = computed(() => !cpu.running && cpu.kbdReaders.length > 0);
+
+// Permanently dead: every core halted, ready queue empty, no I/O readers.
+// Nothing can advance until the user resets or loads a new program. We
+// disable step/run and explain why in the tooltip.
+const haltedDead = computed(
+  () => cpu.halted && cpu.readyQueue.length === 0 && cpu.kbdReaders.length === 0,
+);
+
+// Show PAUSE whenever the sim is "intended to be running": actually ticking,
+// or parked in idle-wait without an explicit user pause. RUN takes over in
+// every other case (paused, dead-halt, or never started).
+const showPause = computed(() => cpu.running || (idleWait.value && !cpu.paused));
+
+// useSimSettings returns viewer as a ComputedRef<boolean>; .value is required
+// when consumed inside another computed (only the template auto-unwraps refs).
+const stepDisabled = computed<boolean>(
+  () => viewer.value || cpu.running || haltedDead.value,
+);
+const runDisabled = computed<boolean>(() => viewer.value || haltedDead.value);
+
+const stepTooltip = computed(() => {
+  if (viewer.value) return t('simbar.tooltips.viewerLocked');
+  if (cpu.running) return t('simbar.tooltips.stepWhileRunning');
+  if (haltedDead.value) return t('simbar.tooltips.stepDisabledDead');
+  return t('simbar.tooltips.step');
+});
+
+const runTooltip = computed(() => {
+  if (viewer.value) return t('simbar.tooltips.viewerLocked');
+  if (haltedDead.value) return t('simbar.tooltips.runDisabledDead');
+  if (cpu.paused) return t('simbar.tooltips.runResumeFromPause');
+  return t('simbar.tooltips.run');
+});
+
+const pauseTooltip = computed(() => {
+  if (viewer.value) return t('simbar.tooltips.viewerLocked');
+  if (idleWait.value) return t('simbar.tooltips.pauseDuringIdleWait');
+  return t('simbar.tooltips.pause');
+});
 </script>
 
 <template>
@@ -154,16 +201,16 @@ const visibleCores = computed<CoreInfo[]>(() =>
             <button
               type="button"
               class="sim-btn sim-btn--anim-step"
-              :disabled="(cpu.halted && cpu.readyQueue.length === 0) || cpu.running || viewer"
-              :title="t('simbar.tooltips.step')"
+              :disabled="stepDisabled"
+              :title="stepTooltip"
               @click="cpu.step()"
             ><StepForward :size="14" :stroke-width="2" /><span>{{ t('simbar.buttons.step') }}</span></button>
             <button
-              v-if="!cpu.running"
+              v-if="!showPause"
               type="button"
               class="sim-btn sim-btn--anim-run"
-              :disabled="(cpu.halted && cpu.readyQueue.length === 0) || viewer"
-              :title="t('simbar.tooltips.run')"
+              :disabled="runDisabled"
+              :title="runTooltip"
               @click="cpu.run(0)"
             ><Play :size="14" :stroke-width="2" /><span>{{ t('simbar.buttons.run') }}</span></button>
             <button
@@ -171,7 +218,7 @@ const visibleCores = computed<CoreInfo[]>(() =>
               type="button"
               class="sim-btn sim-btn--anim-run is-running"
               :disabled="viewer"
-              :title="t('simbar.tooltips.pause')"
+              :title="pauseTooltip"
               @click="cpu.pause()"
             ><Pause :size="14" :stroke-width="2" /><span>{{ t('simbar.buttons.pause') }}</span></button>
             <button

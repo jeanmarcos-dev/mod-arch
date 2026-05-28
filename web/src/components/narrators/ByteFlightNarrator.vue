@@ -108,9 +108,9 @@ narrators.onMemWrite((m: MemWrite) => launch('write', m.addr, m.newValue, m.seq,
 narrators.onMemRead((m: MemRead) => launch('read', m.addr, m.value, -m.seq, m.coreId));
 
 watch(
-  () => cpu.running,
-  (on) => {
-    if (root.value) root.value.style.setProperty('--anim-state', on ? 'running' : 'paused');
+  () => cpu.paused,
+  (p) => {
+    if (root.value) root.value.style.setProperty('--anim-state', p ? 'paused' : 'running');
   },
   { immediate: true },
 );

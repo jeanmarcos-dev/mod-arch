@@ -188,6 +188,13 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     detail: 'El controlador de teclado mete el scancode/byte en un buffer y dispara esta IRQ HW. El handler del kernel lee el byte y, si hay un proceso BLOCKED esperando teclado, le entrega el byte y lo despierta. Igual que el timer, es una IRQ en sentido estricto (HW externo, asincrónica).',
   },
   {
+    term: 'KeyboardBuf',
+    category: 'Interrupciones',
+    short: 'Cola FIFO interna del kernel donde se acumulan los bytes que aún no se entregaron al proceso lector.',
+    detail: 'Cuando usted presiona una tecla, el handler de IRQ 0x21 mete el byte en el KeyboardBuf. Si hay un proceso BLOCKED esperando con sys_read(stdin), el kernel le entrega el primer byte y lo despierta. Si no hay nadie esperando, el byte se queda en el buffer hasta que alguien llame a sys_read. El panel de consola muestra "KBuf {used}/{cap}" para que usted vea cuántos bytes hay pendientes y la cola de procesos esperando lectura.',
+    aliases: ['KBuf', 'buffer del teclado', 'keyboard buffer'],
+  },
+  {
     term: 'INT 0x80 — Syscall',
     category: 'Interrupciones',
     short: 'Software interrupt: el user pide servicio al kernel (convención Linux i386).',

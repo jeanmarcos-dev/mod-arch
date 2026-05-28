@@ -14,9 +14,11 @@ const { t } = useI18n();
 // mode_switch with cause=iret it draws the reverse arc back to the CPU,
 // labelled IRET, plus three mini-arrows for each saved word.
 //
-// All visible animations last exactly one simulator tick. When cpu.running
-// flips to false, --anim-state pauses every CSS animation; the WAAPI
-// timers used to schedule removal pause through the composable.
+// All visible animations last exactly one simulator tick. When cpu.paused
+// flips to true (explicit user pause), --anim-state pauses every CSS
+// animation; the WAAPI timers used to schedule removal pause through the
+// composable. Idle autostops (HALT waiting for IRQ) do not freeze the
+// narrator — the interrupt being shown already happened.
 
 const cpu = useCpuStore();
 const narrators = useNarrators();
@@ -221,9 +223,9 @@ function spawnIretArrows(coreId: number) {
 }
 
 watch(
-  () => cpu.running,
-  (on) => {
-    if (root.value) root.value.style.setProperty('--anim-state', on ? 'running' : 'paused');
+  () => cpu.paused,
+  (p) => {
+    if (root.value) root.value.style.setProperty('--anim-state', p ? 'paused' : 'running');
   },
   { immediate: true },
 );

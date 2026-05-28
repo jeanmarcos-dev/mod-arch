@@ -1,42 +1,53 @@
 <script setup lang="ts">
-import { useCpuStore } from '../stores/cpu';
-import { computed, onUpdated, ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useCpuStore } from '../stores/cpu';
+import ConsoleMonitor from './console/ConsoleMonitor.vue';
+import KeyCap from './console/KeyCap.vue';
+import KeyboardNarrator from './console/KeyboardNarrator.vue';
 
 const cpu = useCpuStore();
-const scroller = ref<HTMLElement | null>(null);
-const keyInput = ref<HTMLInputElement | null>(null);
 const { t } = useI18n();
 
-onUpdated(() => {
-  if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight;
-});
+const keyInput = ref<HTMLInputElement | null>(null);
+const lastChar = ref('');
+const bumpSeq = ref(0);
 
-// Colorea cada chunk por PID. Hasta 4 procesos → 4 tonos verdes/cyan distintos.
-const PID_COLORS = [
-  'var(--cyan)',       // PID 0 (kernel / input echo)
-  'var(--green)',
-  'var(--cyan)',
-  'var(--yellow)',
-  'var(--amber)',
+interface SpecialKey {
+  id: 'esc' | 'ctrlC' | 'enter' | 'backspace';
+  code: string;
+}
+const SPECIAL_KEYS: SpecialKey[] = [
+  { id: 'esc',       code: '\x1B' },
+  { id: 'ctrlC',     code: '\x03' },
+  { id: 'enter',     code: '\n'   },
+  { id: 'backspace', code: '\x08' },
 ];
 
-function colorOf(pid: number) {
-  return PID_COLORS[pid] ?? 'var(--green)';
+function sendKey(ch: string) {
+  if (cpu.isViewer() || ch === '') return;
+  cpu.pushKey(ch);
+  lastChar.value = ch[0];
+  bumpSeq.value++;
 }
 
-// Show the per-core badge only when the session actually has more than one
-// core. In single-core demos every chunk is implicit C0 so the prefix would
-// be visual noise.
-const multicore = computed(() => cpu.cores.length > 1);
-
 function onKeyPress(e: KeyboardEvent) {
-  // Cada tecla individual se envía como una IRQ separada.
   if (e.key.length === 1) {
-    cpu.pushKey(e.key);
+    sendKey(e.key);
     e.preventDefault();
   } else if (e.key === 'Enter') {
-    cpu.pushKey('\n');
+    sendKey('\n');
+    e.preventDefault();
+  } else if (e.key === 'Backspace') {
+    sendKey('\x08');
+    e.preventDefault();
+  }
+}
+
+function onKeyDown(e: KeyboardEvent) {
+  // Pick up the special keys that don't fire keypress reliably across browsers.
+  if (e.key === 'Escape') {
+    sendKey('\x1B');
     e.preventDefault();
   }
 }
@@ -44,155 +55,153 @@ function onKeyPress(e: KeyboardEvent) {
 function focusInput() {
   keyInput.value?.focus();
 }
+
+const kbufOverflow = computed(() => cpu.kbdBufUsed > cpu.kbdBufCap);
+
+const kbufClass = computed(() => {
+  if (cpu.kbdBufUsed === 0) return 'is-empty';
+  if (kbufOverflow.value) return 'is-overflow';
+  const fill = cpu.kbdBufUsed / Math.max(1, cpu.kbdBufCap);
+  if (fill >= 0.95) return 'is-full';
+  if (fill >= 0.5) return 'is-warm';
+  return 'is-active';
+});
+
+const kbufLabel = computed(() => {
+  if (kbufOverflow.value) {
+    return t('panels.console.kbuf.labelOver', { used: cpu.kbdBufUsed, cap: cpu.kbdBufCap });
+  }
+  return t('panels.console.kbuf.label', { used: cpu.kbdBufUsed, cap: cpu.kbdBufCap });
+});
 </script>
 
 <template>
   <div class="panel console" data-pizarra-anchor="console-panel">
-    <div class="panel-title">
-      {{ t('panels.console.title') }}
-      <span class="kbd-hint" @click="focusInput">{{ t('panels.console.clickToType') }}</span>
+    <div class="console__io">
+      <ConsoleMonitor class="console__monitor" />
+      <KeyboardNarrator class="console__narrator" />
     </div>
-    <pre class="output" ref="scroller">
-      <template v-for="(c, i) in cpu.consoleChunks" :key="i">
-        <span
-          v-if="multicore && c.coreId !== undefined"
-          class="output__core-chip"
-          :style="{ background: `var(--core-${c.coreId % 4})`, color: `var(--core-fg)` }"
-          :title="t('panels.console.coreOutTitle', { core: c.coreId })"
-        >C{{ c.coreId }}</span>
-        <span :style="{ color: colorOf(c.pid) }">{{ c.text }}</span>
-      </template>
-      <span v-if="cpu.consoleChunks.length === 0" class="empty">{{ t('panels.console.noOutput') }}</span>
-    </pre>
-    <div class="kbd-wrap">
-      <label
-        class="kbd-label clickable-label"
-        :title="t('panels.console.kbdTooltip')"
-        @click="cpu.openGlossary('IRQ 0x21')"
-      >{{ t('panels.console.keyboardHw') }}
-        <span class="kbd-help">{{ t('panels.console.keyboardHint') }}</span>
-      </label>
-      <input
-        ref="keyInput"
-        name="kbd_input"
-        :aria-label="t('panels.console.kbdAria')"
-        class="key-input"
-        type="text"
-        inputmode="text"
-        autocomplete="off"
-        autocapitalize="none"
-        autocorrect="off"
-        spellcheck="false"
-        :disabled="cpu.isViewer()"
-        :placeholder="cpu.isViewer() ? t('panels.console.placeholderViewer') : t('panels.console.placeholderActive')"
-        @keypress="onKeyPress"
-      />
-    </div>
+
+    <section class="console__keyboard" :aria-label="t('panels.console.kbdAria')">
+      <header class="kbd__header">
+        <button
+          type="button"
+          class="kbd__title"
+          :title="t('panels.console.kbdTooltip')"
+          @click="cpu.openGlossary('IRQ 0x21')"
+        >
+          {{ t('panels.console.keyboardHw') }}
+          <span class="kbd__title-hint">{{ t('panels.console.keyboardHint') }}</span>
+        </button>
+        <button
+          type="button"
+          class="kbd__kbuf"
+          :class="kbufClass"
+          :title="t('panels.console.kbuf.title', { used: cpu.kbdBufUsed, cap: cpu.kbdBufCap })"
+          @click="cpu.openGlossary(t('panels.console.kbuf.glossary'))"
+        >{{ kbufLabel }}</button>
+      </header>
+
+      <div class="kbd__readers">
+        <span class="kbd__readers-label">{{ t('panels.console.readers.waiting') }}</span>
+        <span v-if="cpu.kbdReaders.length === 0" class="kbd__readers-none">
+          {{ t('panels.console.readers.none') }}
+        </span>
+        <ul v-else class="kbd__readers-list" role="list">
+          <li
+            v-for="r in cpu.kbdReaders"
+            :key="r.pid"
+            class="kbd__readers-item"
+            role="listitem"
+          >{{ r.prog
+            ? t('panels.console.readers.item',        { pid: r.pid, prog: r.prog })
+            : t('panels.console.readers.itemUnknown', { pid: r.pid }) }}</li>
+        </ul>
+      </div>
+
+      <div class="kbd__interactor" @click="focusInput">
+        <KeyCap :char="lastChar" :bump-seq="bumpSeq" />
+        <div class="kbd__hint">
+          <span v-if="cpu.isViewer()">{{ t('panels.console.placeholderViewer') }}</span>
+          <span v-else>{{ t('panels.console.placeholderActive') }}</span>
+        </div>
+        <div
+          class="kbd__specials"
+          :aria-label="t('panels.console.specialKeys.ariaLabel')"
+          @click.stop
+        >
+          <button
+            v-for="k in SPECIAL_KEYS"
+            :key="k.id"
+            type="button"
+            class="kbd__special"
+            :disabled="cpu.isViewer()"
+            :title="t(`panels.console.specialKeys.${k.id}Title`)"
+            @click="sendKey(k.code)"
+          >{{ t(`panels.console.specialKeys.${k.id}`) }}</button>
+        </div>
+        <input
+          ref="keyInput"
+          name="kbd_input"
+          class="kbd__input"
+          type="text"
+          inputmode="text"
+          autocomplete="off"
+          autocapitalize="none"
+          autocorrect="off"
+          spellcheck="false"
+          :disabled="cpu.isViewer()"
+          :aria-label="t('panels.console.kbdAria')"
+          @keypress="onKeyPress"
+          @keydown="onKeyDown"
+        />
+      </div>
+    </section>
   </div>
 </template>
 
 <style scoped>
 .console {
-  /* min-height en vez de height fijo: el output tenia ~56px utiles
-     (160 - title 30 - kbd-wrap 54 - padding 20). Con 240 quedan ~135. */
   min-height: 240px;
   display: flex;
   flex-direction: column;
+  gap: 6px;
 }
 
-@media (max-width: 768px) {
-  .console {
-    /* En mobile la consola ocupa todo el alto disponible (es su propia tab). */
-    height: 100%;
-    flex: 1;
-    min-height: 0;
-  }
-
-  .output {
-    font-size: 22px;
-  }
-
-  .key-input {
-    font-size: 20px;
-    padding: 12px 14px;
-    /* Mejor experiencia con el teclado nativo del celular. */
-    -webkit-appearance: none;
-    appearance: none;
-  }
-
-  .kbd-label {
-    font-size: 13px;
-  }
+.console__io {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 6px;
 }
 
-.panel-title {
+.console__monitor,
+.console__narrator {
+  min-height: 0;
+  min-width: 0;
+}
+
+.console__keyboard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kbd__header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
 }
 
-.kbd-hint {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--text-dim);
-  cursor: pointer;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.kbd-hint:hover {
-  color: var(--green);
-}
-
-.output {
-  flex: 1;
-  min-height: 110px;
-  overflow-y: auto;
-  background: var(--terminal-bg);
-  border: 1px solid var(--terminal-border);
-  padding: 8px 10px;
-  font-family: 'VT323', monospace;
-  font-size: 20px;
-  line-height: 1.2;
-  color: var(--terminal-fg);
-  white-space: pre-wrap;
-  word-break: break-all;
-  margin: 0;
-}
-
-.empty {
-  color: var(--text-muted);
-  font-style: italic;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 14px;
-}
-
-/* Compact "C0/C1/..." badge prefixed in front of each console chunk so
-   multicore output stays decipherable even when two cores interleave
-   sys_write calls. Sized small so it does not steal focus from the text. */
-.output__core-chip {
-  display: inline-block;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  padding: 0 4px;
-  margin-right: 4px;
-  border-radius: var(--radius-sm);
-  vertical-align: baseline;
-}
-
-.kbd-wrap {
-  margin-top: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.kbd-label {
+.kbd__title {
+  background: transparent;
+  border: 0;
+  padding: 0;
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 6px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: var(--green);
@@ -201,38 +210,217 @@ function focusInput() {
   cursor: pointer;
 }
 
-.kbd-label:hover {
-  color: var(--green-glow);
-  text-shadow: 0 0 6px rgba(127, 255, 170, 0.4);
+.kbd__title:hover {
+  color: var(--green-glow, var(--green));
+  text-shadow: 0 0 6px color-mix(in oklab, var(--green) 50%, transparent);
 }
 
-.kbd-help {
+.kbd__title-hint {
   font-size: 10px;
+  font-style: italic;
   color: var(--text-dim);
   letter-spacing: 0;
   text-transform: none;
-  font-style: italic;
 }
 
-.key-input {
+.kbd__kbuf {
+  background: transparent;
+  border: 1px solid var(--terminal-border);
+  border-radius: 0;
+  padding: 2px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.kbd__kbuf.is-empty {
+  color: var(--text-dim);
+}
+
+.kbd__kbuf.is-active {
+  color: var(--green);
+  border-color: var(--green);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--green) 35%, transparent);
+}
+
+.kbd__kbuf.is-warm {
+  color: var(--amber);
+  border-color: var(--amber);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--amber) 40%, transparent);
+}
+
+.kbd__kbuf.is-full,
+.kbd__kbuf.is-overflow {
+  color: var(--red, #ff6b6b);
+  border-color: var(--red, #ff6b6b);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--red, #ff6b6b) 50%, transparent);
+  animation: kbuf-pulse 700ms ease-in-out infinite alternate;
+}
+
+@keyframes kbuf-pulse {
+  from { opacity: 1; }
+  to   { opacity: 0.55; }
+}
+
+.kbd__readers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 0 2px;
+  min-height: 14px;
+}
+
+.kbd__readers-label {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.kbd__readers-none {
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.kbd__readers-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 0;
+}
+
+.kbd__readers-item {
+  color: var(--cyan);
+  background: color-mix(in oklab, var(--cyan) 12%, transparent);
+  border-radius: 0;
+  padding: 1px 6px;
+}
+
+.kbd__interactor {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   background: var(--terminal-bg);
   border: 1px solid var(--terminal-border);
-  color: var(--terminal-fg);
-  padding: 6px 10px;
-  font-family: 'VT323', monospace;
-  font-size: 18px;
-  outline: none;
+  border-radius: 0;
+  padding: 4px 8px;
+  cursor: text;
+  position: relative;
 }
 
-.key-input:focus {
+.kbd__interactor:focus-within {
   border-color: var(--green);
-  box-shadow: 0 0 6px rgba(127, 255, 170, 0.3);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--green) 40%, transparent);
 }
 
-.key-input::placeholder {
-  color: var(--text-muted);
+.kbd__hint {
+  flex: 1;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-size: 11px;
   font-style: italic;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.kbd__specials-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Input is the focus carrier — visually invisible but kept on-screen and
+   tab-accessible for keyboard users and screen readers. */
+.kbd__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: 0;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  color: transparent;
+  caret-color: transparent;
+  font-size: 1px;
+}
+
+.kbd__specials {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.kbd__special {
+  background: var(--terminal-bg);
+  border: 1px solid var(--terminal-border);
+  color: var(--text-dim);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 0;
+  cursor: pointer;
+  line-height: 1.4;
+  white-space: nowrap;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.kbd__special:hover:not(:disabled) {
+  color: var(--green);
+  border-color: var(--green);
+  background: color-mix(in oklab, var(--green) 10%, transparent);
+}
+
+.kbd__special:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.kbd__special:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .console {
+    height: 100%;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* Side-by-side stops making sense on narrow screens — stack the narrator
+     under the monitor with a fixed-height feed to keep it visible. */
+  .console__io {
+    grid-template-columns: 1fr;
+    grid-auto-rows: auto;
+  }
+
+  .kbd__hint {
+    font-size: 12px;
+  }
+
+  .kbd__interactor {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+
+  .kbd__specials {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .kbd__special {
+    font-size: 11px;
+    padding: 4px 8px;
+  }
 }
 </style>

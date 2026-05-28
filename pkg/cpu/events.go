@@ -188,14 +188,17 @@ type EventSyscall struct {
 // Tag returns the event tag.
 func (EventSyscall) Tag() string { return "syscall" }
 
-// EventConsoleOut delivers bytes written by sys_write to fd 1 (stdout). Text
-// is the UTF-8 representation of the buffer; the raw bytes are included so the
+// EventConsoleOut delivers bytes that crossed the console boundary. Text is
+// the UTF-8 representation of the buffer; the raw bytes are included so the
 // frontend may hex-dump them if it wants. CoreID identifies the core whose
-// sys_write produced the bytes — used by the console panel to tag each chunk
-// with the originating core in multicore demos.
+// activity produced the bytes — used by the console panel to tag each chunk
+// with the originating core in multicore demos. Kind distinguishes keyboard
+// echo emitted by the kernel ("in") from sys_write output produced by a
+// process ("out", the default).
 type EventConsoleOut struct {
 	CoreID int    `json:"core_id"`
 	PID    int    `json:"pid"`
+	Kind   string `json:"kind,omitempty"`
 	Bytes  []byte `json:"bytes"`
 	Text   string `json:"text"`
 }
@@ -319,6 +322,25 @@ type EventPipeOp struct {
 
 // Tag returns the event tag.
 func (EventPipeOp) Tag() string { return "pipe_op" }
+
+// KbdReader identifies a process blocked in sys_read(stdin), shown in the
+// console panel so the student can see which programs are waiting for input.
+type KbdReader struct {
+	PID  int    `json:"pid"`
+	Prog string `json:"prog"`
+}
+
+// EventKbdState exposes the keyboard driver's state to observers: how many
+// bytes are queued in KeyboardBuf and which processes are blocked waiting in
+// sys_read(stdin). Emitted whenever either side changes.
+type EventKbdState struct {
+	BufUsed int         `json:"buf_used"`
+	BufCap  int         `json:"buf_cap"`
+	Readers []KbdReader `json:"readers"`
+}
+
+// Tag returns the event tag.
+func (EventKbdState) Tag() string { return "kbd_state" }
 
 // EventSemOp summarizes every action on a kernel semaphore. Op values:
 //

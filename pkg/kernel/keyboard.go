@@ -4,6 +4,11 @@ import (
 	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
 )
 
+// KbdBufCap is the visual capacity of the keyboard buffer reported to the UI.
+// The actual KeyboardBuf slice has no hard limit; this constant only sizes
+// the "X/N" indicator so the frontend has a meaningful denominator.
+const KbdBufCap = 16
+
 // blockedReadRequest tracks a process blocked waiting for keyboard input. The
 // kernel keeps the user buffer address and requested count; when bytes arrive
 // they are delivered and the process is woken up.
@@ -11,6 +16,25 @@ type blockedReadRequest struct {
 	PID     int
 	BufAddr uint32
 	Count   uint32
+}
+
+// kbdSnapshot builds an EventKbdState describing the current buffer usage and
+// the list of processes waiting in sys_read(stdin). The reader list is
+// ordered FIFO — the head will be served by the next IRQ 0x21.
+func (k *Kernel) kbdSnapshot() cpu.EventKbdState {
+	readers := make([]cpu.KbdReader, 0, len(k.blockedReads))
+	for _, br := range k.blockedReads {
+		prog := ""
+		if pcb := k.Processes[br.PID]; pcb != nil {
+			prog = pcb.Name
+		}
+		readers = append(readers, cpu.KbdReader{PID: br.PID, Prog: prog})
+	}
+	return cpu.EventKbdState{
+		BufUsed: len(k.KeyboardBuf),
+		BufCap:  KbdBufCap,
+		Readers: readers,
+	}
 }
 
 // PushKey simulates the arrival of a byte from the keyboard.
@@ -21,10 +45,14 @@ type blockedReadRequest struct {
 // keyboard interrupts via the IO-APIC; here the BSP always handles them.
 //
 // Invoked by the server when the frontend sends cmd=push_key.
-func (k *Kernel) PushKey(b byte) {
+//
+// Returns the events that the simulator must broadcast immediately so the UI
+// sees the new buffer level even before the boot core dispatches the IRQ.
+func (k *Kernel) PushKey(b byte) []cpu.Event {
 	k.KeyboardBuf = append(k.KeyboardBuf, b)
 	boot := k.BootCPU()
 	boot.PendingIRQs = append(boot.PendingIRQs, IRQKeyboard)
+	return []cpu.Event{k.kbdSnapshot()}
 }
 
 // blockCurrent removes the running process from the given core and marks it
@@ -114,8 +142,9 @@ func (k *Kernel) handleKeyboard(core *Core) []cpu.Event {
 		cpu.EventProcessState{PID: req.PID, State: string(StateReady), Reason: "keyboard delivered"},
 		// Keyboard echoes belong to no specific core — pin them to C0 so
 		// they always pass the visibility filter and the UI never drops
-		// user input from view.
-		cpu.EventConsoleOut{CoreID: 0, PID: 0, Bytes: delivered, Text: "[in] " + string(delivered)},
+		// user input from view. Kind="in" lets the UI render an [in] tag
+		// without baking it into the actual byte stream.
+		cpu.EventConsoleOut{CoreID: 0, PID: 0, Kind: "in", Bytes: delivered, Text: string(delivered)},
 	}
 
 	// If the core was idle (no running process), switch directly to the woken
@@ -132,6 +161,7 @@ func (k *Kernel) handleKeyboard(core *Core) []cpu.Event {
 		k.Ready.Push(req.PID)
 	}
 
+	out = append(out, k.kbdSnapshot())
 	return out
 }
 
@@ -175,7 +205,7 @@ func (k *Kernel) sysRead(core *Core, fd, bufAddr, count uint32) (uint32, []cpu.E
 			_ = k.Mem.Write8(core.CPU, bufAddr+i, k.KeyboardBuf[i], cpu.ModeKernel)
 		}
 		k.KeyboardBuf = k.KeyboardBuf[n:]
-		return n, nil
+		return n, []cpu.Event{k.kbdSnapshot()}
 	}
 
 	// Slow path: enqueue at the tail of the keyboard wait queue and sleep
@@ -187,5 +217,6 @@ func (k *Kernel) sysRead(core *Core, fd, bufAddr, count uint32) (uint32, []cpu.E
 		Count:   count,
 	})
 	blockEvs := k.blockCurrent(core, "keyboard")
+	blockEvs = append(blockEvs, k.kbdSnapshot())
 	return 0, blockEvs
 }

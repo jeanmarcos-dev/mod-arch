@@ -17,8 +17,8 @@ export type CpuEvent =
   | { type: 'page_fault'; core_id: number; addr: number; mode: number; perm_needed: string }
   | { type: 'halt'; core_id: number; pid?: number }
   | { type: 'tick'; value: number }
-  | { type: 'state'; halted?: boolean; running?: boolean; hz?: number; clockHz?: number; speedMul?: number; tickIntervalMs?: number }
-  | { type: 'snapshot'; regs: Record<string, number>; segments: Record<string, number>; mode: number; halted: boolean; tick: number; timer_quantum?: number; current_pid?: number; ready_queue?: number[]; wait_queue?: WaitInfo[]; procs?: PCBInfo[]; sources?: Record<string, string>; source_maps?: Record<string, SourceLine[]>; cores?: CoreInfo[]; num_cores?: number; running?: boolean; hz?: number; clockHz?: number; speedMul?: number; tickIntervalMs?: number }
+  | { type: 'state'; halted?: boolean; running?: boolean; paused?: boolean; hz?: number; clockHz?: number; speedMul?: number; tickIntervalMs?: number }
+  | { type: 'snapshot'; regs: Record<string, number>; segments: Record<string, number>; mode: number; halted: boolean; tick: number; timer_quantum?: number; current_pid?: number; ready_queue?: number[]; wait_queue?: WaitInfo[]; procs?: PCBInfo[]; sources?: Record<string, string>; source_maps?: Record<string, SourceLine[]>; cores?: CoreInfo[]; num_cores?: number; running?: boolean; paused?: boolean; hz?: number; clockHz?: number; speedMul?: number; tickIntervalMs?: number }
   | { type: 'programs'; list: ProgramInfo[] }
   | { type: 'loaded'; name: string; pids: number[]; procs: PCBInfo[]; sources: Record<string, string>; source_maps?: Record<string, SourceLine[]> }
   | { type: 'reset' }
@@ -33,7 +33,8 @@ export type CpuEvent =
   | { type: 'sched_decision'; from_pid: number; to_pid: number; reason?: string; ready_queue: number[] }
   | { type: 'process_state'; pid: number; state: string; reason?: string }
   | { type: 'syscall'; pid: number; num: number; name: string; args: number[]; result: number }
-  | { type: 'console_out'; core_id?: number; pid: number; bytes: number[]; text: string }
+  | { type: 'console_out'; core_id?: number; pid: number; kind?: 'in' | 'out'; bytes: number[]; text: string }
+  | { type: 'kbd_state'; buf_used: number; buf_cap: number; readers: { pid: number; prog: string }[] }
   | { type: 'core_assign'; core_id: number; pid: number }
   | { type: 'core_release'; core_id: number; pid: number; reason?: string }
   | { type: 'mutex_op'; core_id: number; pid: number; mutex_id: number; op: 'create' | 'acquired' | 'waiting' | 'released' | 'handoff' | 'rejected'; next_pid?: number; waiters?: number[] }
@@ -242,6 +243,10 @@ export const useCpuStore = defineStore('cpu', () => {
   const mode = ref(3); // arranca en user
   const halted = ref(false);
   const running = ref(false);
+  // paused distinguishes "user-pressed-pause" from "system idle waiting for
+  // IRQ". Both produce running=false, but only paused=true should freeze
+  // visual narrators mid-animation; idle should let them complete naturally.
+  const paused = ref(false);
   const tick = ref(0);
   // Speed model: clockHz is the simulated CPU clock (integer Hz the kernel
   // would advertise); speedMul is the wall-clock playback multiplier the user
@@ -521,8 +526,22 @@ export const useCpuStore = defineStore('cpu', () => {
   // Salida acumulada de sys_write. Cada bloque tiene el PID que escribió y el
   // core que originó el write para colorearlos y filtrarlos por core en
   // multicore.
-  interface ConsoleChunk { pid: number; coreId?: number; text: string }
+  interface ConsoleChunk { pid: number; coreId?: number; kind?: 'in' | 'out'; text: string; bytes?: number[] }
   const consoleChunks = ref<ConsoleChunk[]>([]);
+
+  // ─── Estado del teclado HW ──────────────────────────────────────────────
+  // Reflejo del KeyboardBuf del kernel + cola FIFO de procesos bloqueados
+  // en sys_read(stdin). Llega vía evento `kbd_state` cada vez que cambia.
+  interface KbdReader { pid: number; prog: string }
+  const kbdBufUsed = ref(0);
+  const kbdBufCap = ref(16);
+  const kbdReaders = ref<KbdReader[]>([]);
+
+  // Helper compartido por la consola y el narrador del teclado.
+  function processNameOf(pid: number): string {
+    if (pid === 0) return 'kernel';
+    return procs.value.find(p => p.pid === pid)?.name ?? '';
+  }
 
   // ─── Sesión multi-tenant ────────────────────────────────────────────────
   // Llega vía evento session_info al conectar + cada vez que cambia (share/unshare).
@@ -722,6 +741,7 @@ export const useCpuStore = defineStore('cpu', () => {
         tick.value = ev.tick;
         if (ev.timer_quantum !== undefined) timerQuantum.value = ev.timer_quantum;
         if (ev.running !== undefined) running.value = ev.running;
+        if (ev.paused !== undefined) paused.value = ev.paused;
         if (ev.clockHz !== undefined) clockHz.value = ev.clockHz;
         if (ev.speedMul !== undefined) speedMul.value = ev.speedMul;
         if (ev.ready_queue) readyQueue.value = ev.ready_queue;
@@ -838,6 +858,7 @@ export const useCpuStore = defineStore('cpu', () => {
       case 'state':
         if (ev.halted !== undefined) halted.value = ev.halted;
         if (ev.running !== undefined) running.value = ev.running;
+        if (ev.paused !== undefined) paused.value = ev.paused;
         if (ev.clockHz !== undefined) clockHz.value = ev.clockHz;
         if (ev.speedMul !== undefined) speedMul.value = ev.speedMul;
         break;
@@ -871,6 +892,8 @@ export const useCpuStore = defineStore('cpu', () => {
         waitQueue.value = [];
         currentPID.value = 0;
         consoleChunks.value = [];
+        kbdBufUsed.value = 0;
+        kbdReaders.value = [];
         procSources.value = {};
         procSourceMaps.value = {};
         mutexes.value = [];
@@ -896,6 +919,7 @@ export const useCpuStore = defineStore('cpu', () => {
         for (const k of Object.keys(segments)) segments[k] = 0;
         mode.value = 3;
         halted.value = false;
+        paused.value = false;
         break;
       case 'procs':
         procs.value = ev.procs;
@@ -946,8 +970,19 @@ export const useCpuStore = defineStore('cpu', () => {
         pushLog(formatLog.syscall(ev.name, ev.args, ev.result, ev.pid), 'green');
         break;
       case 'console_out':
-        consoleChunks.value.push({ pid: ev.pid, coreId: ev.core_id, text: ev.text });
+        consoleChunks.value.push({
+          pid: ev.pid,
+          coreId: ev.core_id,
+          kind: ev.kind ?? (ev.pid === 0 ? 'in' : 'out'),
+          text: ev.text,
+          bytes: ev.bytes,
+        });
         if (consoleChunks.value.length > 200) consoleChunks.value.splice(0, consoleChunks.value.length - 200);
+        break;
+      case 'kbd_state':
+        kbdBufUsed.value = ev.buf_used ?? 0;
+        kbdBufCap.value = ev.buf_cap ?? 16;
+        kbdReaders.value = Array.isArray(ev.readers) ? ev.readers : [];
         break;
       case 'session_info':
         sessionInfo.value = {
@@ -1203,6 +1238,8 @@ export const useCpuStore = defineStore('cpu', () => {
     send({ cmd: 'reset' });
     log.value = [];
     consoleChunks.value = [];
+    kbdBufUsed.value = 0;
+    kbdReaders.value = [];
   }
   function clearLog() {
     // Limpia solo la vista (log + consola) sin tocar el estado del simulador.
@@ -1334,7 +1371,7 @@ export const useCpuStore = defineStore('cpu', () => {
   }
 
   return {
-    regs, segments, mode, halted, running, tick,
+    regs, segments, mode, halted, running, paused, tick,
     stepHz, clockHz, speedMul, tickIntervalMs, timerQuantum,
     changedRegs, changedRegsByCore,
     programs, selectedProgram, log, connected, hasEverConnected, lastError,
@@ -1346,7 +1383,7 @@ export const useCpuStore = defineStore('cpu', () => {
     mutexes, semaphores, pipes,
     activeFrameByCore, lastFiredHandlerByVector,
     subscribe,
-    consoleChunks, faultShake,
+    consoleChunks, faultShake, kbdBufUsed, kbdBufCap, kbdReaders, processNameOf,
     glossarySearch, glossaryOpenSignal,
     sessionInfo, isViewer, viewerLink,
     lastPresence, handRaiseSignal, lastHandRaiseLabel, ownerGlossaryHover,
