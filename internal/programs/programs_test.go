@@ -250,6 +250,8 @@ func TestShowcase_RunOnFourCoresHitsExpectedStories(t *testing.T) {
 	loadDemo(t, k, demo)
 
 	seenVec := make(map[uint8]bool)
+	seenExitedPIDs := make(map[int]bool)
+	seenFaultedPIDs := make(map[int]bool)
 	const budget = 8000
 	for step := 0; step < budget && k.HasWork(); step++ {
 		evs, err := k.Step()
@@ -257,8 +259,15 @@ func TestShowcase_RunOnFourCoresHitsExpectedStories(t *testing.T) {
 			t.Fatalf("step %d: %v", step, err)
 		}
 		for _, e := range evs {
-			if ev, ok := e.(cpu.EventIRQFire); ok {
+			switch ev := e.(type) {
+			case cpu.EventIRQFire:
 				seenVec[ev.Vector] = true
+			case cpu.EventSyscall:
+				if ev.Name == "exit" {
+					seenExitedPIDs[ev.PID] = true
+				}
+			case cpu.EventPageFault:
+				seenFaultedPIDs[ev.CoreID] = true
 			}
 		}
 	}
@@ -266,21 +275,37 @@ func TestShowcase_RunOnFourCoresHitsExpectedStories(t *testing.T) {
 	if len(k.Semaphores) != 1 {
 		t.Errorf("Semaphores = %d, want 1 (producer should have created sem id 1)", len(k.Semaphores))
 	}
-	// PIDs shift by one now that init occupies PID 1 unconditionally.
-	if walker, ok := k.Processes[2]; !ok {
-		t.Error("PID 2 (memwalk) not registered")
-	} else if walker.State != kernel.StateZombie {
-		t.Errorf("memwalk state = %s, want ZOMBIE (sys_exit)", walker.State)
+
+	// PIDs shift by one now that init occupies PID 1 unconditionally:
+	// memwalk=PID 2, reader=PID 3, producer=PID 4, consumer_fault=PID 5.
+	// Processes that exit cleanly (memwalk, producer) AND those killed by
+	// page-fault (consumer_fault) are reaped by init, so they no longer
+	// appear in k.Processes. We assert their exit/fault was observed
+	// during the run instead.
+	const (
+		memwalkPID  = 2
+		readerPID   = 3
+		consumerPID = 5
+	)
+	if !seenExitedPIDs[memwalkPID] {
+		t.Errorf("memwalk (PID %d) never called sys_exit", memwalkPID)
 	}
-	if reader, ok := k.Processes[3]; !ok {
-		t.Error("PID 3 (reader) not registered")
+	if !seenFaultedPIDs[3] {
+		// consumer_fault runs on core 3 (the showcase deliberately pins
+		// it via the 4-core layout). Page faults emit with CoreID, not
+		// PID, so we key on the core.
+		t.Error("no page fault observed on the consumer_fault core")
+	}
+	if reader, ok := k.Processes[readerPID]; !ok {
+		t.Errorf("PID %d (reader) not registered — it should still be BLOCKED on the keyboard", readerPID)
 	} else if reader.State != kernel.StateBlocked {
 		t.Errorf("reader state = %s, want BLOCKED (no key pushed)", reader.State)
 	}
-	if consumer, ok := k.Processes[5]; !ok {
-		t.Error("PID 5 (consumer_fault) not registered")
-	} else if consumer.State != kernel.StateZombie {
-		t.Errorf("consumer state = %s, want ZOMBIE (page fault)", consumer.State)
+	if _, alive := k.Processes[memwalkPID]; alive {
+		t.Errorf("memwalk PID %d still in process table — init should have reaped it", memwalkPID)
+	}
+	if _, alive := k.Processes[consumerPID]; alive {
+		t.Errorf("consumer_fault PID %d still in process table — init should have reaped it", consumerPID)
 	}
 
 	for _, v := range []uint8{0x0E, 0x20, 0x80, 0x81} {

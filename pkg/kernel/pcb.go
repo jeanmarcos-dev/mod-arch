@@ -59,6 +59,15 @@ type PCB struct {
 	// rather than inside AddressSpace.
 	StackTop uint32
 
+	// Slot is the index in the user-code region this PCB occupies. PIDs are
+	// monotonically increasing (1, 2, 3...), but slots are allocated only for
+	// processes that load user code into the 0x200000–0x2FFFFF range. init
+	// (PID 1) carries Slot=-1 because its body lives in a reserved kernel
+	// zone; demo processes loaded after it get Slot=0, 1, 2, … so their
+	// code base stays at 0x200000 regardless of init's presence. Hardcoded
+	// jump targets inside demos (e.g. clone() entry points) keep working.
+	Slot int
+
 	// memSpace points to the AddressSpace this task lives in. fork() gives
 	// the child a fresh one; vfork() and clone(CLONE_VM) share with the
 	// parent so threads of the same process see the same .text and globals.

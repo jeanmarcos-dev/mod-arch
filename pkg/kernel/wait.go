@@ -1,11 +1,29 @@
 package kernel
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
 )
 
-// BlockedOn reason for processes parked inside sys_waitpid.
-const blockedOnWait = "wait"
+// waitpidBlockedReason formats the BlockedOn label so the UI can tell at a
+// glance whether a parent parked in sys_waitpid is waiting for any child
+// ("wait(any)") or for a specific PID ("wait(P3)"). The prefix "wait(" is
+// what notifyParentOfExit greps for to route reaps; init reuses the
+// "wait(any)" label so all reaper-style waits read the same way.
+func waitpidBlockedReason(target int) string {
+	if target <= 0 {
+		return "wait(any)"
+	}
+	return fmt.Sprintf("wait(P%d)", target)
+}
+
+// waitpidBlockedPrefix identifies any BlockedOn string produced by
+// waitpidBlockedReason or initBlockedReason. notifyParentOfExit uses it to
+// route reaps through the wait branch regardless of which specific target
+// the parent is waiting on.
+const waitpidBlockedPrefix = "wait("
 
 // sysWaitpid implements sys_waitpid(pid, status_addr, options).
 //
@@ -43,10 +61,13 @@ func (k *Kernel) sysWaitpid(core *Core, target, statusAddr uint32) (uint32, []cp
 		return reapedPID, reapEvs, false
 	}
 
-	// No zombie ready: park the parent until a child exits.
+	// No zombie ready: park the parent until a child exits. The reason
+	// string carries the wait target so the UI distinguishes
+	// "wait(any)" from "wait(P3)" without us having to expose Waiter
+	// separately to the frontend.
 	parent.Waiter = want
 	out := []cpu.Event{cpu.EventWaitOp{PID: parentPID, ChildPID: want, Op: "call"}}
-	out = append(out, k.blockOnSync(core, blockedOnWait)...)
+	out = append(out, k.blockOnSync(core, waitpidBlockedReason(want))...)
 	return 0, out, true
 }
 
@@ -98,14 +119,15 @@ func removePID(s []int, pid int) []int {
 //
 // Three cases distinguished by parent's BlockedOn:
 //
-//   - init (BlockedOn="wait()"): queue the orphan and put init back on the
-//     ready queue. Init briefly transitions to RUN at dispatch time, reaps
-//     every queued zombie, and re-blocks in wait() — the dispatcher handles
-//     this loop because init never executes its own user code.
+//   - init (BlockedOn="wait(any)"): queue the orphan and put init back on
+//     the ready queue. Init briefly transitions to RUN at dispatch time,
+//     reaps every queued zombie, and re-blocks in wait(any) — the dispatcher
+//     handles this loop because init never executes its own user code.
 //
-//   - "wait": a regular parent parked in sys_waitpid. Same deferred model:
-//     queue the child, wake parent to READY. On dispatch, parent wakes with
-//     EAX = reaped PID.
+//   - "wait(any)" / "wait(P{n})": a regular parent parked in sys_waitpid.
+//     Same deferred model: queue the child, wake parent to READY. On
+//     dispatch, parent wakes with EAX = reaped PID. The label includes the
+//     target so the UI shows "wait(P3)" instead of a generic "wait".
 //
 //   - "vfork": the parent is unblocked but the zombie is preserved so the
 //     parent can still call waitpid later to read ExitCode. No PendingReap
@@ -127,15 +149,16 @@ func (k *Kernel) notifyParentOfExit(child *PCB) []cpu.Event {
 		return nil
 	}
 
-	switch parent.BlockedOn {
-	case blockedOnWait:
+	switch {
+	case strings.HasPrefix(parent.BlockedOn, waitpidBlockedPrefix):
 		if parent.Waiter > 0 && parent.Waiter != child.PID {
 			return nil
 		}
+		reason := parent.BlockedOn
 		parent.Waiter = 0
-		return k.queueReapAndWake(parent, child, blockedOnWait)
+		return k.queueReapAndWake(parent, child, reason)
 
-	case blockedOnVfork:
+	case parent.BlockedOn == blockedOnVfork:
 		// Only THE vforked child wakes its parent. Other children of
 		// the same parent that happen to exit while we are waiting
 		// must not unblock it. vfork does not reap — that is what
@@ -155,7 +178,7 @@ func (k *Kernel) notifyParentOfExit(child *PCB) []cpu.Event {
 // dispatch cycle, which is what makes the zombie state visible).
 //
 // reason is the BlockedOn value before the wake, used so the event carries
-// an honest "woken from X" string ("wait" or "wait()").
+// an honest "woken from X" string ("wait(any)", "wait(P3)", …).
 func (k *Kernel) queueReapAndWake(parent, child *PCB, reason string) []cpu.Event {
 	parent.PendingReaps = append(parent.PendingReaps, child.PID)
 	return k.wakeToQueue(parent.PID, reason)

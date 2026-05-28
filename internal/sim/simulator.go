@@ -27,7 +27,6 @@ type Demo struct {
 	Description string `json:"description"`
 	Category    string `json:"category,omitempty"`
 	Cores       int    `json:"cores,omitempty"`
-	WithInit    bool   `json:"with_init,omitempty"`
 	Procs       []Proc `json:"-"`
 }
 
@@ -137,7 +136,7 @@ func New(cfg Config) *Simulator {
 		clients:  make(map[*Client]struct{}),
 		events:   NewEventRing(DefaultEventRingCapacity),
 		logger:   cfg.Logger,
-		clockHz:  4,
+		clockHz:  2,
 		speedMul: 1.0,
 	}
 }
@@ -171,13 +170,14 @@ func (s *Simulator) LoadProgram(name string) error {
 	}
 	s.mu.Lock()
 	s.kernel.Reset()
-	if demo.WithInit {
-		// Spawn PID 1 (init) before the demo's own procs so the tree has
-		// a permanent root and orphan zombies have somewhere to land.
-		if _, err := s.kernel.SpawnInit(); err != nil {
-			s.mu.Unlock()
-			return err
-		}
+	// Init (PID 1) is spawned for every demo so the process tree always has
+	// a root and orphan zombies have somewhere to land. Demos that only care
+	// about a single process keep working: the UI hides PID 1 by default
+	// (preferences.showInit). See the ZOMBIE entry in the glossary for the
+	// pedagogical rationale.
+	if _, err := s.kernel.SpawnInit(); err != nil {
+		s.mu.Unlock()
+		return err
 	}
 	pids := make([]int, 0, len(demo.Procs))
 	sources := make(map[int]string)
@@ -188,9 +188,7 @@ func (s *Simulator) LoadProgram(name string) error {
 			s.mu.Unlock()
 			return err
 		}
-		if demo.WithInit {
-			s.kernel.AdoptUnderInit(pid)
-		}
+		s.kernel.AdoptUnderInit(pid)
 		pids = append(pids, pid)
 		sources[pid] = demo.Procs[i].Source
 		if len(demo.Procs[i].SourceMap) > 0 {
@@ -225,6 +223,15 @@ func (s *Simulator) StepOnce() error {
 	evs, err := s.kernel.Step()
 	tick := s.kernel.BootCPU().Tick
 	halted := s.kernel.AllHalted()
+	// Process-table mutations (fork, clone-thread, exit, reparent, reap) only
+	// reach the frontend through individual events whose handlers expect the
+	// PCB to already exist in the local list. Without a fresh "procs"
+	// broadcast the new tasks never appear in the panel and subsequent
+	// pcb_save / process_state events for them are dropped silently.
+	var procsSnap []map[string]any
+	if procTableMutated(bootEvs) || procTableMutated(evs) {
+		procsSnap = s.processListLocked()
+	}
 	s.mu.Unlock()
 	if err != nil {
 		s.Broadcast(map[string]any{"type": "error", "message": err.Error()})
@@ -238,11 +245,32 @@ func (s *Simulator) StepOnce() error {
 		s.events.push(e, tick)
 		s.Broadcast(EventToWire(e))
 	}
+	if procsSnap != nil {
+		s.Broadcast(map[string]any{"type": "procs", "procs": procsSnap})
+	}
 	s.Broadcast(map[string]any{"type": "tick", "value": tick})
 	if halted {
 		s.Broadcast(map[string]any{"type": "state", "halted": true})
 	}
 	return nil
+}
+
+// procTableMutated reports whether any event in the slice changed the set of
+// processes the kernel tracks (or their parent/zombie status). The frontend
+// keeps its own copy of the process list and only refreshes it on a
+// {type:"procs"} broadcast, so any of these events must be paired with one.
+func procTableMutated(evs []cpu.Event) bool {
+	for _, e := range evs {
+		switch ev := e.(type) {
+		case cpu.EventFork, cpu.EventThreadCreate, cpu.EventThreadExit, cpu.EventReparent:
+			return true
+		case cpu.EventWaitOp:
+			if ev.Op == "reap" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // StartRun starts the auto-step loop. If hz > 0 it overrides the stored

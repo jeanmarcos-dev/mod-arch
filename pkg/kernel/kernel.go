@@ -28,20 +28,29 @@ const MaxCores = 4
 // interrupt frames while still keeping all 4 cores well above AddrKernelText.
 const perCoreKernelStackSize = 0x10000
 
-// processCodeBase returns the base address where the code of the given PID
-// is loaded. PID 1 -> 0x200000, PID 2 -> 0x240000, etc.
-func processCodeBase(pid int) uint32 {
-	return cpu.AddrUserBase + uint32(pid-1)*ProcCodeSize
+// processCodeBase returns the base address where the code of a user-space
+// process is loaded, indexed by its user-code slot (not by PID). Slot 0 →
+// 0x200000, slot 1 → 0x240000, etc. init carries Slot=-1 and lives in its
+// own reserved zone (initCodeBase), not in this range.
+func processCodeBase(slot int) uint32 {
+	return cpu.AddrUserBase + uint32(slot)*ProcCodeSize
 }
 
-// processStackTop returns the initial ESP (top of stack) for the given PID.
-// PID 1 -> 0x33FFF0, PID 2 -> 0x37FFF0, etc.
+// processStackTop returns the initial ESP (top of stack) for the given
+// user-code slot. Slot 0 → 0x37FFF0, slot 1 → 0x3BFFF0, etc.
 //
 // The 0x10-byte margin keeps the first push from landing exactly on the
-// region boundary (defensive).
-func processStackTop(pid int) uint32 {
-	return cpu.AddrUserStack + uint32(pid)*ProcStackSize - 0x10
+// region boundary (defensive). The +1 offset preserves the original
+// per-PID layout: slot 0 owns the second 256 KB band so a single demo's
+// stack still lands at 0x37FFF0.
+func processStackTop(slot int) uint32 {
+	return cpu.AddrUserStack + uint32(slot+1)*ProcStackSize - 0x10
 }
+
+// initCodeBase is where the init (PID 1) program lives. It sits in the
+// kernel-text region just past the IDT and default handlers so it does
+// NOT consume a user-code slot and demos keep loading at 0x200000.
+const initCodeBase uint32 = cpu.AddrKernelText + 0x1F000
 
 // Kernel wraps one or more CPU cores and adds the OS software decisions.
 type Kernel struct {
@@ -102,6 +111,11 @@ type Kernel struct {
 	nextFDSpaceID  int
 
 	nextPID int
+	// nextUserSlot is the next index in the user-code region that AddProcess
+	// will hand out. It is independent from nextPID so init can reserve
+	// PID 1 without consuming slot 0 — that way demo bodies always land at
+	// 0x200000 and any hardcoded jump targets they carry stay valid.
+	nextUserSlot int
 }
 
 // New builds a single-core Kernel — the original behavior. Delegates to
@@ -233,6 +247,7 @@ func (k *Kernel) Reset() {
 	k.Processes = make(map[int]*PCB)
 	k.Ready.Reset()
 	k.nextPID = 1
+	k.nextUserSlot = 0
 	k.KeyboardBuf = nil
 	k.blockedReads = nil
 	k.Mutexes = nil
@@ -266,7 +281,7 @@ func (k *Kernel) Reset() {
 // loaded into its CPU; any subsequent ones either fill remaining idle cores
 // (in multicore mode) or go onto the ready queue.
 func (k *Kernel) AddProcess(name string, code []byte) (int, error) {
-	if k.nextPID > MaxProcesses {
+	if k.nextUserSlot >= MaxProcesses {
 		return 0, fmt.Errorf("maximum of %d processes supported", MaxProcesses)
 	}
 	if uint32(len(code)) > ProcCodeSize {
@@ -275,9 +290,11 @@ func (k *Kernel) AddProcess(name string, code []byte) (int, error) {
 
 	pid := k.nextPID
 	k.nextPID++
+	slot := k.nextUserSlot
+	k.nextUserSlot++
 
-	codeBase := processCodeBase(pid)
-	stackTop := processStackTop(pid)
+	codeBase := processCodeBase(slot)
+	stackTop := processStackTop(slot)
 	stackBase := stackTop + 0x10 - ProcStackSize
 
 	// Zero the region before loading to avoid leftovers from a prior program.
@@ -294,6 +311,7 @@ func (k *Kernel) AddProcess(name string, code []byte) (int, error) {
 		State:    StateReady,
 		Mode:     cpu.ModeUser,
 		StackTop: stackTop,
+		Slot:     slot,
 		Core:     -1,
 		TGID:     pid,
 		memSpace: k.newMemSpace(codeBase, uint32(len(code)), stackBase),
@@ -477,14 +495,14 @@ func (k *Kernel) runHandlerLogic(core *Core, vector uint8, source string) []cpu.
 		if source != "fault" {
 			return nil
 		}
-		return k.killCurrent(core, "page_fault")
+		return k.killAndNotify(core, "page_fault")
 	case IRQGeneralProt:
 		// #GP is raised by the CPU when user code executes a privileged
 		// instruction (HLT in PL3), uses a bad segment, etc. Kill the process.
 		if source != "fault" {
 			return nil
 		}
-		return k.killCurrent(core, "general_protection")
+		return k.killAndNotify(core, "general_protection")
 	case IRQKeyboard:
 		// Keyboard: HW (PushKey) injects this IRQ with source HW. Deliver any
 		// pending bytes to the first process BLOCKED in sys_read.
@@ -495,6 +513,19 @@ func (k *Kernel) runHandlerLogic(core *Core, vector uint8, source string) []cpu.
 	default:
 		return nil
 	}
+}
+
+// killAndNotify is the death path used by fault handlers (page fault, #GP).
+// It mirrors what sys_exit does after marking ZOMBIE: hand the orphan over
+// to init via notifyParentOfExit so the reaper picks it up on the next
+// dispatch and the process table does not stay polluted with corpses.
+func (k *Kernel) killAndNotify(core *Core, reason string) []cpu.Event {
+	curPID := core.CurrentPID
+	out := k.killCurrent(core, reason)
+	if pcb := k.Processes[curPID]; pcb != nil {
+		out = append(out, k.notifyParentOfExit(pcb)...)
+	}
+	return out
 }
 
 // killCurrent terminates the current process on the given core and schedules
@@ -514,12 +545,31 @@ func (k *Kernel) killCurrent(core *Core, reason string) []cpu.Event {
 		return nil
 	}
 	k.evictFromAllQueues(curPID)
+	// Freeze the live CPU into the PCB before marking ZOMBIE so the frontend
+	// (and any wait() reader) sees the registers at the moment of death,
+	// not the stale snapshot from process loading. saveCurrentToPCB copies
+	// core.CPU.R into pcb.Regs, so after it returns EAX holds the syscall
+	// number (1 for sys_exit) — that is fine for page-fault deaths, but
+	// sys_exit conventionally leaves EAX = exit code (matches Linux's
+	// wait()-readable value), so we restore it from pcb.ExitCode which
+	// sysExit already wrote before delegating to us.
+	k.saveCurrentToPCB(core)
+	if reason == "exit" {
+		curPCB.Regs.EAX = curPCB.ExitCode
+	}
 	curPCB.State = StateZombie
 	curPCB.BlockedOn = reason
 	curPCB.Core = -1
 
+	exitCode := curPCB.ExitCode
 	out := []cpu.Event{
-		cpu.EventProcessState{PID: curPID, State: string(StateZombie), Reason: reason},
+		cpu.EventPCBSave{CoreID: core.ID, PID: curPID, Regs: pcbRegsSnapshot(curPCB)},
+		cpu.EventProcessState{
+			PID:      curPID,
+			State:    string(StateZombie),
+			Reason:   reason,
+			ExitCode: &exitCode,
+		},
 	}
 
 	// Re-parent any surviving children to init so they remain reachable

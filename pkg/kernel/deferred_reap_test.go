@@ -32,7 +32,7 @@ func TestNotifyParentOfExit_DefersTheReap(t *testing.T) {
 	// Park the parent in blocked-on-wait, the state it would be in after
 	// having called sys_waitpid(-1) with no zombie ready.
 	parent.State = StateBlocked
-	parent.BlockedOn = blockedOnWait
+	parent.BlockedOn = waitpidBlockedReason(-1)
 	parent.Waiter = -1
 	k.Ready.Remove(parentPID)
 

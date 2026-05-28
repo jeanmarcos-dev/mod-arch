@@ -225,8 +225,9 @@ func TestStopRun_IdleAutostopMarksPausedFalse(t *testing.T) {
 
 	// Wait long enough for the run loop to tick once, execute HLT, see
 	// HasWork=false, and self-stop. At the default 4 Hz that is one
-	// 250 ms interval; give it a generous budget.
-	states := drainStateEvents(c, 500*time.Millisecond)
+	// 250 ms interval; give the test 4 cycles of slack so it is not flaky
+	// under heavy CI load.
+	states := drainStateEvents(c, 1500*time.Millisecond)
 
 	// Look for the autostop state event: running:false with paused:false.
 	var sawAutoStop bool

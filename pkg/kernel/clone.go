@@ -68,7 +68,7 @@ func (k *Kernel) Clone(core *Core, parent *PCB, flags CloneFlags, opts cloneOpti
 	if parent == nil {
 		return nil, nil, fmt.Errorf("clone: nil parent")
 	}
-	if k.nextPID > MaxProcesses {
+	if k.nextPID > MaxProcesses+1 { // +1 to reserve room for init's PID 1
 		return nil, nil, fmt.Errorf("clone: PID space exhausted")
 	}
 	parentMem := parent.MemSpace()
@@ -79,9 +79,21 @@ func (k *Kernel) Clone(core *Core, parent *PCB, flags CloneFlags, opts cloneOpti
 	childPID := k.nextPID
 	k.nextPID++
 
+	// Fork carves a fresh user-code slot; everything else (CLONE_VM /
+	// CloneVfork / threads with their own stack) shares the parent's slot,
+	// so we tag the child with Slot=-1 to skip slot accounting.
+	childSlot := -1
+	if flags&CloneVM == 0 && opts.childStackTop == 0 && flags&CloneVfork == 0 {
+		if k.nextUserSlot >= MaxProcesses {
+			return nil, nil, fmt.Errorf("clone: user-code slots exhausted")
+		}
+		childSlot = k.nextUserSlot
+		k.nextUserSlot++
+	}
+
 	// AddressSpace + stack: share or copy. Threads sub-allocate stack
 	// slots inside the shared region; fork carves a fresh dedicated one.
-	childMem, childStackTop, err := k.resolveCloneMemory(parent, parentMem, childPID, flags, opts.childStackTop)
+	childMem, childStackTop, err := k.resolveCloneMemory(parent, parentMem, childSlot, flags, opts.childStackTop)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -113,6 +125,7 @@ func (k *Kernel) Clone(core *Core, parent *PCB, flags CloneFlags, opts cloneOpti
 		State:        StateReady,
 		Mode:         parent.Mode,
 		StackTop:     childStackTop,
+		Slot:         childSlot,
 		Core:         -1,
 		TGID:         childTGID,
 		ParentPID:    parent.PID,
@@ -185,8 +198,8 @@ func (k *Kernel) Clone(core *Core, parent *PCB, flags CloneFlags, opts cloneOpti
 //     stack to the kernel): share MemSpace and carve a slot from the
 //     shared stack region.
 //   - Neither (fork): fresh MemSpace at the child's own slot, dedicated
-//     stack at processStackTop(childPID).
-func (k *Kernel) resolveCloneMemory(parent *PCB, parentMem *AddressSpace, childPID int, flags CloneFlags, explicitStack uint32) (*AddressSpace, uint32, error) {
+//     stack at processStackTop(childSlot).
+func (k *Kernel) resolveCloneMemory(parent *PCB, parentMem *AddressSpace, childSlot int, flags CloneFlags, explicitStack uint32) (*AddressSpace, uint32, error) {
 	switch {
 	case flags&CloneVM != 0 && explicitStack != 0:
 		return k.shareMemSpace(parentMem), explicitStack, nil
@@ -203,8 +216,8 @@ func (k *Kernel) resolveCloneMemory(parent *PCB, parentMem *AddressSpace, childP
 		return mem, top, nil
 
 	default:
-		codeBase := processCodeBase(childPID)
-		stackTop := processStackTop(childPID)
+		codeBase := processCodeBase(childSlot)
+		stackTop := processStackTop(childSlot)
 		stackBase := stackTop + 0x10 - ProcStackSize
 		// Zero the child's new code region and copy the parent's bytes
 		// into it. The rest stays zero so stale data from a previous
@@ -218,7 +231,7 @@ func (k *Kernel) resolveCloneMemory(parent *PCB, parentMem *AddressSpace, childP
 		// Mirror the parent's stack too — the interrupt frame the kernel
 		// just pushed must be present in the child so its IRET resumes
 		// at the correct point.
-		parentStackBase := processStackTop(parent.PID) + 0x10 - ProcStackSize
+		parentStackBase := processStackTop(parent.Slot) + 0x10 - ProcStackSize
 		childStackBase := stackTop + 0x10 - ProcStackSize
 		for i := uint32(0); i < ProcStackSize; i++ {
 			k.Mem.Bytes[childStackBase+i] = k.Mem.Bytes[parentStackBase+i]
@@ -268,7 +281,7 @@ func stampCloneEntry(child *PCB, core *Core, opts cloneOptions, childStackTop ui
 // the parent's stack, and pthread children received a fresh stack from
 // user space so no translation applies.
 func translateForkStack(child, parent *PCB, childStackTop uint32) {
-	parentStackBase := processStackTop(parent.PID) + 0x10 - ProcStackSize
+	parentStackBase := processStackTop(parent.Slot) + 0x10 - ProcStackSize
 	childStackBase := childStackTop + 0x10 - ProcStackSize
 	if child.SavedUserESP >= parentStackBase && child.SavedUserESP < parentStackBase+ProcStackSize {
 		child.SavedUserESP = child.SavedUserESP - parentStackBase + childStackBase

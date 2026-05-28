@@ -1,24 +1,39 @@
 package kernel
 
-// initProgram is the user-mode body of PID 1. Two bytes of `hlt` keep
-// AddProcess happy (the slot must hold at least one byte of valid code).
-// Init never actually executes them: SpawnInit parks the PCB in
-// BLOCKED("wait()") right after registering and the dispatcher returns
-// init to that state after each zombie reap.
+import (
+	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+)
+
+// initProgram is the body of PID 1. Two bytes of `hlt` keep loadCPUFromPCB
+// happy (the slot must hold at least one byte of valid code). init never
+// actually executes them: SpawnInit parks the PCB in BLOCKED("wait()") right
+// after registering and the dispatcher returns init to that state after
+// each zombie reap.
 var initProgram = []byte{0xF4, 0xF4}
 
-// initBlockedReason mirrors the wait() syscall name a real init would
-// spend its life inside (sysvinit loops on wait(); systemd uses an
-// epoll loop driven by SIGCHLD that semantically does the same thing).
-// Sharing the string with blockedOnWait keeps the UI honest about what
-// state init is in.
-const initBlockedReason = "wait()"
+// initBlockedReason names the eternal wait loop init lives in. We use
+// "wait(any)" to make the UI distinguish init's universal-reaper role
+// from a regular sys_waitpid that targets a specific child (which shows
+// up as "wait(P{n})"). sysvinit loops on wait(); systemd uses an epoll
+// loop driven by SIGCHLD that is semantically the same thing.
+const initBlockedReason = "wait(any)"
 
-// SpawnInit allocates the init PCB (typically PID 1), parks it in
-// BLOCKED("idle") so the scheduler never picks it, and records its PID
-// in k.InitPID. Demos that exercise fork / vfork / pipes call this
-// before loading their own processes so the tree always has a root and
-// so re-parenting in killCurrent has a target.
+// initStackTop is the initial ESP for init's tiny kernel-side stack. Init
+// never enters user mode in a way that consumes stack, but loadCPUFromPCB
+// still needs a valid ESP. We carve a small region just past initCodeBase
+// inside the kernel zone so it does not collide with the per-core kernel
+// stacks (which grow downward from KernelStackTop).
+const initStackTop uint32 = initCodeBase + 0x100
+
+// SpawnInit allocates the init PCB (always PID 1), parks it in
+// BLOCKED("wait()") so the scheduler never picks it, and records its PID
+// in k.InitPID. Now invoked unconditionally by sim.LoadProgram so every
+// demo carries init in the background.
+//
+// Unlike AddProcess, SpawnInit does NOT consume a user-code slot — init
+// lives at initCodeBase inside the kernel zone, so demo procs loaded
+// afterwards keep landing at 0x200000 (slot 0). That preserves hardcoded
+// jump addresses inside demo bytecode (e.g. clone() entry points).
 //
 // Safe to call once per kernel; calling it twice is a no-op that returns
 // the existing PID.
@@ -26,21 +41,41 @@ func (k *Kernel) SpawnInit() (int, error) {
 	if k.InitPID != 0 {
 		return k.InitPID, nil
 	}
-	pid, err := k.AddProcess("init", initProgram)
-	if err != nil {
+	pid := k.nextPID
+	k.nextPID++
+
+	// Load init's two HLT bytes into the reserved kernel-side code region
+	// so the CPU has something to read if it ever resumes init. Zeroing the
+	// guard area defensively keeps stale bytes from a prior demo out of view.
+	for i := initCodeBase; i < initCodeBase+uint32(len(initProgram)); i++ {
+		k.Mem.Bytes[i] = 0
+	}
+	if err := k.Mem.LoadBytes(initCodeBase, initProgram); err != nil {
 		return 0, err
 	}
-	k.InitPID = pid
 
-	// Park init: BLOCKED keeps the scheduler from ever choosing it and
-	// makes AllHalted reachable once user demos finish. Without this,
-	// init's HLT loop would still occupy the boot core forever.
-	init := k.Processes[pid]
-	if init != nil {
-		init.State = StateBlocked
-		init.BlockedOn = initBlockedReason
+	pcb := &PCB{
+		PID:       pid,
+		Name:      "init",
+		State:     StateBlocked,
+		BlockedOn: initBlockedReason,
+		Mode:      cpu.ModeUser,
+		StackTop:  initStackTop,
+		Slot:      -1,
+		Core:      -1,
+		TGID:      pid,
+		memSpace:  k.newMemSpace(initCodeBase, uint32(len(initProgram)), initCodeBase+0x80),
+		fdSpace:   k.newFDSpace(),
 	}
-	k.Ready.Remove(pid)
+	pcb.Regs.EIP = initCodeBase
+	pcb.Regs.ESP = initStackTop
+	pcb.Regs.EFLAGS = cpu.FlagIF
+	pcb.Regs.CS = cpu.SelUserCode
+	pcb.Regs.DS = cpu.SelUserData
+	pcb.Regs.SS = cpu.SelUserData
+
+	k.Processes[pid] = pcb
+	k.InitPID = pid
 	return pid, nil
 }
 

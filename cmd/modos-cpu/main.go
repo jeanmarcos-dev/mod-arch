@@ -93,7 +93,6 @@ func runServer(args []string) {
 			Description: d.Description,
 			Category:    d.Category,
 			Cores:       d.Cores,
-			WithInit:    d.WithInit,
 			Procs:       procs,
 		})
 	}

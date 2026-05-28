@@ -166,10 +166,14 @@ type EventSchedDecision struct {
 func (EventSchedDecision) Tag() string { return "sched_decision" }
 
 // EventProcessState reflects a process state transition (RUN/READY/BLOCKED/ZOMBIE).
+// ExitCode is set (pointer, so the field is absent in JSON when nil) for the
+// ZOMBIE transition so the frontend can show the value sys_exit stored in
+// the PCB without waiting for the next full procs snapshot.
 type EventProcessState struct {
-	PID    int    `json:"pid"`
-	State  string `json:"state"`
-	Reason string `json:"reason,omitempty"`
+	PID      int     `json:"pid"`
+	State    string  `json:"state"`
+	Reason   string  `json:"reason,omitempty"`
+	ExitCode *uint32 `json:"exit_code,omitempty"`
 }
 
 // Tag returns the event tag.

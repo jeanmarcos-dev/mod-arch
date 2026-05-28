@@ -101,6 +101,69 @@ func TestSyscall_ExitHalts(t *testing.T) {
 	}
 }
 
+// TestSyscall_ExitEmitsPCBSaveAndExitCode covers the bug where the frontend
+// saw a ZOMBIE process with stale registers and exit_code=0 after sys_exit:
+// killCurrent did not snapshot the CPU into the PCB before flipping the
+// state, and EventProcessState did not carry the exit code. The fix has to
+// emit both an EventPCBSave with the final registers and an EventProcessState
+// whose ExitCode points at the value sys_exit stored in pcb.ExitCode.
+func TestSyscall_ExitEmitsPCBSaveAndExitCode(t *testing.T) {
+	// Program: mov ebx, 42 ; mov eax, 1 (sys_exit) ; int 0x80
+	exitProg := []byte{
+		0xBB, 0x2A, 0x00, 0x00, 0x00, // mov ebx, 42
+		0xB8, 0x01, 0x00, 0x00, 0x00, // mov eax, 1 (sys_exit)
+		0xCD, 0x80, // int 0x80
+	}
+	k := newTestKernel(t, exitProg)
+	k.TimerQuantum = 0
+
+	var pcbSave *cpu.EventPCBSave
+	var procState *cpu.EventProcessState
+	for range 30 {
+		evs, err := k.Step()
+		if err != nil {
+			t.Fatalf("Step: %v", err)
+		}
+		for _, e := range evs {
+			switch v := e.(type) {
+			case cpu.EventPCBSave:
+				if v.PID == 1 {
+					ev := v
+					pcbSave = &ev
+				}
+			case cpu.EventProcessState:
+				if v.PID == 1 && v.State == string(StateZombie) {
+					ev := v
+					procState = &ev
+				}
+			}
+		}
+		if k.BootCPU().Halted {
+			break
+		}
+	}
+
+	if pcbSave == nil {
+		t.Fatal("killCurrent did not emit EventPCBSave for the exiting process")
+	}
+	if got := pcbSave.Regs["EBX"]; got != 42 {
+		t.Errorf("PCBSave EBX = %d, want 42 (exit code copied to PCB)", got)
+	}
+	if got := pcbSave.Regs["EAX"]; got != 42 {
+		t.Errorf("PCBSave EAX = %d, want 42 (sysExit sets pcb.Regs.EAX = code)", got)
+	}
+
+	if procState == nil {
+		t.Fatal("killCurrent did not emit EventProcessState{State:ZOMBIE} for PID 1")
+	}
+	if procState.ExitCode == nil {
+		t.Fatal("EventProcessState{ZOMBIE} did not carry an ExitCode pointer — frontend cannot see exit_code")
+	}
+	if *procState.ExitCode != 42 {
+		t.Errorf("EventProcessState ExitCode = %d, want 42", *procState.ExitCode)
+	}
+}
+
 func TestSyscall_ExitSchedulesNext(t *testing.T) {
 	// Two processes: the first calls exit, the second (READY) must take RUN.
 	exitProg := []byte{
