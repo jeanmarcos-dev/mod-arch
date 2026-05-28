@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onUnmounted, ref } from 'vue';
+import { onUnmounted, ref, watch, computed } from 'vue';
 import { useNarrators, type PcbSave, type PcbRestore } from '../../lib/narratorBus';
-import { usePreferencesStore } from '../../stores/preferences';
 import { useCpuStore } from '../../stores/cpu';
+import { useNarratorAnimation } from './useNarratorAnimation';
 
 const cpu = useCpuStore();
+const animator = useNarratorAnimation();
 
 // PCBCopyNarrator animates the kernel's pcb_save / pcb_restore work. On
 // pcb_save a card flies from the CPU anchor to the row of the PID whose
@@ -13,8 +14,11 @@ const cpu = useCpuStore();
 // EBX) so the student can see "this is the chunk of state being copied"
 // rather than a vague glow.
 //
-// Place inside a position: relative parent — it covers it via inset: 0 and
-// lets pointer events fall through.
+// The trip's wall-clock duration is one simulator tick (cpu.tickIntervalMs).
+// When the simulator pauses, --anim-state flips to "paused" so CSS animations
+// freeze; the WAAPI timer used to schedule removal also pauses thanks to the
+// composable. Place inside a position: relative parent — it covers it via
+// inset: 0 and lets pointer events fall through.
 
 interface Trip {
   id: number;
@@ -38,18 +42,12 @@ const props = withDefaults(
     cpuSelector?: string;
     /** Function returning the PCB row element for a given PID. */
     pcbTarget?: (pid: number) => Element | null;
-    /** Time each card stays on screen in ms (scaled by animationSpeed). */
-    ttlMs?: number;
   }>(),
   {
     cpuSelector: '[data-narrator-anchor="cpu"]',
-    ttlMs: 1300,
   },
 );
 
-// Resolve the CPU-side anchor for a given core. Multicore views render one
-// `data-narrator-anchor="cpu-<id>"` per strip; falling back to the generic
-// "cpu" anchor keeps the legacy single-core panels working unchanged.
 function cpuAnchorFor(coreId: number): Element | null {
   return (
     document.querySelector(`[data-narrator-anchor="cpu-${coreId}"]`)
@@ -59,7 +57,6 @@ function cpuAnchorFor(coreId: number): Element | null {
 
 const trips = ref<Trip[]>([]);
 const root = ref<HTMLElement | null>(null);
-const prefs = usePreferencesStore();
 
 const MAX_TRIPS = 4;
 
@@ -86,10 +83,12 @@ function pickRegs(regs: Record<string, number>): { name: string; val: string }[]
 
 const narrators = useNarrators();
 
+const ttlCss = computed(() => `${animator.tickMs.value}ms`);
+
 function launch(kind: 'save' | 'restore', payload: PcbSave | PcbRestore) {
-  // Skip events from cores hidden by the SimBar filter so the user does not
-  // see arcs flying from off-screen anchors.
   if (!cpu.isCoreVisible(payload.coreId)) return;
+  if (!animator.shouldFire()) return;
+
   const cpuEl = cpuAnchorFor(payload.coreId);
   const pcbEl = props.pcbTarget ? props.pcbTarget(payload.pid) : defaultPcbTarget(payload.pid);
   if (!cpuEl || !pcbEl) return;
@@ -115,11 +114,29 @@ function launch(kind: 'save' | 'restore', payload: PcbSave | PcbRestore) {
     kind,
   });
 
-  const ttl = Math.round(props.ttlMs / prefs.animationSpeed);
-  window.setTimeout(() => {
-    trips.value = trips.value.filter(t => t.id !== payload.seq);
-  }, ttl + 80);
+  // Pause/resume-aware timer: a hidden dummy element animated for one tick,
+  // .finished fires when the trip should be removed. When the simulator
+  // pauses, the composable freezes this animation (and the CSS pcb-fly /
+  // pcb-trail on the visible elements freeze via --anim-state).
+  const dummy = document.createElement('div');
+  const anim = animator.play(dummy, [{ opacity: 0 }, { opacity: 0 }], { fill: 'none' });
+  if (anim) {
+    anim.finished
+      .then(() => { trips.value = trips.value.filter(t => t.id !== payload.seq); })
+      .catch(() => { /* cancelled */ });
+  }
 }
+
+// Toggle a custom property on the root so all in-flight CSS animations honor
+// the sim's running flag. Without this the pcb-fly / pcb-trail keyframes would
+// keep racing through wall-clock even when the simulator is paused.
+watch(
+  () => cpu.running,
+  (on) => {
+    if (root.value) root.value.style.setProperty('--anim-state', on ? 'running' : 'paused');
+  },
+  { immediate: true },
+);
 
 narrators.onPcbSave((p) => launch('save', p));
 narrators.onPcbRestore((p) => launch('restore', p));
@@ -138,7 +155,7 @@ onUnmounted(() => { trips.value = []; });
           :x2="t.toX"
           :y2="t.toY"
           :style="{
-            '--ttl': `${props.ttlMs / prefs.animationSpeed}ms`,
+            '--ttl': ttlCss,
             '--core-color': `var(--core-${t.coreId % 4})`,
           }"
         />
@@ -154,7 +171,7 @@ onUnmounted(() => { trips.value = []; });
         '--from-y': `${t.fromY}px`,
         '--to-x':   `${t.toX}px`,
         '--to-y':   `${t.toY}px`,
-        '--ttl':    `${props.ttlMs / prefs.animationSpeed}ms`,
+        '--ttl':    ttlCss,
         '--core-color': `var(--core-${t.coreId % 4})`,
       }"
     >
@@ -193,11 +210,9 @@ onUnmounted(() => { trips.value = []; });
   fill: none;
   stroke-dasharray: 6 4;
   animation: pcb-trail var(--ttl) linear forwards;
+  animation-play-state: var(--anim-state, running);
 }
 
-/* SAVE picks up the source core's tint (matches the InterruptNarrator
-   convention). RESTORE stays green — semantically "this PID is now running
-   again" — regardless of which core received the context. */
 .pcb-copy__trail--save {
   stroke: var(--core-color, var(--amber));
   filter: drop-shadow(0 0 5px color-mix(in oklab, var(--core-color, var(--amber)) 60%, transparent));
@@ -227,6 +242,7 @@ onUnmounted(() => { trips.value = []; });
   font-size: 11px;
   transform: translate(calc(var(--from-x) - 50%), calc(var(--from-y) - 50%));
   animation: pcb-fly var(--ttl) cubic-bezier(0.25, 0.5, 0.25, 1) forwards;
+  animation-play-state: var(--anim-state, running);
 }
 
 .pcb-copy__card--save {

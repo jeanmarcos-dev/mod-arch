@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onUnmounted, watch, computed } from 'vue';
 import { useNarrators, type MemWrite, type MemRead } from '../../lib/narratorBus';
-import { usePreferencesStore } from '../../stores/preferences';
 import { useCpuStore } from '../../stores/cpu';
+import { useNarratorAnimation } from './useNarratorAnimation';
 
 const cpu = useCpuStore();
+const animator = useNarratorAnimation();
 
 // A flight is one animated byte traveling from the source anchor (CPU
 // register grid) to the destination anchor (a row inside the memory hex
-// view, identified by data-mem-addr). Flights are pruned by their own TTL
-// so we never accumulate.
+// view, identified by data-mem-addr). Each flight lasts exactly one
+// simulator tick; below narratorMinTickMs they don't fire at all.
 interface Flight {
   id: number;
   fromX: number;
@@ -19,7 +20,6 @@ interface Flight {
   label: string;
   kind: 'write' | 'read';
   coreId: number;
-  born: number;
 }
 
 const props = withDefaults(
@@ -32,18 +32,16 @@ const props = withDefaults(
      * so the byte lands on the exact byte being written.
      */
     target?: (addr: number) => Element | null;
-    /** How long each byte stays on screen, in ms. */
-    ttlMs?: number;
   }>(),
   {
     sourceSelector: '[data-narrator-anchor="cpu"]',
-    ttlMs: 900,
   },
 );
 
 const flights = ref<Flight[]>([]);
 const root = ref<HTMLElement | null>(null);
-const prefs = usePreferencesStore();
+
+const ttlCss = computed(() => `${animator.tickMs.value}ms`);
 
 function rectCenter(el: Element | null): { x: number; y: number } | null {
   if (!el || !root.value) return null;
@@ -63,9 +61,6 @@ const narrators = useNarrators();
 const MAX_FLIGHTS = 12;
 
 function sourceFor(coreId: number): Element | null {
-  // Prefer the strip of the core that actually issued the read/write so the
-  // byte appears to launch from there. Fall back to the single-panel anchor
-  // for views that do not split CPU state per core (e.g. Memory.vue).
   return (
     document.querySelector(`[data-narrator-anchor="cpu-${coreId}"]`)
     ?? document.querySelector(props.sourceSelector)
@@ -73,9 +68,9 @@ function sourceFor(coreId: number): Element | null {
 }
 
 function launch(kind: 'write' | 'read', addr: number, value: number, seq: number, coreId: number) {
-  // Drop bytes from cores the user is filtering out — keeps the animation
-  // surface aligned with the rest of the UI.
   if (!cpu.isCoreVisible(coreId)) return;
+  if (!animator.shouldFire()) return;
+
   const chipCenter = rectCenter(sourceFor(coreId));
   const cellCenter = rectCenter(props.target ? props.target(addr) : defaultTarget(addr));
   if (!chipCenter || !cellCenter) return;
@@ -86,15 +81,7 @@ function launch(kind: 'write' | 'read', addr: number, value: number, seq: number
   const from = kind === 'write' ? chipCenter : cellCenter;
   const to   = kind === 'write' ? cellCenter : chipCenter;
 
-  // Slow the flight down in pedagogic and projector modes so the audience
-  // can actually trace it.
-  const ttl = Math.round(props.ttlMs / prefs.animationSpeed);
-
-  // Cap the in-flight set so a burst (e.g. sys_write reading 8 bytes) doesn't
-  // turn into visual noise. Drop the oldest when over the cap.
-  if (flights.value.length >= MAX_FLIGHTS) {
-    flights.value.shift();
-  }
+  if (flights.value.length >= MAX_FLIGHTS) flights.value.shift();
 
   flights.value.push({
     id: seq,
@@ -105,38 +92,30 @@ function launch(kind: 'write' | 'read', addr: number, value: number, seq: number
     label: (kind === 'write' ? 'W ' : 'R ') + '0x' + (value & 0xff).toString(16).toUpperCase().padStart(2, '0'),
     kind,
     coreId,
-    born: performance.now(),
   });
 
-  // Self-pruning: schedule a single removal per flight.
-  window.setTimeout(() => {
-    flights.value = flights.value.filter((f) => f.id !== seq);
-  }, ttl + 50);
+  // One-tick pause/resume-aware timer driving removal of this flight.
+  const dummy = document.createElement('div');
+  const anim = animator.play(dummy, [{ opacity: 0 }, { opacity: 0 }], { fill: 'none' });
+  if (anim) {
+    anim.finished
+      .then(() => { flights.value = flights.value.filter((f) => f.id !== seq); })
+      .catch(() => { /* cancelled */ });
+  }
 }
 
 narrators.onMemWrite((m: MemWrite) => launch('write', m.addr, m.newValue, m.seq, m.coreId));
 narrators.onMemRead((m: MemRead) => launch('read', m.addr, m.value, -m.seq, m.coreId));
 
-// rAF tick to expire flights even when the timeout drifts (e.g. tab in
-// background returns). Kept lightweight; bails out as soon as the array is
-// empty.
-let raf = 0;
-function tick() {
-  const now = performance.now();
-  const cutoff = props.ttlMs / Math.max(prefs.animationSpeed, 0.2);
-  flights.value = flights.value.filter((f) => now - f.born < cutoff + 60);
-  if (flights.value.length > 0) raf = requestAnimationFrame(tick);
-  else raf = 0;
-}
-const stopWatcher = setInterval(() => {
-  if (flights.value.length > 0 && raf === 0) raf = requestAnimationFrame(tick);
-}, 200);
+watch(
+  () => cpu.running,
+  (on) => {
+    if (root.value) root.value.style.setProperty('--anim-state', on ? 'running' : 'paused');
+  },
+  { immediate: true },
+);
 
-onMounted(() => { /* root ref already wired via template */ });
-onUnmounted(() => {
-  if (raf !== 0) cancelAnimationFrame(raf);
-  clearInterval(stopWatcher);
-});
+onUnmounted(() => { flights.value = []; });
 </script>
 
 <template>
@@ -155,7 +134,7 @@ onUnmounted(() => {
           :x2="f.toX"
           :y2="f.toY"
           marker-end="url(#bf-head)"
-          :style="{ '--ttl': `${props.ttlMs / prefs.animationSpeed}ms`, '--core-color': `var(--core-${f.coreId % 4})` }"
+          :style="{ '--ttl': ttlCss, '--core-color': `var(--core-${f.coreId % 4})` }"
         />
       </template>
     </svg>
@@ -169,7 +148,7 @@ onUnmounted(() => {
         '--from-y': `${f.fromY}px`,
         '--to-x': `${f.toX}px`,
         '--to-y': `${f.toY}px`,
-        '--ttl': `${props.ttlMs / prefs.animationSpeed}ms`,
+        '--ttl': ttlCss,
         '--core-color': `var(--core-${f.coreId % 4})`,
       }"
     >
@@ -198,6 +177,7 @@ onUnmounted(() => {
   stroke-width: 1.5;
   fill: none;
   animation: bf-trail var(--ttl) linear forwards;
+  animation-play-state: var(--anim-state, running);
   stroke: var(--core-color, var(--amber));
   color: var(--core-color, var(--amber));
   filter: drop-shadow(0 0 4px color-mix(in oklab, var(--core-color, var(--amber)) 70%, transparent));
@@ -233,6 +213,7 @@ onUnmounted(() => {
   background: var(--surface-2);
   white-space: nowrap;
   animation: bf-fly var(--ttl) cubic-bezier(0.25, 0.5, 0.25, 1) forwards;
+  animation-play-state: var(--anim-state, running);
   color: var(--core-color, var(--amber));
   box-shadow: 0 0 12px color-mix(in oklab, var(--core-color, var(--amber)) 50%, transparent);
 }

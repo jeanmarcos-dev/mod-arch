@@ -1,23 +1,23 @@
 <script setup lang="ts">
-import { onUnmounted, ref } from 'vue';
+import { onUnmounted, ref, watch, computed } from 'vue';
 import { useCpuStore } from '../../stores/cpu';
 import { useNarrators, type IrqFire, type ModeSwitch } from '../../lib/narratorBus';
-import { usePreferencesStore } from '../../stores/preferences';
+import { useNarratorAnimation } from './useNarratorAnimation';
 
 // InterruptNarrator stages the IRQ-enter / IRET-return arc. On irq_fire it
 // draws a curved arrow from the CPU anchor to the IDT entry whose vector was
 // just dispatched, and floats a "frame" card at the IDT side listing what
 // the hardware just pushed onto the kernel stack (EIP, CS, EFLAGS). On
 // mode_switch with cause=iret it draws the reverse arc back to the CPU,
-// labelled IRET.
+// labelled IRET, plus three mini-arrows for each saved word.
 //
-// We keep the most-recently-entered vector in a tiny stack so a chain of
-// IRET hops can pop in LIFO order. The simulator only nests handlers
-// shallowly, but the stack is the honest model.
+// All visible animations last exactly one simulator tick. When cpu.running
+// flips to false, --anim-state pauses every CSS animation; the WAAPI
+// timers used to schedule removal pause through the composable.
 
 const cpu = useCpuStore();
-const prefs = usePreferencesStore();
 const narrators = useNarrators();
+const animator = useNarratorAnimation();
 
 interface Hop {
   id: number;
@@ -32,10 +32,6 @@ interface Hop {
   frame: { EIP: string; CS: string; EFLAGS: string };
 }
 
-// IRETArrow is one of the three "stack → CPU" mini-arrows we fire when the
-// kernel executes iret. Each arrow re-traces the journey of one saved word
-// (EIP / CS / EFLAGS) from the stack panel back to its home register, with a
-// small delay so the user reads them as a sequence rather than a single blob.
 interface IRETArrow {
   id: number;
   coreId: number;
@@ -52,25 +48,22 @@ const iretArrows = ref<IRETArrow[]>([]);
 const root = ref<HTMLElement | null>(null);
 
 const MAX_HOPS = 4;
-// Total time the mini-arrow stays on screen, before stagger scaling.
-const IRET_ARROW_MS = 700;
-// Stagger between the three saved-word arrows (EIP, CS, EFLAGS).
-const IRET_STAGGER_MS = 120;
 
 const props = withDefaults(
   defineProps<{
-    /** CSS selector for the CPU side (mode chip / register file). */
     cpuSelector?: string;
-    /** Lookup for the IDT row of a given vector. */
     idtTarget?: (vec: number) => Element | null;
-    /** Time each hop stays on screen in ms (scaled by animationSpeed). */
-    ttlMs?: number;
   }>(),
   {
     cpuSelector: '[data-narrator-anchor="cpu"]',
-    ttlMs: 1500,
   },
 );
+
+const ttlCss = computed(() => `${animator.tickMs.value}ms`);
+// Stagger is a fraction of the tick so all three mini-arrows finish within
+// one event window even when SPEED is very slow.
+const iretStaggerMs = computed(() => Math.max(40, Math.round(animator.tickMs.value * 0.12)));
+const iretArrowMs  = computed(() => Math.max(120, Math.round(animator.tickMs.value * 0.7)));
 
 function rectCenter(el: Element | null): { x: number; y: number } | null {
   if (!el || !root.value) return null;
@@ -87,10 +80,6 @@ function hex(n: number, w = 6): string {
   return '0x' + (n >>> 0).toString(16).padStart(w, '0').toUpperCase();
 }
 
-// snapshotFrame reads EIP/CS/EFLAGS from the core that actually triggered the
-// event, not the one the user happens to be inspecting. In single-core mode
-// the two collapse to the same core; in multicore an IRQ on C1 must show C1's
-// frame regardless of whether the SimBar is parked on C0.
 function snapshotFrame(coreId: number) {
   const core = cpu.cores.find(c => c.id === coreId);
   const regs = core?.regs ?? cpu.regs;
@@ -103,9 +92,6 @@ function snapshotFrame(coreId: number) {
 }
 
 let seq = 0;
-// One enter-stack per core so an IRET on C1 pops the IRQ that C1 took, not
-// whichever vector landed last on any core. Without the per-core split, IRET
-// arcs in a 2-core demo would chase the wrong vector half the time.
 const enterStacks = ref<Record<number, number[]>>({});
 function pushEnter(coreId: number, vec: number) {
   (enterStacks.value[coreId] ??= []).push(vec);
@@ -120,22 +106,26 @@ function spawn(h: Omit<Hop, 'id'>) {
   const id = seq;
   hops.value.push({ ...h, id });
 
-  const ttl = Math.round(props.ttlMs / prefs.animationSpeed);
-  window.setTimeout(() => {
-    hops.value = hops.value.filter(x => x.id !== id);
-  }, ttl + 100);
+  // Pause/resume-aware one-tick timer for cleanup.
+  const dummy = document.createElement('div');
+  const anim = animator.play(dummy, [{ opacity: 0 }, { opacity: 0 }], { fill: 'none' });
+  if (anim) {
+    anim.finished
+      .then(() => { hops.value = hops.value.filter(x => x.id !== id); })
+      .catch(() => { /* cancelled */ });
+  }
 }
 
 narrators.onIrqFire((ev: IrqFire) => {
-  // Bookkeeping first, rendering second. The enterStack must stay balanced
-  // even if the user toggles the core off mid-flight, otherwise a later IRET
-  // pops the wrong vector. Nested kernel→kernel IRQs never produce a mode
-  // flip on IRET, so we skip the push entirely to keep enter/pop paired.
+  // Bookkeeping first so an IRET later pops the right vector even when the
+  // narrator is suppressed for visibility reasons.
   if (ev.fromMode === 'user') {
     pushEnter(ev.coreId, ev.vector);
   }
 
   if (!cpu.isCoreVisible(ev.coreId)) return;
+  if (!animator.shouldFire()) return;
+
   const cpuEl = document.querySelector(props.cpuSelector);
   const idtEl = props.idtTarget ? props.idtTarget(ev.vector) : defaultIdtTarget(ev.vector);
   if (!cpuEl || !idtEl) return;
@@ -154,17 +144,14 @@ narrators.onIrqFire((ev: IrqFire) => {
 });
 
 narrators.onModeSwitch((ev: ModeSwitch) => {
-  // Only model the kernel→user return triggered by an IRET. Other causes
-  // (a fault elevating into kernel) are handled by ModeFlipNarrator.
   if (ev.to !== 'user') return;
   if (!/iret/i.test(ev.cause)) return;
 
-  // Pop unconditionally so the per-core stack stays balanced even when the
-  // core is hidden in the SimBar. Render is what gates on visibility.
   const vec = popEnter(ev.coreId);
   if (vec === undefined) return;
 
   if (!cpu.isCoreVisible(ev.coreId)) return;
+  if (!animator.shouldFire()) return;
 
   const cpuEl = document.querySelector(props.cpuSelector);
   const idtEl = props.idtTarget ? props.idtTarget(vec) : defaultIdtTarget(vec);
@@ -185,11 +172,6 @@ narrators.onModeSwitch((ev: ModeSwitch) => {
   spawnIretArrows(ev.coreId);
 });
 
-// spawnIretArrows fires three small arrows from the stack-frame panel rows
-// (EIP / CS / EFLAGS) toward the CPU anchor, each delayed slightly so they
-// read as a sequence. If the stack panel is not mounted (e.g. the user is on
-// a different route, the narrator still runs because the bus is global) we
-// silently skip — there is nothing to animate from.
 function spawnIretArrows(coreId: number) {
   const stackRoot = document.querySelector(`[data-irq-stack="C${coreId}"]`);
   if (!stackRoot) return;
@@ -218,14 +200,30 @@ function spawnIretArrows(coreId: number) {
       label,
       fromX: from.x, fromY: from.y,
       toX: cpuTarget.x, toY: cpuTarget.y,
-      delayMs: i * IRET_STAGGER_MS,
+      delayMs: i * iretStaggerMs.value,
     });
-    const lifetime = (IRET_ARROW_MS + i * IRET_STAGGER_MS) / prefs.animationSpeed + 50;
-    window.setTimeout(() => {
-      iretArrows.value = iretArrows.value.filter(a => a.id !== id);
-    }, lifetime);
+
+    const dummy = document.createElement('div');
+    const anim = animator.play(
+      dummy,
+      [{ opacity: 0 }, { opacity: 0 }],
+      { fill: 'none', delayMs: i * iretStaggerMs.value, durationMs: iretArrowMs.value },
+    );
+    if (anim) {
+      anim.finished
+        .then(() => { iretArrows.value = iretArrows.value.filter(a => a.id !== id); })
+        .catch(() => { /* cancelled */ });
+    }
   }
 }
+
+watch(
+  () => cpu.running,
+  (on) => {
+    if (root.value) root.value.style.setProperty('--anim-state', on ? 'running' : 'paused');
+  },
+  { immediate: true },
+);
 
 onUnmounted(() => {
   hops.value = [];
@@ -233,26 +231,15 @@ onUnmounted(() => {
   enterStacks.value = {};
 });
 
-// The arrow path is a quadratic bezier whose control point sits above the
-// midpoint to draw a noticeable arc rather than a straight line.
 function curvePath(h: Hop): string {
   const midX = (h.fromX + h.toX) / 2;
   const midY = (h.fromY + h.toY) / 2;
   const lift = Math.min(120, Math.max(40, Math.abs(h.toX - h.fromX) * 0.25));
-  // Lift the control point UP for ENTER (going right), DOWN for IRET so
-  // the two paths don't overlap.
   const sign = h.kind === 'enter' ? -1 : 1;
   return `M ${h.fromX},${h.fromY} Q ${midX},${midY + sign * lift} ${h.toX},${h.toY}`;
 }
 
-// The card sits near the arc's destination so the student reads it after
-// the arrow lands.
 function cardPos(h: Hop): { x: number; y: number } {
-  // ENTER lands on the IDT row — drop the card to the right of it.
-  // IRET lands on the CPU anchor — drop the card BELOW it so the card
-  // never overlaps section titles or sticky chrome sitting above the CPU
-  // anchor (the mode chip on /interrupciones has the page title to its
-  // right and only empty body below).
   if (h.kind === 'enter') {
     return { x: h.toX + 40, y: h.toY };
   }
@@ -284,7 +271,7 @@ function vecLabel(v: number): string {
           :d="curvePath(h)"
           :marker-end="h.kind === 'enter' ? 'url(#int-arrow-enter)' : 'url(#int-arrow-iret)'"
           :style="{
-            '--ttl': `${props.ttlMs / prefs.animationSpeed}ms`,
+            '--ttl': ttlCss,
             '--core-color': `var(--core-${h.coreId % 4})`,
           }"
         />
@@ -294,14 +281,14 @@ function vecLabel(v: number): string {
           class="int-narrator__mini"
           :d="`M ${a.fromX},${a.fromY} L ${a.toX},${a.toY}`"
           marker-end="url(#int-arrow-mini)"
-          :style="{ '--delay': `${a.delayMs / prefs.animationSpeed}ms`, '--ttl': `${IRET_ARROW_MS / prefs.animationSpeed}ms` }"
+          :style="{ '--delay': `${a.delayMs}ms`, '--ttl': `${iretArrowMs}ms` }"
         />
         <text
           class="int-narrator__mini-label"
           :x="(a.fromX + a.toX) / 2"
           :y="(a.fromY + a.toY) / 2 - 6"
           text-anchor="middle"
-          :style="{ '--delay': `${a.delayMs / prefs.animationSpeed}ms`, '--ttl': `${IRET_ARROW_MS / prefs.animationSpeed}ms` }"
+          :style="{ '--delay': `${a.delayMs}ms`, '--ttl': `${iretArrowMs}ms` }"
         >{{ a.label }}</text>
       </template>
     </svg>
@@ -313,7 +300,7 @@ function vecLabel(v: number): string {
       :style="{
         '--x': `${cardPos(h).x}px`,
         '--y': `${cardPos(h).y}px`,
-        '--ttl': `${props.ttlMs / prefs.animationSpeed}ms`,
+        '--ttl': ttlCss,
         '--core-color': `var(--core-${h.coreId % 4})`,
       }"
     >
@@ -364,11 +351,9 @@ function vecLabel(v: number): string {
   stroke-width: 2;
   stroke-dasharray: 6 4;
   animation: int-arc var(--ttl) ease-out forwards;
+  animation-play-state: var(--anim-state, running);
 }
 
-/* ENTER picks up the issuing core's tint so a 4-core demo paints four
-   distinct arcs into the IDT. IRET stays semantic-green to read as "return
-   to user mode" regardless of core. */
 .int-narrator__arc--enter {
   stroke: var(--core-color, var(--amber));
   color: var(--core-color, var(--amber));
@@ -400,6 +385,7 @@ function vecLabel(v: number): string {
   font-size: 11px;
   transform: translate(calc(var(--x) - 50%), calc(var(--y) - 50%));
   animation: int-card var(--ttl) cubic-bezier(0.25, 0.5, 0.25, 1) forwards;
+  animation-play-state: var(--anim-state, running);
 }
 
 .int-narrator__card--enter {
@@ -487,6 +473,7 @@ function vecLabel(v: number): string {
   filter: drop-shadow(0 0 4px rgba(127, 255, 170, 0.55));
   animation: int-mini-arc var(--ttl) ease-out forwards;
   animation-delay: var(--delay);
+  animation-play-state: var(--anim-state, running);
 }
 
 .int-narrator__mini-label {
@@ -499,6 +486,7 @@ function vecLabel(v: number): string {
   text-shadow: 0 0 6px rgba(127, 255, 170, 0.6);
   animation: int-mini-label var(--ttl) ease-out forwards;
   animation-delay: var(--delay);
+  animation-play-state: var(--anim-state, running);
 }
 
 @keyframes int-mini-arc {

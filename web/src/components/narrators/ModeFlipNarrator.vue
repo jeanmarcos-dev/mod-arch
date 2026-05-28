@@ -1,24 +1,25 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useCpuStore } from '../../stores/cpu';
 import { useNarrators, type ModeSwitch } from '../../lib/narratorBus';
-import { usePreferencesStore } from '../../stores/preferences';
+import { useNarratorAnimation } from './useNarratorAnimation';
 
 // ModeFlipNarrator stages the USER↔KERNEL transition. Two layers:
 //
 //   1. An always-on ambient tint over its host element so the student can tell
 //      at a glance which privilege level the CPU is in right now. This stays
 //      on even when narrators are toggled off — it is context, not animation.
-//   2. A transient pulse + banner on each mode_switch event. The banner names
-//      both modes and the cause (e.g. "int 0x80", "iret"). Honors the
-//      narrators preference and the global animation speed knob.
+//   2. A transient pulse + banner on each mode_switch event. Each lasts exactly
+//      one simulator tick (cpu.tickIntervalMs) so the visual matches the event
+//      it represents. When the simulator pauses, the banner freezes in place
+//      mid-life and continues from the same frame on resume.
 //
 // The component must be placed inside a position: relative parent — it covers
 // it via inset: 0 and lets pointer events fall through to the content below.
 
 const cpu = useCpuStore();
-const prefs = usePreferencesStore();
 const narrators = useNarrators();
+const animator = useNarratorAnimation();
 
 interface BannerInfo {
   id: number;
@@ -29,36 +30,61 @@ interface BannerInfo {
 }
 
 const banner = ref<BannerInfo | null>(null);
-const pulse = ref(false);
+const tintRef = ref<HTMLElement | null>(null);
+const bannerRef = ref<HTMLElement | null>(null);
 let seq = 0;
-let bannerTimer = 0;
-let pulseTimer = 0;
 
 narrators.onModeSwitch((ev: ModeSwitch) => {
   // Respect the SimBar filter: do not announce flips on hidden cores.
   if (!cpu.isCoreVisible(ev.coreId)) return;
+  // At very high effective rates we skip the narrator entirely — see the
+  // narratorMinTickMs preference.
+  if (!animator.shouldFire()) return;
+
   seq++;
-  banner.value = { id: seq, coreId: ev.coreId, from: ev.from, to: ev.to, cause: ev.cause };
-  pulse.value = true;
+  const myId = seq;
+  banner.value = { id: myId, coreId: ev.coreId, from: ev.from, to: ev.to, cause: ev.cause };
 
-  // Scale dwell + pulse by the global animation speed so projector mode reads
-  // them longer than compact mode.
-  const dwell = Math.round(1800 / prefs.animationSpeed);
-  const pulseDur = Math.round(450 / prefs.animationSpeed);
+  // Brightness pulse on the tint, mirrors the legacy 450ms mf-pulse keyframes
+  // but stretched/compressed to one simulator tick so it stays in sync with
+  // the event.
+  if (tintRef.value) {
+    animator.play(
+      tintRef.value,
+      [
+        { filter: 'brightness(1) saturate(1)', offset: 0 },
+        { filter: 'brightness(1.9) saturate(1.4)', offset: 0.35 },
+        { filter: 'brightness(1) saturate(1)', offset: 1 },
+      ],
+      { fill: 'none' },
+    );
+  }
 
-  window.clearTimeout(bannerTimer);
-  window.clearTimeout(pulseTimer);
-  bannerTimer = window.setTimeout(() => { banner.value = null; }, dwell);
-  pulseTimer = window.setTimeout(() => { pulse.value = false; }, pulseDur);
-});
-
-onBeforeUnmount(() => {
-  window.clearTimeout(bannerTimer);
-  window.clearTimeout(pulseTimer);
+  // Banner dwell: animate an invisible opacity hold for one tick so we get a
+  // pause/resume-aware timer "for free". rAF defers until Vue mounts the v-if
+  // wrapper and bannerRef is populated.
+  requestAnimationFrame(() => {
+    if (banner.value?.id !== myId || !bannerRef.value) return;
+    const anim = animator.play(
+      bannerRef.value,
+      [{ opacity: 1 }, { opacity: 1 }],
+      { fill: 'forwards' },
+    );
+    if (!anim) {
+      banner.value = null;
+      return;
+    }
+    anim.finished
+      .then(() => { if (banner.value?.id === myId) banner.value = null; })
+      .catch(() => { /* cancelled on unmount or rapid follow-up event */ });
+  });
 });
 
 // cpu.mode is 3 for user, 0 for kernel. Map to a readable class hook.
 const modeName = computed<'user' | 'kernel'>(() => (cpu.mode === 3 ? 'user' : 'kernel'));
+
+// Boot idle (no PID on any core, not running) is neutral — no halo.
+const showTint = computed(() => cpu.running || cpu.cores.some(c => c.current_pid > 0));
 
 function label(m: 'user' | 'kernel') {
   return m === 'user' ? 'USER' : 'KERNEL';
@@ -69,16 +95,16 @@ function label(m: 'user' | 'kernel') {
   <div
     :class="[
       'mode-flip',
-      `mode-flip--${modeName}`,
-      { 'mode-flip--pulse': pulse },
+      showTint ? `mode-flip--${modeName}` : 'mode-flip--idle',
     ]"
     aria-hidden="true"
   >
-    <div class="mode-flip__tint"></div>
+    <div ref="tintRef" class="mode-flip__tint"></div>
 
     <Transition name="mf-banner">
       <div
         v-if="banner"
+        ref="bannerRef"
         :key="banner.id"
         class="mode-flip__banner"
         :style="{ '--core-color': `var(--core-${banner.coreId % 4})`, '--core-color-fg': `var(--core-fg)` }"
@@ -119,16 +145,6 @@ function label(m: 'user' | 'kernel') {
     radial-gradient(circle at top right, rgba(var(--accent-rgb), 0.12), transparent 55%),
     radial-gradient(circle at bottom left, rgba(var(--accent-rgb), 0.07), transparent 60%);
   box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.22), inset 0 0 38px rgba(var(--accent-rgb), 0.14);
-}
-
-.mode-flip--pulse .mode-flip__tint {
-  animation: mf-pulse 450ms ease-out;
-}
-
-@keyframes mf-pulse {
-  0%   { filter: brightness(1) saturate(1); }
-  35%  { filter: brightness(1.9) saturate(1.4); }
-  100% { filter: brightness(1) saturate(1); }
 }
 
 .mode-flip__banner {
@@ -204,6 +220,5 @@ function label(m: 'user' | 'kernel') {
   .mode-flip__tint,
   .mf-banner-enter-active,
   .mf-banner-leave-active { transition-duration: 0.001ms !important; }
-  .mode-flip--pulse .mode-flip__tint { animation: none; }
 }
 </style>

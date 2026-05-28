@@ -19,6 +19,11 @@ interface PrefsState {
   mode: PresentationMode;
   density: Density;
   narratorsEnabled: boolean;
+  // Below this tick interval (ms) narrators stop firing. Pedagogically:
+  // visual narration of every event is meaningless once the CPU ticks faster
+  // than the eye can resolve. Configurable so the teacher can widen or
+  // narrow the readable band.
+  narratorMinTickMs: number;
   theme: Theme;
 }
 
@@ -35,6 +40,7 @@ const DEFAULTS: PrefsState = {
   mode: 'pedagogic',
   density: 'comfortable',
   narratorsEnabled: true,
+  narratorMinTickMs: 200,
   theme: 'amber',
 };
 
@@ -80,6 +86,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
   const mode = ref<PresentationMode>(initial.mode);
   const density = ref<Density>(initial.density);
   const narratorsEnabled = ref(initial.narratorsEnabled);
+  const narratorMinTickMs = ref(initial.narratorMinTickMs);
   const theme = ref<Theme>(initial.theme);
 
   // Mobile drawer state is volatile by design: always starts closed so a
@@ -94,8 +101,8 @@ export const usePreferencesStore = defineStore('preferences', () => {
   watch(theme, (t) => applyTheme(t), { immediate: false });
 
   watch(
-    [sidebarCollapsed, mode, density, narratorsEnabled, theme],
-    ([sc, m, d, n, t]) => {
+    [sidebarCollapsed, mode, density, narratorsEnabled, narratorMinTickMs, theme],
+    ([sc, m, d, n, nMin, t]) => {
       try {
         window.localStorage.setItem(
           STORAGE_KEY,
@@ -104,6 +111,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
             mode: m,
             density: d,
             narratorsEnabled: n,
+            narratorMinTickMs: nMin,
             theme: t,
           }),
         );
@@ -156,6 +164,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     mode,
     density,
     narratorsEnabled,
+    narratorMinTickMs,
     theme,
     rowDensity,
     animationsEnabled,
