@@ -116,6 +116,22 @@ export const formatLog = {
   semHandoff(id: number, fromPid: number, toPid: number): string {
     return `↪ ${t('logEvents.semHandoff', { id, from: fromPid, to: toPid })}`;
   },
+  forkSpawn(parentPid: number, childPid: number, isVfork: boolean): string {
+    const key = isVfork ? 'logEvents.vforkSpawn' : 'logEvents.forkSpawn';
+    return `⤴ ${t(key, { parent: parentPid, child: childPid })}`;
+  },
+  reparent(pid: number, oldParent: number, newParent: number): string {
+    return `↳ ${t('logEvents.reparent', { pid, old: oldParent, new: newParent })}`;
+  },
+  waitCall(pid: number, targetPid: number): string {
+    const target = targetPid === -1 ? '−1' : targetPid.toString();
+    return `⏳ ${t('logEvents.waitCall', { pid, target })}`;
+  },
+  waitReap(parentPid: number, childPid: number, exitCode: number, byInit: boolean): string {
+    const exit = (exitCode >>> 0).toString(16).padStart(8, '0').toUpperCase();
+    const key = byInit ? 'logEvents.initReap' : 'logEvents.waitReap';
+    return `☠ ${t(key, { parent: parentPid, child: childPid, exit })}`;
+  },
   wsDisconnected(): string {
     return `⚠ ${t('logEvents.wsDisconnected')}`;
   },
@@ -133,5 +149,21 @@ export const formatLog = {
   },
   genericErr(message: string): string {
     return `⚠ ${t('logEvents.genericErr', { message })}`;
+  },
+  // backendError renders an error frame received from the Go server. The
+  // backend ships `code` + `params` so the frontend can translate the message
+  // against its own catalog and keep it in sync with the active locale. The
+  // `fallback` is the raw `message` from the payload; we use it when the code
+  // is not in the SPA catalog (forward compat with newer server codes).
+  backendError(code: string, params: Record<string, unknown> | undefined, fallback?: string): string {
+    const key = `backend.errors.${code}`;
+    const translated = t(key, params);
+    // vue-i18n returns the key itself when no translation is found. We treat
+    // that as "missing code in catalog" and fall back to whatever the server
+    // sent in `message`.
+    if (translated === key && fallback) {
+      return `⚠ ${fallback}`;
+    }
+    return `⚠ ${translated}`;
   },
 };

@@ -44,7 +44,7 @@ describe('i18n', () => {
       const esLoad = t.t('simbar.buttons.load');
       t.locale.value = 'en';
       const enLoad = t.t('simbar.buttons.load');
-      expect(esLoad).toBe('LOAD');
+      expect(esLoad).toBe('CARGAR');
       expect(enLoad).toBe('LOAD');
 
       t.locale.value = 'es';

@@ -1,4 +1,4 @@
-# MODOS_CPU
+# MODARCH
 
 Visualizador didáctico de sistemas operativos sobre una arquitectura x86 simplificada. Ejecuta programas hand-encoded paso a paso y muestra en vivo lo que un sistema operativo hace sobre la CPU: cambios de modo kernel/user, interrupciones de hardware (timer, teclado), syscalls, preservación de PCB en context switches, y violaciones de memoria.
 

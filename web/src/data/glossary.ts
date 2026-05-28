@@ -5,6 +5,8 @@
 // automatically. Order inside a category is meaningful — entries are listed
 // in the sequence a student is likely to learn them.
 
+import { GLOSSARY_EN } from './glossary.en';
+
 export interface GlossaryEntry {
   term: string;
   category: string;
@@ -15,6 +17,16 @@ export interface GlossaryEntry {
   // surfaces a Spanish label ("semáforo"), or to map ad-hoc tokens like
   // "interbloqueo" → "Deadlock".
   aliases?: string[];
+}
+
+// Returns the entry with `short`/`detail` swapped for the active locale. When
+// the locale is 'es' (or any unknown locale) the original entry is returned
+// as-is so the Spanish data file keeps being the source of truth.
+export function localizeEntry(entry: GlossaryEntry, locale: string): GlossaryEntry {
+  if (locale !== 'en') return entry;
+  const en = GLOSSARY_EN[entry.term];
+  if (!en) return entry;
+  return { ...entry, short: en.short, detail: en.detail };
 }
 
 export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
@@ -497,15 +509,17 @@ export function listCategories(): string[] {
   return out;
 }
 
-export function filterEntries(query: string): GlossaryEntry[] {
+export function filterEntries(query: string, locale: string = 'es'): GlossaryEntry[] {
   const q = query.trim().toLowerCase();
-  if (!q) return GLOSSARY_ENTRIES;
-  return GLOSSARY_ENTRIES.filter(e =>
-    e.term.toLowerCase().includes(q) ||
-    e.short.toLowerCase().includes(q) ||
-    e.detail.toLowerCase().includes(q) ||
-    e.category.toLowerCase().includes(q),
-  );
+  if (!q) return GLOSSARY_ENTRIES.map(e => localizeEntry(e, locale));
+  return GLOSSARY_ENTRIES
+    .map(e => localizeEntry(e, locale))
+    .filter(e =>
+      e.term.toLowerCase().includes(q) ||
+      e.short.toLowerCase().includes(q) ||
+      e.detail.toLowerCase().includes(q) ||
+      e.category.toLowerCase().includes(q),
+    );
 }
 
 export function groupByCategory(entries: GlossaryEntry[]): Record<string, GlossaryEntry[]> {
