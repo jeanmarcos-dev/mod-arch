@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { useCpuStore } from '../stores/cpu';
 import { computed, onUpdated, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 const cpu = useCpuStore();
 const scroller = ref<HTMLElement | null>(null);
 const keyInput = ref<HTMLInputElement | null>(null);
+const { t } = useI18n();
 
 onUpdated(() => {
   if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight;
@@ -47,8 +49,8 @@ function focusInput() {
 <template>
   <div class="panel console" data-pizarra-anchor="console-panel">
     <div class="panel-title">
-      CONSOLE · sys_write fd=1
-      <span class="kbd-hint" @click="focusInput">⌨ clic para escribir</span>
+      {{ t('panels.console.title') }}
+      <span class="kbd-hint" @click="focusInput">{{ t('panels.console.clickToType') }}</span>
     </div>
     <pre class="output" ref="scroller">
       <template v-for="(c, i) in cpu.consoleChunks" :key="i">
@@ -56,24 +58,24 @@ function focusInput() {
           v-if="multicore && c.coreId !== undefined"
           class="output__core-chip"
           :style="{ background: `var(--core-${c.coreId % 4})`, color: `var(--core-fg)` }"
-          :title="`Salida del núcleo C${c.coreId}`"
+          :title="t('panels.console.coreOutTitle', { core: c.coreId })"
         >C{{ c.coreId }}</span>
         <span :style="{ color: colorOf(c.pid) }">{{ c.text }}</span>
       </template>
-      <span v-if="cpu.consoleChunks.length === 0" class="empty">(sin output todavía)</span>
+      <span v-if="cpu.consoleChunks.length === 0" class="empty">{{ t('panels.console.noOutput') }}</span>
     </pre>
     <div class="kbd-wrap">
       <label
         class="kbd-label clickable-label"
-        title="Este campo simula el teclado físico de la máquina.&#10;Cada tecla que escriba aquí manda una IRQ 0x21 (interrupción de hardware del teclado) al CPU.&#10;Si hay un proceso BLOCKED esperando con sys_read, lo despierta y le entrega el byte.&#10;&#10;— clic para más info —"
+        :title="t('panels.console.kbdTooltip')"
         @click="cpu.openGlossary('IRQ 0x21')"
-      >⌨ TECLADO HW
-        <span class="kbd-help">(cada tecla → IRQ 0x21)</span>
+      >{{ t('panels.console.keyboardHw') }}
+        <span class="kbd-help">{{ t('panels.console.keyboardHint') }}</span>
       </label>
       <input
         ref="keyInput"
         name="kbd_input"
-        aria-label="Teclado simulado (cada tecla genera IRQ 0x21)"
+        :aria-label="t('panels.console.kbdAria')"
         class="key-input"
         type="text"
         inputmode="text"
@@ -82,7 +84,7 @@ function focusInput() {
         autocorrect="off"
         spellcheck="false"
         :disabled="cpu.isViewer()"
-        :placeholder="cpu.isViewer() ? 'modo espectador: solo el propietario puede escribir' : 'haga clic aquí y escriba para enviar teclas al simulador...'"
+        :placeholder="cpu.isViewer() ? t('panels.console.placeholderViewer') : t('panels.console.placeholderActive')"
         @keypress="onKeyPress"
       />
     </div>

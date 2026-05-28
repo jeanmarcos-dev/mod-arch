@@ -1,32 +1,29 @@
 <script setup lang="ts">
 import { useCpuStore, REGISTERS, type CoreInfo } from '../stores/cpu';
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 const cpu = useCpuStore();
+const { t } = useI18n();
 
 function hex(n: number, w = 8) {
   return '0x' + (n >>> 0).toString(16).padStart(w, '0').toUpperCase();
 }
 
-// Tooltips por registro: explicación corta y al hueso.
-const REG_HELP: Record<string, string> = {
-  EAX: 'Accumulator. Registro de propósito general. En syscalls Linux: número del syscall en la entrada, resultado en la salida.',
-  EBX: 'Base. Propósito general. En syscalls Linux i386: arg1.',
-  ECX: 'Counter. Propósito general. En syscalls Linux i386: arg2. Históricamente usado por LOOP.',
-  EDX: 'Data. Propósito general. En syscalls Linux i386: arg3. Usado por MUL/DIV para resultados de 64 bits.',
-  ESI: 'Source Index. Usado por instrucciones de string (movs, lods).',
-  EDI: 'Destination Index. Usado por instrucciones de string (movs, stos).',
-  ESP: 'Stack Pointer. Apunta al tope de la pila del proceso. PUSH decrementa, POP incrementa.',
-  EBP: 'Base Pointer. Apunta a la base del stack frame actual. Útil para acceder a parámetros y locales.',
-  EIP: 'Instruction Pointer. Dirección de la próxima instrucción a ejecutar. Solo cambia por JMP/CALL/RET/INT/IRET o automáticamente tras fetch.',
-  EFLAGS: 'Status register. Bits que reflejan el último resultado aritmético (ZF/SF/CF/OF) y configuración del CPU (IF, etc.).',
-};
-
-const SEG_HELP: Record<string, string> = {
-  CS: 'Code Segment selector. Bits 0-1 = RPL (Requested Privilege Level). En user mode = 0x1B (0x18|3), en kernel = 0x08. IRET lo consulta para decidir el modo de retorno.',
-  DS: 'Data Segment selector. Para accesos de datos (mov, push memoria, etc.).',
-  SS: 'Stack Segment selector. Asociado al stack del proceso actual.',
-};
+// Tooltip lookup is computed from the active locale via t() — these helpers
+// produce the final string with the "click to open glossary" hint appended.
+function regHelp(reg: string): string {
+  return `${t(`cpu.regHelp.${reg}` as const)}${t('cpu.glossaryHint')}`;
+}
+function instrHelp(): string {
+  return t('cpu.instrHelp');
+}
+function flagsHelp(): string {
+  return `${t('cpu.flagsHelp')}${t('cpu.glossaryHint')}`;
+}
+function plHelp(): string {
+  return `${t('cpu.plHelp')}${t('cpu.glossaryHint')}`;
+}
 
 function flagsString(eflags: number): string {
   return [
@@ -37,10 +34,6 @@ function flagsString(eflags: number): string {
     eflags & 0x800 ? 'O' : '-',
   ].join('');
 }
-
-const FLAGS_HELP = 'Flags activos: C=Carry (overflow no signado), Z=Zero (resultado fue 0), S=Sign (resultado negativo), I=Interrupt (IRQs habilitadas), O=Overflow (overflow signado). - = apagado.';
-const PL_HELP = 'PL = Privilege Level. PL3 = USER (procesos comunes, sin permiso de tocar memoria/recursos kernel). PL0 = KERNEL (privilegios totales). El HW cambia el PL automáticamente en INT/IRET/excepción — el SW no puede setearlo directamente.';
-const INSTR_HELP = 'Instruction Register (IR) decodificado: los bytes apuntados por EIP traducidos a la forma legible que el CPU acaba de ejecutar. Cambia con cada step. x86 no expone el IR como un registro arquitectónico, pero conceptualmente esto es lo que vive en el pipeline después del fetch+decode.';
 
 // Cores currently visible in the SimBar filter, sorted by id for stable
 // vertical order. Empty array falls back to a synthetic boot core so the
@@ -74,7 +67,7 @@ function shouldFlash(core: CoreInfo, reg: string): boolean {
     data-pizarra-anchor="cpu-panel"
     data-narrator-anchor="cpu"
   >
-    <div class="panel-title">CPU · REGISTROS</div>
+    <div class="panel-title">{{ t('panels.cores.title') }}</div>
     <section
       v-for="core in visibleCores"
       :key="`core-${core.id}`"
@@ -83,47 +76,47 @@ function shouldFlash(core: CoreInfo, reg: string): boolean {
     >
       <header v-if="visibleCores.length > 1" class="cpu-core__head">
         <span class="cpu-core__id">C{{ core.id }}</span>
-        <span class="cpu-core__pid">{{ core.current_pid ? `P${core.current_pid}` : 'idle' }}</span>
-        <span v-if="core.halted" class="cpu-core__tag">HALT</span>
+        <span class="cpu-core__pid">{{ core.current_pid ? `P${core.current_pid}` : t('panels.cores.idle') }}</span>
+        <span v-if="core.halted" class="cpu-core__tag">{{ t('panels.cores.halt') }}</span>
       </header>
       <div
         class="reg-row clickable"
         v-for="r in REGISTERS"
         :key="r"
         :class="{ flash: shouldFlash(core, r) }"
-        :title="REG_HELP[r] + '\n\n— click para abrir el glosario —'"
+        :title="regHelp(r)"
         @click="cpu.openGlossary(r)"
       >
         <span class="reg-name">{{ r }}</span>
         <span class="reg-val">{{ hex(core.regs[r] ?? 0) }}</span>
       </div>
       <div class="separator"></div>
-      <div class="reg-row instr-row" :title="INSTR_HELP">
+      <div class="reg-row instr-row" :title="instrHelp()">
         <span class="reg-name">INSTR</span>
         <span class="reg-val instr-val">{{ cpu.lastMnemonic[core.id] ?? '—' }}</span>
       </div>
       <div class="separator"></div>
-      <div class="reg-row clickable" :title="FLAGS_HELP + '\n\n— click para abrir el glosario —'" @click="cpu.openGlossary('EFLAGS')">
+      <div class="reg-row clickable" :title="flagsHelp()" @click="cpu.openGlossary('EFLAGS')">
         <span class="reg-name">FLAGS</span>
         <span class="reg-val">{{ flagsString(core.regs.EFLAGS ?? 0) }}</span>
       </div>
-      <div class="reg-row clickable" :title="SEG_HELP.CS + '\n\n— click para abrir el glosario —'" @click="cpu.openGlossary('CS')">
+      <div class="reg-row clickable" :title="regHelp('CS')" @click="cpu.openGlossary('CS')">
         <span class="reg-name">CS</span>
         <span class="reg-val">{{ hex(core.segments.CS, 4) }}</span>
       </div>
-      <div class="reg-row clickable" :title="SEG_HELP.DS + '\n\n— click para abrir el glosario —'" @click="cpu.openGlossary('DS')">
+      <div class="reg-row clickable" :title="regHelp('DS')" @click="cpu.openGlossary('DS')">
         <span class="reg-name">DS</span>
         <span class="reg-val">{{ hex(core.segments.DS, 4) }}</span>
       </div>
-      <div class="reg-row clickable" :title="SEG_HELP.SS + '\n\n— click para abrir el glosario —'" @click="cpu.openGlossary('SS')">
+      <div class="reg-row clickable" :title="regHelp('SS')" @click="cpu.openGlossary('SS')">
         <span class="reg-name">SS</span>
         <span class="reg-val">{{ hex(core.segments.SS, 4) }}</span>
       </div>
       <div class="separator"></div>
-      <div class="reg-row clickable" :title="PL_HELP + '\n\n— click para abrir el glosario —'" @click="cpu.openGlossary('PL')">
+      <div class="reg-row clickable" :title="plHelp()" @click="cpu.openGlossary('PL')">
         <span class="reg-name">PL</span>
         <span class="reg-val" :style="{ color: core.mode === 3 ? 'var(--green)' : 'var(--red-soft)' }">
-          {{ core.mode }} ({{ core.mode === 3 ? 'user' : 'kernel' }})
+          {{ core.mode }} ({{ core.mode === 3 ? t('cpu.plUser') : t('cpu.plKernel') }})
         </span>
       </div>
     </section>

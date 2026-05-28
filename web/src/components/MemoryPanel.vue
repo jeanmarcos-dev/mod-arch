@@ -2,8 +2,10 @@
 import { useCpuStore } from '../stores/cpu';
 import type { CoreInfo } from '../stores/cpu';
 import { computed, onMounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 const cpu = useCpuStore();
+const { t } = useI18n();
 
 // View tabs are global across the accordion. EIP/ESP make each card center on
 // its own core; Custom collapses the accordion into a single full-width dump.
@@ -119,7 +121,7 @@ async function loadCustom() {
   if (!cpu.connected || view.value !== 'custom') return;
   const addr = parseUserAddr(customAddr.value);
   if (addr < 0) {
-    customData.value = { ...customData.value, error: 'dirección inválida' };
+    customData.value = { ...customData.value, error: t('panels.memory.invalidAddr') };
     return;
   }
   customData.value = { ...customData.value, loading: true, error: '' };
@@ -245,11 +247,11 @@ function espFor(coreId: number): number {
 
 function regionLabel(addr: number): string {
   const r = regionOf(addr);
-  if (r === 'reserved') return 'reserved';
-  if (r === 'kernel') return 'kernel';
-  if (r === 'user_code') return 'user code';
-  if (r === 'user_stack') return 'user stack';
-  return '—';
+  if (r === 'reserved') return t('panels.memory.regions.reserved');
+  if (r === 'kernel') return t('panels.memory.regions.kernel');
+  if (r === 'user_code') return t('panels.memory.regions.userCode');
+  if (r === 'user_stack') return t('panels.memory.regions.userStack');
+  return t('panels.memory.regions.none');
 }
 
 function cardData(coreId: number): CardData {
@@ -270,31 +272,31 @@ function effectivelyExpanded(coreId: number): boolean {
 
 <template>
   <div class="panel mem" data-pizarra-anchor="memory-panel">
-    <div class="panel-title">MEMORIA · HEX DUMP</div>
+    <div class="panel-title">{{ t('panels.memory.title') }}</div>
 
     <div class="controls">
       <div class="view-tabs">
         <button
           @click="view = 'eip'"
           :class="{ active: view === 'eip' }"
-          title="Muestra los bytes alrededor del EIP de cada núcleo: el código que se está ejecutando o por ejecutar."
-        >EIP context</button>
+          :title="t('panels.memory.tabHints.eip')"
+        >{{ t('panels.memory.tabs.eip') }}</button>
         <button
           @click="view = 'esp'"
           :class="{ active: view === 'esp' }"
-          title="Muestra la cima del stack de cada núcleo. Lo que se pushea/popea aparece aquí."
-        >Stack (ESP)</button>
+          :title="t('panels.memory.tabHints.esp')"
+        >{{ t('panels.memory.tabs.esp') }}</button>
         <button
           @click="view = 'custom'"
           :class="{ active: view === 'custom' }"
-          title="Salta a una dirección arbitraria. Como la RAM es compartida, esta vista muestra un único dump."
-        >Custom</button>
+          :title="t('panels.memory.tabHints.custom')"
+        >{{ t('panels.memory.tabs.custom') }}</button>
       </div>
       <input
         v-if="view === 'custom'"
         v-model="customAddr"
         name="memory_address"
-        aria-label="Dirección de memoria a inspeccionar"
+        :aria-label="t('panels.memory.addrAria')"
         class="addr-input"
         placeholder="0x100000"
       />
@@ -305,7 +307,7 @@ function effectivelyExpanded(coreId: number): boolean {
     <div v-if="view === 'custom'" class="memory-stack">
       <section class="memory-card memory-card--custom">
         <header class="memory-card__head">
-          <span class="memory-card__label">Custom</span>
+          <span class="memory-card__label">{{ t('panels.memory.customLabel') }}</span>
           <span class="memory-card__reg">addr {{ fmtAddr(customData.baseAddr) }}</span>
           <span class="memory-card__region">{{ regionLabel(customData.baseAddr) }}</span>
         </header>
@@ -396,10 +398,10 @@ function effectivelyExpanded(coreId: number): boolean {
     </div>
 
     <div class="legend">
-      <span class="leg leg-reserved">reserved</span>
-      <span class="leg leg-kernel">kernel</span>
-      <span class="leg leg-user_code">user_code</span>
-      <span class="leg leg-user_stack">user_stack</span>
+      <span class="leg leg-reserved">{{ t('panels.memory.legend.reserved') }}</span>
+      <span class="leg leg-kernel">{{ t('panels.memory.legend.kernel') }}</span>
+      <span class="leg leg-user_code">{{ t('panels.memory.legend.userCode') }}</span>
+      <span class="leg leg-user_stack">{{ t('panels.memory.legend.userStack') }}</span>
     </div>
   </div>
 </template>

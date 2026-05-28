@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Share2, X, Zap, Copy, Check, Square } from '@lucide/vue';
 import { useCpuStore } from '../stores/cpu';
 
 const cpu = useCpuStore();
+const { t } = useI18n();
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
@@ -35,7 +37,7 @@ function activate() {
 }
 
 function deactivate() {
-  if (confirm('¿Desea detener el compartido? Los espectadores actuales perderán la conexión.')) {
+  if (confirm(t('shareModal.deactivateConfirm'))) {
     cpu.unshare();
   }
 }
@@ -46,44 +48,36 @@ function deactivate() {
     <div v-if="props.open" class="modal-overlay" @click.self="emit('close')">
       <div class="modal" role="dialog" aria-modal="true">
         <header class="modal-head">
-          <span class="modal-title"><Share2 :size="14" :stroke-width="2" /> COMPARTIR SESIÓN</span>
-          <button class="close-btn" @click="emit('close')" title="Cerrar (Esc)" aria-label="Cerrar"><X :size="16" :stroke-width="2" /></button>
+          <span class="modal-title"><Share2 :size="14" :stroke-width="2" /> {{ t('shareModal.title') }}</span>
+          <button class="close-btn" @click="emit('close')" :title="t('shareModal.closeHint')" :aria-label="t('shareModal.closeAria')"><X :size="16" :stroke-width="2" /></button>
         </header>
 
         <div class="modal-body">
-          <p class="lead">
-            Genere un enlace <strong>solo lectura</strong> que cualquier persona
-            puede abrir para ver su sesión en tiempo real. Los espectadores verán
-            todo lo que usted hace, pero no podrán tocar nada.
-          </p>
+          <p class="lead">{{ t('shareModal.description') }}</p>
 
           <template v-if="!isShared">
             <button class="cta primary" @click="activate">
               <Zap :size="14" :stroke-width="2" />
-              <span>Activar compartido</span>
+              <span>{{ t('shareModal.activate') }}</span>
             </button>
-            <p class="muted">Se generará un enlace único. Puede desactivarlo cuando lo desee.</p>
+            <p class="muted">{{ t('shareModal.activateHint') }}</p>
           </template>
 
           <template v-else>
-            <label class="field-label">Enlace para compartir</label>
+            <label class="field-label">{{ t('shareModal.linkLabel') }}</label>
             <div class="link-row">
-              <input class="link-input" name="share_link" aria-label="Enlace de la sesión compartida" readonly :value="link" @click="($event.target as HTMLInputElement).select()" />
+              <input class="link-input" name="share_link" :aria-label="t('shareModal.linkAria')" readonly :value="link" @click="($event.target as HTMLInputElement).select()" />
               <button class="copy-btn" @click="copyLink">
                 <component :is="copied ? Check : Copy" :size="14" :stroke-width="2" />
-                <span>{{ copied ? 'COPIADO' : 'COPIAR' }}</span>
+                <span>{{ copied ? t('shareModal.copied') : t('shareModal.copy') }}</span>
               </button>
             </div>
-            <p class="muted">
-              Cualquier persona con este enlace entra como espectador. Si lo
-              desactiva, los espectadores conectados quedan sin poder
-              reconectarse.
-            </p>
+            <p class="muted">{{ t('shareModal.activeHint') }}</p>
 
             <div class="actions-row">
               <button class="cta danger" @click="deactivate">
                 <Square :size="14" :stroke-width="2" />
-                <span>Detener compartido</span>
+                <span>{{ t('shareModal.deactivate') }}</span>
               </button>
             </div>
           </template>

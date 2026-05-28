@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { useCpuStore, type PCBInfo } from '../stores/cpu';
 import { computed, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { ChevronRight } from '@lucide/vue';
 
 const cpu = useCpuStore();
+const { t } = useI18n();
 
 function hex(n: number, w = 6) {
   return '0x' + (n >>> 0).toString(16).padStart(w, '0').toUpperCase();
@@ -16,12 +18,13 @@ function stateClass(state: string) {
 // Mirror of pkg/cpu/cpu.go FlagCF/ZF/SF/IF/OF bit positions. Anything outside
 // this set is irrelevant for the chip strip; if the backend adds new flags
 // the strip degrades silently (no chip rendered) instead of breaking layout.
-const EFLAGS_BITS: Array<{ name: string; mask: number; help: string }> = [
-  { name: 'CF', mask: 1 << 0,  help: 'Carry: el resultado generó acarreo o pidió préstamo.' },
-  { name: 'ZF', mask: 1 << 6,  help: 'Zero: el resultado fue cero.' },
-  { name: 'SF', mask: 1 << 7,  help: 'Sign: el resultado fue negativo (bit alto en 1).' },
-  { name: 'IF', mask: 1 << 9,  help: 'Interrupt Enable: el CPU acepta interrupciones de hardware.' },
-  { name: 'OF', mask: 1 << 11, help: 'Overflow: el resultado se salió del rango con signo.' },
+type FlagName = 'CF' | 'ZF' | 'SF' | 'IF' | 'OF';
+const EFLAGS_BITS: Array<{ name: FlagName; mask: number }> = [
+  { name: 'CF', mask: 1 << 0  },
+  { name: 'ZF', mask: 1 << 6  },
+  { name: 'SF', mask: 1 << 7  },
+  { name: 'IF', mask: 1 << 9  },
+  { name: 'OF', mask: 1 << 11 },
 ];
 
 // Lista ordenada por PID para que las tarjetas no salten. El PID es secuencial
@@ -132,18 +135,51 @@ function flagOn(eflags: number, mask: number): boolean {
 }
 
 function regsSource(p: PCBInfo): string {
-  return coreOfPid(p.pid) !== null ? 'live · CPU' : 'guardado · PCB';
+  return coreOfPid(p.pid) !== null
+    ? t('panels.processes.regsSrcLive')
+    : t('panels.processes.regsSrcSaved');
 }
 
 function stateTitle(p: PCBInfo): string {
   switch (p.state) {
-    case 'RUN':     return `Corriendo en C${coreOfPid(p.pid) ?? '?'}: sus registros viven en el CPU.`;
-    case 'READY':   return 'En cola listo para correr. Sus registros están guardados en el PCB.';
-    case 'BLOCKED': return `Esperando un recurso${p.blocked_on ? ` (${p.blocked_on})` : ''}. Sus registros están guardados en el PCB.`;
-    case 'NEW':     return 'Recién creado, todavía no entró a la cola de listos.';
-    case 'ZOMBIE':  return 'Terminó; el kernel mantiene el PCB hasta que el padre lo recoja.';
+    case 'RUN': {
+      const core = coreOfPid(p.pid);
+      return core === null
+        ? t('panels.processes.states.runUnknownCore')
+        : t('panels.processes.states.run', { core });
+    }
+    case 'READY':   return t('panels.processes.states.ready');
+    case 'BLOCKED': return p.blocked_on
+      ? t('panels.processes.states.blockedOn', { reason: p.blocked_on })
+      : t('panels.processes.states.blocked');
+    case 'NEW':     return t('panels.processes.states.new');
+    case 'ZOMBIE':  return t('panels.processes.states.zombie');
     default:        return p.state;
   }
+}
+
+function flagHelp(name: FlagName): string {
+  return t(`panels.processes.flagHelp.${name}`);
+}
+
+function flagChipTitle(name: FlagName, on: boolean): string {
+  return on
+    ? t('panels.processes.flagChipOn', { name, help: flagHelp(name) })
+    : t('panels.processes.flagChipOff', { name, help: flagHelp(name) });
+}
+
+function regCellTitle(reg: string, p: PCBInfo): string {
+  const cell = coreOfPid(p.pid) !== null
+    ? t('panels.processes.regCellLive', { reg })
+    : t('panels.processes.regCellSaved', { reg });
+  return t('panels.processes.regCellTitle', { cell, pid: p.pid });
+}
+
+function regsSrcTitle(p: PCBInfo): string {
+  const desc = coreOfPid(p.pid) !== null
+    ? t('panels.processes.regsHintLive')
+    : t('panels.processes.regsHintSaved');
+  return t('panels.processes.regsValuesAre', { desc });
 }
 </script>
 
@@ -152,16 +188,16 @@ function stateTitle(p: PCBInfo): string {
     <div class="proc-header">
       <div
         class="panel-title clickable-title"
-        title="Process Control Block: tabla completa de procesos cargados por el kernel, en orden de carga (PID asc), sin importar el estado.&#10;&#10;— click para más info —"
+        :title="t('panels.processes.titleHint')"
         @click="cpu.openGlossary('PCB')"
-      >PCB DE PROCESOS</div>
+      >{{ t('panels.processes.title') }}</div>
       <button
         v-if="sortedProcs.length > 0"
         type="button"
         class="proc-toolbar__btn"
         :class="{ 'proc-toolbar__btn--open': allExpanded }"
-        :title="allExpanded ? 'Colapsar todos los PCBs.' : 'Expandir el PCB de todos los procesos.'"
-        :aria-label="allExpanded ? 'Colapsar todos' : 'Expandir todos'"
+        :title="allExpanded ? t('panels.processes.collapseHint') : t('panels.processes.expandHint')"
+        :aria-label="allExpanded ? t('panels.processes.collapseAll') : t('panels.processes.expandAll')"
         :aria-expanded="allExpanded"
         @click="allExpanded ? collapseAll() : expandAll()"
       >
@@ -170,7 +206,7 @@ function stateTitle(p: PCBInfo): string {
     </div>
 
     <div v-if="sortedProcs.length === 0" class="empty">
-      Cargue un demo para ver los procesos.
+      {{ t('panels.processes.emptyDemo') }}
     </div>
 
     <div v-if="sortedProcs.length > 0" class="proc-list">
@@ -204,31 +240,31 @@ function stateTitle(p: PCBInfo): string {
             v-if="coreOfPid(p.pid) !== null"
             class="proc-card__core"
             :style="{ color: `var(--core-${(coreOfPid(p.pid) as number) % 4})` }"
-            :title="`Núcleo C${coreOfPid(p.pid)} ejecutando este proceso.`"
+            :title="t('panels.processes.coreRunning', { core: coreOfPid(p.pid) ?? 0 })"
           >C{{ coreOfPid(p.pid) }}</span>
           <span class="proc-card__pid">P{{ p.pid }}</span>
-          <span class="proc-card__name" :title="`${p.name} · EIP ${hex(liveEIP(p), 8)}`">{{ p.name }}</span>
+          <span class="proc-card__name" :title="t('panels.processes.nameTooltip', { name: p.name, eip: hex(liveEIP(p), 8) })">{{ p.name }}</span>
         </header>
 
         <div v-if="isExpanded(p.pid)" class="proc-card__body">
           <div class="proc-card__meta">
-            <span class="proc-card__addr" title="Dirección donde el kernel cargó el binario .text de este proceso.">
+            <span class="proc-card__addr" :title="t('panels.processes.addrHint')">
               @ {{ hex(p.code_base, 8) }}
             </span>
-            <span class="proc-card__regs-src" :title="`Los valores mostrados son ${coreOfPid(p.pid) !== null ? 'los registros vivos del CPU mientras este proceso corre. Cambian cada step.' : 'la última copia guardada en el PCB. Se congelaron en el último context switch hasta que el scheduler lo restaure.'}`">
+            <span class="proc-card__regs-src" :title="regsSrcTitle(p)">
               {{ regsSource(p) }}
             </span>
           </div>
 
           <div v-if="p.state === 'BLOCKED' && p.blocked_on" class="proc-card__blocked">
-            ⏸ esperando: {{ p.blocked_on }}
+            {{ t('panels.processes.blockedWaiting', { reason: p.blocked_on }) }}
           </div>
 
           <div class="proc-card__regs">
             <span
               v-for="r in regsList(liveRegs(p))"
               :key="r.name"
-              :title="`${r.name} ${coreOfPid(p.pid) !== null ? 'live en CPU' : 'guardado en PCB'} de P${p.pid}.`"
+              :title="regCellTitle(r.name, p)"
             >
               <span class="r-name">{{ r.name }}</span>
               <span class="r-val">{{ hex(r.val, 8) }}</span>
@@ -238,15 +274,15 @@ function stateTitle(p: PCBInfo): string {
           <div class="proc-card__flags">
             <span
               class="proc-card__flags-label clickable-label"
-              title="EFLAGS: registro de banderas del CPU guardado en el PCB. Cada bit refleja el último resultado aritmético (CF/ZF/SF/OF) o configuración del núcleo (IF). Cada chip se enciende cuando su bandera está en 1.&#10;&#10;— click para más info —"
+              :title="t('panels.processes.eflagsHint')"
               @click="cpu.openGlossary('EFLAGS')"
-            >EFLAGS</span>
+            >{{ t('panels.processes.eflagsTitle') }}</span>
             <span
               v-for="f in EFLAGS_BITS"
               :key="f.name"
               class="pcb-flag"
               :class="{ 'pcb-flag--on': flagOn(liveRegs(p).EFLAGS ?? 0, f.mask) }"
-              :title="`${f.name} — ${f.help} Actualmente ${flagOn(liveRegs(p).EFLAGS ?? 0, f.mask) ? 'en 1 (encendida)' : 'en 0 (apagada)'}.`"
+              :title="flagChipTitle(f.name, flagOn(liveRegs(p).EFLAGS ?? 0, f.mask))"
             >{{ f.name }}</span>
           </div>
         </div>
@@ -256,11 +292,11 @@ function stateTitle(p: PCBInfo): string {
     <div class="ready-queue" v-if="sortedProcs.length > 0">
       <div
         class="rq-label clickable-label"
-        title="Cola FIFO de procesos READY.&#10;&#10;— click para más info —"
+        :title="t('panels.processes.readyQueueHint')"
         @click="cpu.openGlossary('Ready queue')"
-      >READY QUEUE</div>
+      >{{ t('panels.processes.readyQueue') }}</div>
       <div class="rq-pills">
-        <span v-if="cpu.readyQueue.length === 0" class="rq-empty">— vacía —</span>
+        <span v-if="cpu.readyQueue.length === 0" class="rq-empty">{{ t('panels.processes.empty') }}</span>
         <span v-for="pid in cpu.readyQueue" :key="pid" class="rq-pill">P{{ pid }}</span>
       </div>
     </div>
@@ -268,14 +304,14 @@ function stateTitle(p: PCBInfo): string {
     <div class="wait-queue" v-if="sortedProcs.length > 0">
       <div
         class="rq-label clickable-label"
-        title="Cola de procesos BLOCKED esperando un recurso.&#10;&#10;— click para más info —"
+        :title="t('panels.processes.waitQueueHint')"
         @click="cpu.openGlossary('Waiting queue')"
-      >WAITING QUEUE
-        <span v-if="cpu.waitQueue.length > 0" class="wq-hint">— bloqueados en I/O</span>
+      >{{ t('panels.processes.waitQueue') }}
+        <span v-if="cpu.waitQueue.length > 0" class="wq-hint">{{ t('panels.processes.waitQueueHelp') }}</span>
       </div>
       <div class="rq-pills">
-        <span v-if="cpu.waitQueue.length === 0" class="rq-empty">— vacía —</span>
-        <span v-for="w in cpu.waitQueue" :key="w.pid" class="wq-pill" :title="`P${w.pid} esperando: ${w.reason}. Va a despertarse cuando llegue el dato/evento que pidió.`">
+        <span v-if="cpu.waitQueue.length === 0" class="rq-empty">{{ t('panels.processes.empty') }}</span>
+        <span v-for="w in cpu.waitQueue" :key="w.pid" class="wq-pill" :title="t('panels.processes.waitTooltip', { pid: w.pid, reason: w.reason })">
           P{{ w.pid }}
           <span class="wq-reason">{{ w.reason }}</span>
         </span>

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { useCpuStore } from '../stores/cpu';
 import { computed, onUpdated, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 const cpu = useCpuStore();
 const scroller = ref<HTMLElement | null>(null);
+const { t } = useI18n();
 
 onUpdated(() => {
   if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight;
@@ -34,7 +36,7 @@ const multicore = computed(() => cpu.cores.length > 1);
 
 <template>
   <div class="panel log" ref="scroller" data-pizarra-anchor="events-panel">
-    <div class="panel-title">EVENT_LOG</div>
+    <div class="panel-title">{{ t('panels.events.title') }}</div>
     <div
       v-for="(e, i) in visibleLog"
       :key="i"
@@ -47,14 +49,14 @@ const multicore = computed(() => cpu.cores.length > 1);
         v-if="multicore && e.coreId !== undefined"
         class="line__core-chip"
         :style="{ background: `var(--core-${e.coreId % 4})`, color: `var(--core-fg)` }"
-        :title="`Núcleo C${e.coreId}`"
+        :title="t('panels.events.coreChip', { id: e.coreId })"
       >C{{ e.coreId }}</span>
       <span class="line__text">{{ e.text }}</span>
     </div>
     <div v-if="visibleLog.length === 0" class="empty">
       {{ cpu.log.length === 0
-        ? 'Cargue un programa y presione STEP para ver eventos.'
-        : 'Sin eventos para los núcleos visibles. Active más núcleos en la SimBar.' }}
+        ? t('panels.events.emptyLoad')
+        : t('panels.events.emptyNoCores') }}
     </div>
   </div>
 </template>

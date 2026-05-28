@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { computed, reactive, ref } from 'vue';
+import { formatLog } from '../i18n/formatLog';
 
 // Tipos de eventos que llegan por WS (espejo de internal/cpu/events.go).
 // Todos los eventos generados por la CPU llevan core_id: con multicore el
@@ -624,11 +625,11 @@ export const useCpuStore = defineStore('cpu', () => {
     ws.onclose = () => {
       connected.value = false;
       ws = null;
-      pushLog('⚠ desconectado', 'red');
+      pushLog(formatLog.wsDisconnected(), 'red');
       scheduleReconnect();
     };
     ws.onerror = () => {
-      pushLog('⚠ error de conexión WS', 'red');
+      pushLog(formatLog.wsError(), 'red');
       // onerror precedes onclose in the WebSocket lifecycle; rely on onclose
       // to trigger the backoff so we do not double-schedule.
     };
@@ -637,7 +638,7 @@ export const useCpuStore = defineStore('cpu', () => {
         const ev = JSON.parse(e.data) as CpuEvent;
         applyEvent(ev);
       } catch (err) {
-        pushLog(`⚠ json: ${err}`, 'red');
+        pushLog(formatLog.wsJsonErr(err), 'red');
       }
     };
   }
@@ -733,7 +734,7 @@ export const useCpuStore = defineStore('cpu', () => {
         lastMnemonic[ev.core_id] = ev.mnemonic;
         // EventsLog renders the per-core chip from coreId so the text itself
         // stays clean and identical across single- and multi-core sessions.
-        pushLog(`[${ev.eip.toString(16).padStart(6, '0')}]  ${ev.mnemonic}`, 'amber', ev.core_id);
+        pushLog(formatLog.instruction(ev.eip, ev.mnemonic), 'amber', ev.core_id);
         if (isSelected(ev.core_id)) regs.EIP = nextEIP;
         break;
       }
@@ -743,7 +744,7 @@ export const useCpuStore = defineStore('cpu', () => {
       case 'mode_switch': {
         const c = ensureCoreSlot(ev.core_id);
         c.mode = ev.to;
-        pushLog(`▸ mode ${ev.from === 3 ? 'USER' : 'KERNEL'} → ${ev.to === 3 ? 'USER' : 'KERNEL'} (${ev.cause})`, 'red', ev.core_id);
+        pushLog(formatLog.modeSwitch(ev.from, ev.to, ev.cause), 'red', ev.core_id);
         if (isSelected(ev.core_id)) mode.value = ev.to;
         // IRET pops the interrupt frame; the panel needs to clear that core
         // so it goes back to "— sin handler activo —". Defer the mutation
@@ -761,7 +762,7 @@ export const useCpuStore = defineStore('cpu', () => {
         break;
       }
       case 'irq_fire': {
-        pushLog(`◉ IRQ 0x${ev.vector.toString(16).padStart(2, '0')} (${ev.source})`, 'yellow', ev.core_id);
+        pushLog(formatLog.irq(ev.vector, ev.source), 'yellow', ev.core_id);
         lastFiredHandlerByVector.value = {
           ...lastFiredHandlerByVector.value,
           [ev.vector]: {
@@ -790,7 +791,7 @@ export const useCpuStore = defineStore('cpu', () => {
         break;
       }
       case 'page_fault': {
-        pushLog(`✗ PAGE FAULT @ 0x${ev.addr.toString(16)} (need ${ev.perm_needed} in PL${ev.mode})`, 'red', ev.core_id);
+        pushLog(formatLog.pageFault(ev.addr, ev.perm_needed, ev.mode), 'red', ev.core_id);
         faultShake.value = true;
         setTimeout(() => { faultShake.value = false; }, 500);
         break;
@@ -798,7 +799,7 @@ export const useCpuStore = defineStore('cpu', () => {
       case 'halt': {
         const c = ensureCoreSlot(ev.core_id);
         c.halted = true;
-        pushLog(`▸ HALT`, 'red', ev.core_id);
+        pushLog(formatLog.halt(), 'red', ev.core_id);
         if (isSelected(ev.core_id)) halted.value = true;
         break;
       }
@@ -809,7 +810,7 @@ export const useCpuStore = defineStore('cpu', () => {
         if (ev.speedMul !== undefined) speedMul.value = ev.speedMul;
         break;
       case 'loaded':
-        pushLog(`▸ loaded ${ev.name} (${ev.pids.length} proc) PIDs=${ev.pids.join(',')}`, 'green');
+        pushLog(formatLog.loaded(ev.name, ev.pids.length, ev.pids), 'green');
         procs.value = ev.procs;
         if (ev.sources) {
           procSources.value = {};
@@ -827,7 +828,7 @@ export const useCpuStore = defineStore('cpu', () => {
         }
         break;
       case 'reset':
-        pushLog('▸ reset', 'cyan');
+        pushLog(formatLog.reset(), 'cyan');
         changedRegs.clear();
         for (const k of Object.keys(changedRegsByCore)) delete changedRegsByCore[Number(k)];
         procs.value = [];
@@ -867,14 +868,14 @@ export const useCpuStore = defineStore('cpu', () => {
         const p = procs.value.find(x => x.pid === ev.pid);
         if (p) p.regs = ev.regs;
         flashPID(ev.pid);
-        pushLog(`◍ PCB save  PID=${ev.pid}  EIP=0x${(ev.regs.EIP || 0).toString(16)}`, 'red');
+        pushLog(formatLog.pcbSave(ev.pid, ev.regs.EIP || 0), 'red');
         break;
       }
       case 'pcb_restore': {
         const p = procs.value.find(x => x.pid === ev.pid);
         if (p) p.regs = ev.regs;
         flashPID(ev.pid);
-        pushLog(`◌ PCB restore PID=${ev.pid}  EIP=0x${(ev.regs.EIP || 0).toString(16)}`, 'green');
+        pushLog(formatLog.pcbRestore(ev.pid, ev.regs.EIP || 0), 'green');
         break;
       }
       case 'sched_decision': {
@@ -886,8 +887,7 @@ export const useCpuStore = defineStore('cpu', () => {
         // normalize so consumers see an empty array.
         const rq = ev.ready_queue ?? [];
         readyQueue.value = rq;
-        const reasonTag = ev.reason ? ` (${ev.reason})` : '';
-        pushLog(`⇄ schedule: P${ev.from_pid} → P${ev.to_pid}${reasonTag}  ready=[${rq.join(',')}]`, 'yellow');
+        pushLog(formatLog.schedule(ev.from_pid, ev.to_pid, ev.reason, rq), 'yellow');
         break;
       }
       case 'process_state': {
@@ -907,7 +907,7 @@ export const useCpuStore = defineStore('cpu', () => {
         break;
       }
       case 'syscall':
-        pushLog(`⚙ sys_${ev.name}(${ev.args[0]}, 0x${(ev.args[1]>>>0).toString(16)}, ${ev.args[2]}) → ${ev.result}  [P${ev.pid}]`, 'green');
+        pushLog(formatLog.syscall(ev.name, ev.args, ev.result, ev.pid), 'green');
         break;
       case 'console_out':
         consoleChunks.value.push({ pid: ev.pid, coreId: ev.core_id, text: ev.text });
@@ -934,7 +934,7 @@ export const useCpuStore = defineStore('cpu', () => {
           };
         }
         if (ev.role === 'viewer') {
-          pushLog(`▸ conectado como ESPECTADOR de "${ev.label || ev.id.slice(0, 6)}"`, 'cyan');
+          pushLog(formatLog.spectatorMode(ev.label || ev.id.slice(0, 6)), 'cyan');
         }
         break;
       case 'presence':
@@ -961,7 +961,7 @@ export const useCpuStore = defineStore('cpu', () => {
         break;
       case 'error':
         lastError.value = ev.message;
-        pushLog(`⚠ ${ev.message}`, 'red');
+        pushLog(formatLog.genericErr(ev.message), 'red');
         break;
       case 'mem_read':
       case 'mem_write': {
@@ -977,14 +977,14 @@ export const useCpuStore = defineStore('cpu', () => {
         const c = ensureCoreSlot(ev.core_id);
         c.current_pid = ev.pid;
         markCoreActive(c, ev.core_id);
-        pushLog(`◈ core ${ev.core_id} ← P${ev.pid}`, 'amber', ev.core_id);
+        pushLog(formatLog.coreAssign(ev.core_id, ev.pid), 'amber', ev.core_id);
         if (isSelected(ev.core_id)) currentPID.value = ev.pid;
         break;
       }
       case 'core_release': {
         const c = ensureCoreSlot(ev.core_id);
         c.current_pid = 0;
-        pushLog(`◇ core ${ev.core_id} ↛ P${ev.pid}${ev.reason ? ' (' + ev.reason + ')' : ''}`, 'amber', ev.core_id);
+        pushLog(formatLog.coreRelease(ev.core_id, ev.pid, ev.reason), 'amber', ev.core_id);
         if (isSelected(ev.core_id)) currentPID.value = 0;
         break;
       }
@@ -997,29 +997,29 @@ export const useCpuStore = defineStore('cpu', () => {
         switch (ev.op) {
           case 'create':
             // Object already added above; nothing else to track.
-            pushLog(`🔒 mutex ${ev.mutex_id} creado por P${ev.pid}`, 'green');
+            pushLog(formatLog.mutexCreated(ev.mutex_id, ev.pid), 'green');
             break;
           case 'acquired':
             m.holder = ev.pid;
             m.waiters = ev.waiters ?? [];
-            pushLog(`🔒 mutex ${ev.mutex_id} adquirido por P${ev.pid}`, 'green');
+            pushLog(formatLog.mutexAcquired(ev.mutex_id, ev.pid), 'green');
             break;
           case 'waiting':
             m.waiters = ev.waiters ?? [];
-            pushLog(`⏸ P${ev.pid} esperando mutex ${ev.mutex_id}`, 'yellow');
+            pushLog(formatLog.mutexWaiting(ev.mutex_id, ev.pid), 'yellow');
             break;
           case 'released':
             m.holder = -1;
             m.waiters = ev.waiters ?? [];
-            pushLog(`🔓 mutex ${ev.mutex_id} liberado por P${ev.pid}`, 'cyan');
+            pushLog(formatLog.mutexReleased(ev.mutex_id, ev.pid), 'cyan');
             break;
           case 'handoff':
             m.holder = ev.next_pid ?? -1;
             m.waiters = ev.waiters ?? [];
-            pushLog(`↪ mutex ${ev.mutex_id}: P${ev.pid} → P${ev.next_pid}`, 'green');
+            pushLog(formatLog.mutexHandoff(ev.mutex_id, ev.pid, ev.next_pid ?? -1), 'green');
             break;
           case 'rejected':
-            pushLog(`✗ mutex ${ev.mutex_id}: P${ev.pid} intentó liberarlo sin poseerlo (rechazado)`, 'red');
+            pushLog(formatLog.mutexRejected(ev.mutex_id, ev.pid), 'red');
             break;
         }
         break;
@@ -1034,19 +1034,19 @@ export const useCpuStore = defineStore('cpu', () => {
         s.waiters = ev.waiters ?? [];
         switch (ev.op) {
           case 'create':
-            pushLog(`◯ semáforo ${ev.sem_id} creado (count=${ev.count})`, 'green');
+            pushLog(formatLog.semCreated(ev.sem_id, ev.count), 'green');
             break;
           case 'wait_immediate':
-            pushLog(`↓ P${ev.pid} wait sem ${ev.sem_id} (count=${ev.count})`, 'cyan');
+            pushLog(formatLog.semWait(ev.sem_id, ev.pid, ev.count), 'cyan');
             break;
           case 'wait_blocked':
-            pushLog(`⏸ P${ev.pid} bloqueado en sem ${ev.sem_id}`, 'yellow');
+            pushLog(formatLog.semBlocked(ev.sem_id, ev.pid), 'yellow');
             break;
           case 'signal':
-            pushLog(`↑ P${ev.pid} signal sem ${ev.sem_id} (count=${ev.count})`, 'green');
+            pushLog(formatLog.semSignal(ev.sem_id, ev.pid, ev.count), 'green');
             break;
           case 'handoff':
-            pushLog(`↪ sem ${ev.sem_id}: P${ev.pid} → P${ev.next_pid}`, 'green');
+            pushLog(formatLog.semHandoff(ev.sem_id, ev.pid, ev.next_pid ?? -1), 'green');
             break;
         }
         break;
@@ -1056,7 +1056,7 @@ export const useCpuStore = defineStore('cpu', () => {
     // the up-to-date snapshot in their handler.
     if (subscribers.size > 0) {
       for (const fn of subscribers) {
-        try { fn(ev); } catch (err) { pushLog(`⚠ subscriber: ${err}`, 'red'); }
+        try { fn(ev); } catch (err) { pushLog(formatLog.subscriberErr(err), 'red'); }
       }
     }
   }
@@ -1244,7 +1244,11 @@ export const useCpuStore = defineStore('cpu', () => {
     share, unshare, setAlias, setNumCores, sendPresence, sendFocus, raiseHand, sendPointer, sendPointerOff, sendClick, sendGlossaryHover, sendGlossaryHoverOff,
     // Tutor: keep the wire shape private to this store so consumers do not
     // have to know the WS command name.
-    sendTutorAsk: (question: string, requestId: string) => send({ cmd: 'ask', question, request_id: requestId }),
+    sendTutorAsk: (
+      question: string,
+      requestId: string,
+      history?: { role: 'user' | 'assistant'; text: string }[],
+    ) => send({ cmd: 'ask', question, request_id: requestId, history }),
     // Test seam: vitest fakes the WebSocket by dispatching events directly
     // through this entry point. Production code uses the real ws.onmessage.
     __applyEvent: applyEvent,
