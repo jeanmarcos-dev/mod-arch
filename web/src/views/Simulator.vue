@@ -1,23 +1,127 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch, type ComponentPublicInstance } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Cpu, Code2, ListTree, MemoryStick, Boxes, Terminal } from '@lucide/vue';
+import { Cpu, Code2, ListTree, MemoryStick, Boxes, Terminal, Lock } from '@lucide/vue';
 import { useCpuStore } from '../stores/cpu';
 import { useViewerMirrorStore } from '../stores/viewerMirror';
+import { useAppConfigStore } from '../stores/appConfig';
+import { usePreferencesStore, COLUMN_MIN_PX, COLUMN_MAX_PERCENT } from '../stores/preferences';
+import { useIsStudent } from '../composables/useIsStudent';
+import { useResizableColumn } from '../composables/useResizableColumn';
+import { useResizableRow } from '../composables/useResizableRow';
 import CpuPanel from '../components/CpuPanel.vue';
 import EventsLog from '../components/EventsLog.vue';
 import ProcessesPanel from '../components/ProcessesPanel.vue';
+import QueuesPanel from '../components/QueuesPanel.vue';
 import IpcPanel from '../components/IpcPanel.vue';
 import ConsolePanel from '../components/ConsolePanel.vue';
 import MemoryPanel from '../components/MemoryPanel.vue';
 import CodeAsmSplit from '../components/CodeAsmSplit.vue';
+import LockedPanel from '../components/shell/LockedPanel.vue';
+import ColumnResizer from '../components/shell/ColumnResizer.vue';
+import RowResizer from '../components/shell/RowResizer.vue';
 import ByteFlightNarrator from '../components/narrators/ByteFlightNarrator.vue';
 import ModeFlipNarrator from '../components/narrators/ModeFlipNarrator.vue';
 import PCBCopyNarrator from '../components/narrators/PCBCopyNarrator.vue';
 
 const cpu = useCpuStore();
 const mirror = useViewerMirrorStore();
+const appCfg = useAppConfigStore();
+const prefs = usePreferencesStore();
+const isStudent = useIsStudent();
 const { t } = useI18n();
+
+// Two resizable side columns: the cores rail on the left, and the
+// procesos/colas/IPC stack on the right. Widths are persisted in preferences
+// and clamped to [minPx, COLUMN_MAX_PERCENT * viewport]. Snap targets land on
+// 25% and 33% of the viewport so the layout can converge on the two presets
+// the design discussed without forcing the user there.
+const COLUMN_SNAP_PERCENTS = [0.25, COLUMN_MAX_PERCENT];
+
+const {
+  width: leftWidth,
+  isResizing: leftResizing,
+  start: startLeftResize,
+} = useResizableColumn({
+  side: 'left',
+  initialPx: prefs.columnWidths.leftPx,
+  minPx: COLUMN_MIN_PX.left,
+  maxPercent: COLUMN_MAX_PERCENT,
+  snapPercents: COLUMN_SNAP_PERCENTS,
+  onChange: (px) => prefs.setColumnWidth('left', px),
+});
+
+const {
+  width: rightWidth,
+  isResizing: rightResizing,
+  start: startRightResize,
+} = useResizableColumn({
+  side: 'right',
+  initialPx: prefs.columnWidths.rightPx,
+  minPx: COLUMN_MIN_PX.right,
+  maxPercent: COLUMN_MAX_PERCENT,
+  snapPercents: COLUMN_SNAP_PERCENTS,
+  onChange: (px) => prefs.setColumnWidth('right', px),
+});
+
+const leftStyle = computed(() => ({ width: `${leftWidth.value}px` }));
+const rightStyle = computed(() => ({ width: `${rightWidth.value}px` }));
+
+// Refs to the three panels stacked in the right column. useResizableRow reads
+// their offsetHeight at drag start to translate pointer deltas into weight
+// changes. Template refs on Vue components resolve to a public instance, not
+// a DOM node — useResizableRow walks $el internally.
+type PanelRef = ComponentPublicInstance | HTMLElement | null;
+const processesEl = ref<PanelRef>(null);
+const queuesEl = ref<PanelRef>(null);
+const ipcEl = ref<PanelRef>(null);
+
+// CSS variable, not `flex` shorthand: CollapsiblePanel reads --cpanel-weight
+// from this inline style and applies it only to flex-grow. The collapsed
+// override targets the long-hand properties with !important, so a toggle
+// always wins over the inline weight without depending on shorthand cascade.
+const processesStyle = computed(() => ({ '--cpanel-weight': String(prefs.panelHeights.processes) }));
+const queuesStyle = computed(() => ({ '--cpanel-weight': String(prefs.panelHeights.queues) }));
+const ipcStyle = computed(() => ({ '--cpanel-weight': String(prefs.panelHeights.ipc) }));
+
+const { isResizing: processesQueuesResizing, start: startProcessesQueuesResize } = useResizableRow({
+  topEl: processesEl,
+  bottomEl: queuesEl,
+  getTopWeight: () => prefs.panelHeights.processes,
+  getBottomWeight: () => prefs.panelHeights.queues,
+  setTopWeight: (w) => prefs.setPanelHeight('processes', w),
+  setBottomWeight: (w) => prefs.setPanelHeight('queues', w),
+});
+
+const { isResizing: queuesIpcResizing, start: startQueuesIpcResize } = useResizableRow({
+  topEl: queuesEl,
+  bottomEl: ipcEl,
+  getTopWeight: () => prefs.panelHeights.queues,
+  getBottomWeight: () => prefs.panelHeights.ipc,
+  setTopWeight: (w) => prefs.setPanelHeight('queues', w),
+  setBottomWeight: (w) => prefs.setPanelHeight('ipc', w),
+});
+
+// Row resizers only make sense when both neighbours are expanded — a
+// collapsed panel is fixed at its header height and has no slack to trade.
+const showProcessesQueuesResizer = computed(() =>
+  !prefs.panelsCollapsed.processes && !prefs.panelsCollapsed.queues,
+);
+const showQueuesIpcResizer = computed(() =>
+  !prefs.panelsCollapsed.queues && !prefs.panelsCollapsed.ipc,
+);
+
+// Panel IDs disabled by the admin, scoped to students. Privileged users
+// (admin / moderator) always see every panel — the simulator must remain a
+// debugging surface for the people configuring the experience.
+const lockedPanels = computed<Set<string>>(() => {
+  if (!isStudent.value) return new Set();
+  return new Set(appCfg.disabledPanels);
+});
+
+function isLocked(panel: string): boolean {
+  return lockedPanels.value.has(panel);
+}
 
 // Tab state lives locally as the source of truth for the user that owns the
 // tab UI. Viewers receive overrides through the focus mirror: when the host
@@ -41,6 +145,7 @@ const activeMobileTab = computed<MobileTab>(() => {
 });
 
 function setMiddleTab(val: MiddleTab) {
+  if (isLocked(val)) return;
   localMiddleTab.value = val;
   if (val === 'code' || val === 'events' || val === 'memory') {
     localMobileTab.value = val;
@@ -51,6 +156,7 @@ function setMiddleTab(val: MiddleTab) {
 }
 
 function setMobileTab(val: MobileTab) {
+  if (isLocked(val)) return;
   localMobileTab.value = val;
   if (val === 'code' || val === 'events' || val === 'memory') {
     localMiddleTab.value = val;
@@ -62,6 +168,23 @@ function setMobileTab(val: MobileTab) {
     });
   }
 }
+
+// If the currently-active tab falls into the locked set (admin just disabled
+// it, or the user lands on the page while it's already disabled), pick the
+// first still-available tab so the center column never renders a locked
+// panel as the active view.
+const MIDDLE_TAB_FALLBACK: MiddleTab[] = ['events', 'code', 'memory'];
+const MOBILE_TAB_FALLBACK: MobileTab[] = ['events', 'cpu', 'code', 'memory', 'procs', 'console'];
+watch(lockedPanels, (locked) => {
+  if (locked.has(localMiddleTab.value)) {
+    const next = MIDDLE_TAB_FALLBACK.find((t) => !locked.has(t));
+    if (next) localMiddleTab.value = next;
+  }
+  if (locked.has(localMobileTab.value)) {
+    const next = MOBILE_TAB_FALLBACK.find((t) => !locked.has(t));
+    if (next) localMobileTab.value = next;
+  }
+}, { immediate: true });
 
 // Mirror-driven local copies: when the viewer receives a new focus, sync the
 // local refs so a later autofollow-off does not snap the tab back.
@@ -126,45 +249,112 @@ onUnmounted(() => {
   <div :class="{ shake: cpu.faultShake }" class="root" data-pizarra-anchor="view-overview">
     <!-- Tab bar mobile-only — controla todo el layout. Sólo visible <= 768px (CSS) -->
     <nav class="mobile-tabs" :aria-hidden="!isMobile">
-      <button :class="{ active: activeMobileTab === 'cpu' }" @click="setMobileTab('cpu')" :title="t('tabs.cpuTitle')"><Cpu :size="14" :stroke-width="2" /><span>{{ t('tabs.cpu') }}</span></button>
-      <button :class="{ active: activeMobileTab === 'code' }" @click="setMobileTab('code')" :title="t('tabs.codeTitle')"><Code2 :size="14" :stroke-width="2" /><span>{{ t('tabs.cod') }}</span></button>
-      <button :class="{ active: activeMobileTab === 'events' }" @click="setMobileTab('events')" :title="t('tabs.eventsTitle')"><ListTree :size="14" :stroke-width="2" /><span>{{ t('tabs.log') }}</span></button>
-      <button :class="{ active: activeMobileTab === 'memory' }" @click="setMobileTab('memory')" :title="t('tabs.memoryTitle')"><MemoryStick :size="14" :stroke-width="2" /><span>{{ t('tabs.mem') }}</span></button>
-      <button :class="{ active: activeMobileTab === 'procs' }" @click="setMobileTab('procs')" :title="t('tabs.procsTitle')"><Boxes :size="14" :stroke-width="2" /><span>{{ t('tabs.proc') }}</span></button>
-      <button :class="{ active: activeMobileTab === 'console' }" @click="setMobileTab('console')" :title="t('tabs.consoleTitle')"><Terminal :size="14" :stroke-width="2" /><span>{{ t('tabs.cons') }}</span></button>
+      <button :class="{ active: activeMobileTab === 'cpu', locked: isLocked('cpu') }" :disabled="isLocked('cpu')" @click="setMobileTab('cpu')" :title="isLocked('cpu') ? t('simulator.lockedPanel.title') : t('tabs.cpuTitle')"><Cpu :size="14" :stroke-width="2" /><span>{{ t('tabs.cpu') }}</span><Lock v-if="isLocked('cpu')" class="tab-lock" :size="10" :stroke-width="2" /></button>
+      <button :class="{ active: activeMobileTab === 'code', locked: isLocked('code') }" :disabled="isLocked('code')" @click="setMobileTab('code')" :title="isLocked('code') ? t('simulator.lockedPanel.title') : t('tabs.codeTitle')"><Code2 :size="14" :stroke-width="2" /><span>{{ t('tabs.cod') }}</span><Lock v-if="isLocked('code')" class="tab-lock" :size="10" :stroke-width="2" /></button>
+      <button :class="{ active: activeMobileTab === 'events', locked: isLocked('events') }" :disabled="isLocked('events')" @click="setMobileTab('events')" :title="isLocked('events') ? t('simulator.lockedPanel.title') : t('tabs.eventsTitle')"><ListTree :size="14" :stroke-width="2" /><span>{{ t('tabs.log') }}</span><Lock v-if="isLocked('events')" class="tab-lock" :size="10" :stroke-width="2" /></button>
+      <button :class="{ active: activeMobileTab === 'memory', locked: isLocked('memory') }" :disabled="isLocked('memory')" @click="setMobileTab('memory')" :title="isLocked('memory') ? t('simulator.lockedPanel.title') : t('tabs.memoryTitle')"><MemoryStick :size="14" :stroke-width="2" /><span>{{ t('tabs.mem') }}</span><Lock v-if="isLocked('memory')" class="tab-lock" :size="10" :stroke-width="2" /></button>
+      <button :class="{ active: activeMobileTab === 'procs', locked: isLocked('procs') }" :disabled="isLocked('procs')" @click="setMobileTab('procs')" :title="isLocked('procs') ? t('simulator.lockedPanel.title') : t('tabs.procsTitle')"><Boxes :size="14" :stroke-width="2" /><span>{{ t('tabs.proc') }}</span><Lock v-if="isLocked('procs')" class="tab-lock" :size="10" :stroke-width="2" /></button>
+      <button :class="{ active: activeMobileTab === 'console', locked: isLocked('console') }" :disabled="isLocked('console')" @click="setMobileTab('console')" :title="isLocked('console') ? t('simulator.lockedPanel.title') : t('tabs.consoleTitle')"><Terminal :size="14" :stroke-width="2" /><span>{{ t('tabs.cons') }}</span><Lock v-if="isLocked('console')" class="tab-lock" :size="10" :stroke-width="2" /></button>
     </nav>
 
     <main class="layout">
-      <CpuPanel v-show="visible.cpu" class="col-left" />
+      <div
+        v-show="visible.cpu"
+        class="col-left"
+        :style="!isMobile ? leftStyle : undefined"
+      >
+        <CpuPanel v-if="!isLocked('cpu')" />
+        <LockedPanel v-else />
+      </div>
+      <ColumnResizer
+        v-if="!isMobile && visible.cpu"
+        side="left"
+        :active="leftResizing"
+        @pointerdown="startLeftResize"
+      />
       <div v-show="visible.middle" class="middle col-center">
         <div class="middle-tabs desktop-only">
           <button
             class="tab"
-            :class="{ active: activeMiddleTab === 'code' }"
+            :class="{ active: activeMiddleTab === 'code', locked: isLocked('code') }"
+            :disabled="isLocked('code')"
             @click="setMiddleTab('code')"
-            :title="t('tabs.codeC_long')"
-          ><Code2 :size="14" :stroke-width="2" /><span>{{ t('tabs.codeC') }}</span></button>
+            :title="isLocked('code') ? t('simulator.lockedPanel.title') : t('tabs.codeC_long')"
+          ><Code2 :size="14" :stroke-width="2" /><span>{{ t('tabs.codeC') }}</span><Lock v-if="isLocked('code')" class="tab-lock" :size="10" :stroke-width="2" /></button>
           <button
             class="tab"
-            :class="{ active: activeMiddleTab === 'events' }"
+            :class="{ active: activeMiddleTab === 'events', locked: isLocked('events') }"
+            :disabled="isLocked('events')"
             @click="setMiddleTab('events')"
-            :title="t('tabs.eventsLong')"
-          ><ListTree :size="14" :stroke-width="2" /><span>{{ t('tabs.eventLog') }}</span></button>
+            :title="isLocked('events') ? t('simulator.lockedPanel.title') : t('tabs.eventsLong')"
+          ><ListTree :size="14" :stroke-width="2" /><span>{{ t('tabs.eventLog') }}</span><Lock v-if="isLocked('events')" class="tab-lock" :size="10" :stroke-width="2" /></button>
           <button
             class="tab"
-            :class="{ active: activeMiddleTab === 'memory' }"
+            :class="{ active: activeMiddleTab === 'memory', locked: isLocked('memory') }"
+            :disabled="isLocked('memory')"
             @click="setMiddleTab('memory')"
-            :title="t('tabs.memoryLong')"
-          ><MemoryStick :size="14" :stroke-width="2" /><span>{{ t('tabs.memory') }}</span></button>
+            :title="isLocked('memory') ? t('simulator.lockedPanel.title') : t('tabs.memoryLong')"
+          ><MemoryStick :size="14" :stroke-width="2" /><span>{{ t('tabs.memory') }}</span><Lock v-if="isLocked('memory')" class="tab-lock" :size="10" :stroke-width="2" /></button>
         </div>
-        <CodeAsmSplit v-show="visible.code" />
-        <EventsLog v-show="visible.events" />
-        <MemoryPanel v-show="visible.memory" />
-        <ConsolePanel v-show="visible.console" />
+        <CodeAsmSplit v-if="!isLocked('code')" v-show="visible.code" />
+        <LockedPanel v-else v-show="visible.code" />
+        <EventsLog v-if="!isLocked('events')" v-show="visible.events" />
+        <LockedPanel v-else v-show="visible.events" />
+        <MemoryPanel v-if="!isLocked('memory')" v-show="visible.memory" />
+        <LockedPanel v-else v-show="visible.memory" />
+        <ConsolePanel v-if="!isLocked('console')" v-show="visible.console" />
+        <LockedPanel v-else v-show="visible.console" />
       </div>
-      <div v-show="visible.procs" class="col-right col-right--stack">
-        <ProcessesPanel class="col-right__top" />
-        <IpcPanel class="col-right__bottom" />
+      <ColumnResizer
+        v-if="!isMobile && visible.procs"
+        side="right"
+        :active="rightResizing"
+        @pointerdown="startRightResize"
+      />
+      <div
+        v-show="visible.procs"
+        class="col-right col-right--stack"
+        :style="!isMobile ? rightStyle : undefined"
+      >
+        <ProcessesPanel
+          v-if="!isLocked('procs')"
+          ref="processesEl"
+          class="col-right__panel"
+          :style="!isMobile ? processesStyle : undefined"
+        />
+        <LockedPanel
+          v-else
+          ref="processesEl"
+          class="col-right__panel"
+          :style="!isMobile ? processesStyle : undefined"
+        />
+        <RowResizer
+          v-if="!isMobile && showProcessesQueuesResizer"
+          :active="processesQueuesResizing"
+          @pointerdown="startProcessesQueuesResize"
+        />
+        <QueuesPanel
+          ref="queuesEl"
+          class="col-right__panel"
+          :style="!isMobile ? queuesStyle : undefined"
+        />
+        <RowResizer
+          v-if="!isMobile && showQueuesIpcResizer"
+          :active="queuesIpcResizing"
+          @pointerdown="startQueuesIpcResize"
+        />
+        <IpcPanel
+          v-if="!isLocked('ipc')"
+          ref="ipcEl"
+          class="col-right__panel"
+          :style="!isMobile ? ipcStyle : undefined"
+        />
+        <LockedPanel
+          v-else
+          ref="ipcEl"
+          class="col-right__panel"
+          :style="!isMobile ? ipcStyle : undefined"
+        />
       </div>
     </main>
 
@@ -185,7 +375,9 @@ onUnmounted(() => {
 .layout {
   display: flex;
   flex: 1;
-  gap: 8px;
+  /* No gap here: the ColumnResizer between columns is the only separator —
+     adding gap on top of the resizer width would waste horizontal space. */
+  gap: 0;
   padding: 8px;
   overflow: hidden;
 }
@@ -196,33 +388,39 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 8px;
   min-width: 0;
+  /* Breathing room only on the two edges that face a resizer. */
+  margin: 0;
 }
 
-/* Right column splits vertically: ProcessesPanel on top (60%) and
-   IpcPanel below (40%). Both panels already cap their width at 280px,
-   so on desktop the split affects height only. */
+.col-left {
+  flex-shrink: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Right column stacks three collapsible panels: Procesos, Colas, IPC. Width
+   is driven inline from useResizableColumn; the height is split equally
+   between expanded children, while collapsed children shrink to their header
+   row (flex: 0 0 auto, applied by CollapsiblePanel itself). */
 .col-right--stack {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  /* RowResizer (when present) provides the only visual gap. Adjacent
+     collapsed headers sit flush against each other, which makes the
+     "collapsed stack" feel like a single sidebar of titles. */
+  gap: 0;
   min-width: 0;
   flex-shrink: 0;
 }
 
-.col-right__top {
-  flex: 0 1 60%;
-  min-height: 0;
-}
-
-.col-right__bottom {
-  flex: 0 1 40%;
-  min-height: 0;
-}
+/* The flex sizing of each panel inside .col-right--stack lives on
+   .cpanel inside CollapsiblePanel — scoped CSS here cannot reach the
+   child component's root. We only handle the column itself. */
 
 @media (max-width: 768px) {
-  /* On mobile only one panel is shown at a time; let both children
-     fill the available space when the column is the active view. */
-  .col-right__top, .col-right__bottom { flex: 1 1 auto; }
+  .col-left { width: 100% !important; }
+  .col-right--stack { width: 100% !important; }
 }
 
 .middle-tabs {
@@ -268,6 +466,28 @@ onUnmounted(() => {
   border-color: var(--amber);
   background: rgba(var(--accent-rgb), 0.1);
   box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.2);
+}
+
+.tab.locked,
+.mobile-tabs button.locked {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--surface-overlay);
+}
+
+.tab.locked:hover,
+.mobile-tabs button.locked:hover {
+  background: var(--surface-overlay);
+  color: var(--text-dim);
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+.tab-lock {
+  margin-left: 4px;
+  color: var(--text-muted);
+  opacity: 0.85;
+  flex-shrink: 0;
 }
 
 .root {

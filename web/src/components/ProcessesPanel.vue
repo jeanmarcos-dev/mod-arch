@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { useCpuStore, type PCBInfo } from '../stores/cpu';
+import { usePreferencesStore } from '../stores/preferences';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { ChevronRight } from '@lucide/vue';
+import { Maximize2, Minimize2 } from '@lucide/vue';
+import CollapsiblePanel from './ui/CollapsiblePanel.vue';
 
 const cpu = useCpuStore();
+const prefs = usePreferencesStore();
 const { t } = useI18n();
 
 function hex(n: number, w = 6) {
@@ -221,26 +224,29 @@ function regsSrcTitle(p: PCBInfo): string {
 </script>
 
 <template>
-  <div class="panel procs" data-pizarra-anchor="procs-panel">
-    <div class="proc-header">
-      <div
-        class="panel-title clickable-title"
-        :title="t('panels.processes.titleHint')"
-        @click="cpu.openGlossary('PCB')"
-      >{{ t('panels.processes.title') }}</div>
+  <CollapsiblePanel
+    class="panel procs"
+    data-pizarra-anchor="procs-panel"
+    :title="t('panels.processes.title')"
+    :title-hint="t('panels.processes.titleHint')"
+    glossary-key="PCB"
+    :collapsed="prefs.panelsCollapsed.processes"
+    @update:collapsed="prefs.togglePanel('processes', $event)"
+  >
+    <template #header-actions>
       <button
         v-if="sortedProcs.length > 0"
         type="button"
         class="proc-toolbar__btn"
-        :class="{ 'proc-toolbar__btn--open': allExpanded }"
         :title="allExpanded ? t('panels.processes.collapseHint') : t('panels.processes.expandHint')"
         :aria-label="allExpanded ? t('panels.processes.collapseAll') : t('panels.processes.expandAll')"
         :aria-expanded="allExpanded"
-        @click="allExpanded ? collapseAll() : expandAll()"
+        @click.stop="allExpanded ? collapseAll() : expandAll()"
       >
-        <ChevronRight :size="11" :stroke-width="2" />
+        <Minimize2 v-if="allExpanded" :size="11" :stroke-width="2" />
+        <Maximize2 v-else :size="11" :stroke-width="2" />
       </button>
-    </div>
+    </template>
 
     <div v-if="sortedProcs.length === 0" class="empty">
       {{ t('panels.processes.emptyDemo') }}
@@ -343,53 +349,13 @@ function regsSrcTitle(p: PCBInfo): string {
       </section>
     </div>
 
-    <div class="ready-queue" v-if="sortedProcs.length > 0">
-      <div
-        class="rq-label clickable-label"
-        :title="t('panels.processes.readyQueueHint')"
-        @click="cpu.openGlossary('Ready queue')"
-      >{{ t('panels.processes.readyQueue') }}</div>
-      <div class="rq-pills">
-        <span v-if="cpu.readyQueue.length === 0" class="rq-empty">{{ t('panels.processes.empty') }}</span>
-        <span v-for="pid in cpu.readyQueue" :key="pid" class="rq-pill">P{{ pid }}</span>
-      </div>
-    </div>
-
-    <div class="wait-queue" v-if="sortedProcs.length > 0">
-      <div
-        class="rq-label clickable-label"
-        :title="t('panels.processes.waitQueueHint')"
-        @click="cpu.openGlossary('Waiting queue')"
-      >{{ t('panels.processes.waitQueue') }}
-        <span v-if="cpu.waitQueue.length > 0" class="wq-hint">{{ t('panels.processes.waitQueueHelp') }}</span>
-      </div>
-      <div class="rq-pills">
-        <span v-if="cpu.waitQueue.length === 0" class="rq-empty">{{ t('panels.processes.empty') }}</span>
-        <span v-for="w in cpu.waitQueue" :key="w.pid" class="wq-pill" :title="t('panels.processes.waitTooltip', { pid: w.pid, reason: w.reason })">
-          P{{ w.pid }}
-          <span class="wq-reason">{{ w.reason }}</span>
-        </span>
-      </div>
-    </div>
-  </div>
+  </CollapsiblePanel>
 </template>
 
 <style scoped>
 .procs {
-  width: 280px;
-  flex-shrink: 0;
   height: 100%;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-}
-
-@media (max-width: 768px) {
-  .procs {
-    width: 100%;
-    height: auto;
-    flex: 1;
-  }
+  min-height: 0;
 }
 
 .empty {
@@ -399,33 +365,14 @@ function regsSrcTitle(p: PCBInfo): string {
   text-align: center;
 }
 
-.clickable-title, .clickable-label {
+.clickable-label {
   cursor: pointer;
   transition: color 0.15s ease;
 }
 
-.clickable-title:hover, .clickable-label:hover {
+.clickable-label:hover {
   color: var(--cyan);
   text-shadow: 0 0 6px rgba(106, 212, 255, 0.4);
-}
-
-/* Pull the title's dashed underline up onto the whole header so it spans
-   the full panel width and the toggle button sits on it. The original
-   .panel-title underline is suppressed inside this flex container. */
-.proc-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 8px;
-  border-bottom: 1px dashed var(--border-strong);
-  padding-bottom: 5px;
-  margin-bottom: 8px;
-}
-
-.proc-header .panel-title {
-  border-bottom: none;
-  padding-bottom: 0;
-  margin-bottom: 0;
 }
 
 .proc-toolbar__btn {
@@ -452,11 +399,7 @@ function regsSrcTitle(p: PCBInfo): string {
 }
 
 .proc-toolbar__btn :deep(svg) {
-  transition: transform 0.2s ease;
-}
-
-.proc-toolbar__btn--open :deep(svg) {
-  transform: rotate(90deg);
+  transition: opacity 0.2s ease;
 }
 
 .proc-toolbar__btn:hover {
@@ -704,76 +647,5 @@ function regsSrcTitle(p: PCBInfo): string {
   border-color: var(--amber);
   background: rgba(var(--accent-rgb), 0.12);
   text-shadow: 0 0 4px rgba(var(--accent-rgb), 0.45);
-}
-
-.ready-queue,
-.wait-queue {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border);
-}
-
-.rq-label {
-  color: var(--cyan);
-  font-size: 11px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  margin-bottom: 6px;
-}
-
-.rq-pills {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.rq-pill {
-  padding: 2px 8px;
-  background: rgba(255, 213, 79, 0.08);
-  border: 1px solid var(--yellow);
-  color: var(--yellow);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.rq-empty {
-  color: var(--text-muted);
-  font-style: italic;
-  font-size: 13px;
-}
-
-.wq-hint {
-  color: var(--text-muted);
-  font-style: italic;
-  font-size: 10px;
-  text-transform: none;
-  letter-spacing: 0;
-  margin-left: 4px;
-}
-
-.wq-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 8px;
-  background: rgba(255, 122, 122, 0.06);
-  border: 1px solid var(--red-soft);
-  color: var(--red-soft);
-  font-size: 13px;
-  font-weight: 700;
-  animation: wait-pulse 1.6s ease-in-out infinite;
-}
-
-.wq-reason {
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--text-dim);
-  text-transform: lowercase;
-  letter-spacing: 0;
-}
-
-@keyframes wait-pulse {
-  0%, 100% { opacity: 1; box-shadow: none; }
-  50%      { opacity: 0.7; box-shadow: 0 0 6px rgba(255, 122, 122, 0.3); }
 }
 </style>

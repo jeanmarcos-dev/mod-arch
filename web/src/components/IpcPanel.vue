@@ -2,8 +2,11 @@
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useCpuStore, type PipeInfo } from '../stores/cpu';
+import { usePreferencesStore } from '../stores/preferences';
+import CollapsiblePanel from './ui/CollapsiblePanel.vue';
 
 const cpu = useCpuStore();
+const prefs = usePreferencesStore();
 const { t } = useI18n();
 
 const channels = computed(() => [...cpu.pipes].sort((a, b) => a.pipe_id - b.pipe_id));
@@ -40,11 +43,15 @@ function lastOpLabel(p: PipeInfo): string {
 </script>
 
 <template>
-  <div class="panel ipc">
-    <div class="ipc__header">
-      <span class="ipc__title">{{ t('panels.ipc.title') }}</span>
+  <CollapsiblePanel
+    class="panel ipc"
+    :title="t('panels.ipc.title')"
+    :collapsed="prefs.panelsCollapsed.ipc"
+    @update:collapsed="prefs.togglePanel('ipc', $event)"
+  >
+    <template #header-actions>
       <span class="ipc__count">{{ channelCountLabel(channels.length) }}</span>
-    </div>
+    </template>
 
     <div v-if="channels.length === 0" class="ipc__empty">
       {{ t('panels.ipc.emptyBefore') }}<code>sys_pipe</code>{{ t('panels.ipc.emptyAfter') }}
@@ -75,45 +82,16 @@ function lastOpLabel(p: PipeInfo): string {
         </footer>
       </article>
     </div>
-  </div>
+  </CollapsiblePanel>
 </template>
 
 <style scoped>
 .ipc {
-  width: 280px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  padding: 8px;
-  gap: 6px;
+  height: 100%;
+  min-height: 0;
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: var(--text);
-  overflow-y: auto;
-}
-
-@media (max-width: 768px) {
-  .ipc {
-    width: 100%;
-  }
-}
-
-.ipc__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 4px;
-}
-
-.ipc__title {
-  font-family: var(--font-display);
-  font-size: 12px;
-  letter-spacing: 3px;
-  color: var(--amber);
-  text-shadow: var(--shadow-glow-amber);
 }
 
 .ipc__count {

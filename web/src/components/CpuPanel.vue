@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { useCpuStore, REGISTERS, type CoreInfo } from '../stores/cpu';
+import { usePreferencesStore } from '../stores/preferences';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
+import CollapsiblePanel from './ui/CollapsiblePanel.vue';
 
 const cpu = useCpuStore();
+const prefs = usePreferencesStore();
 const { t } = useI18n();
 
 function hex(n: number, w = 8) {
@@ -62,12 +65,14 @@ function shouldFlash(core: CoreInfo, reg: string): boolean {
 </script>
 
 <template>
-  <div
+  <CollapsiblePanel
     class="panel cpu"
     data-pizarra-anchor="cpu-panel"
     data-narrator-anchor="cpu"
+    :title="t('panels.cores.title')"
+    :collapsed="prefs.panelsCollapsed.cores"
+    @update:collapsed="prefs.togglePanel('cores', $event)"
   >
-    <div class="panel-title">{{ t('panels.cores.title') }}</div>
     <section
       v-for="core in visibleCores"
       :key="`core-${core.id}`"
@@ -120,24 +125,16 @@ function shouldFlash(core: CoreInfo, reg: string): boolean {
         </span>
       </div>
     </section>
-  </div>
+  </CollapsiblePanel>
 </template>
 
 <style scoped>
 .cpu {
-  width: 200px;
-  flex-shrink: 0;
   height: 100%;
-  overflow-y: auto;
+  min-height: 0;
 }
 
 @media (max-width: 768px) {
-  .cpu {
-    width: 100%;
-    height: auto;
-    flex: 1;
-  }
-
   .reg-row {
     padding: 8px 6px;
     font-size: 15px;

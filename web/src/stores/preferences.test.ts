@@ -39,4 +39,37 @@ describe('preferences store', () => {
     prefs.setMode('projector');
     expect(prefs.animationSpeed).toBe(0.5);
   });
+
+  it('starts with every side panel expanded', () => {
+    const prefs = usePreferencesStore();
+    expect(prefs.panelsCollapsed.cores).toBe(false);
+    expect(prefs.panelsCollapsed.processes).toBe(false);
+    expect(prefs.panelsCollapsed.queues).toBe(false);
+    expect(prefs.panelsCollapsed.ipc).toBe(false);
+  });
+
+  it('toggles individual side panels independently', () => {
+    const prefs = usePreferencesStore();
+    prefs.togglePanel('queues');
+    expect(prefs.panelsCollapsed.queues).toBe(true);
+    expect(prefs.panelsCollapsed.processes).toBe(false);
+    prefs.togglePanel('queues');
+    expect(prefs.panelsCollapsed.queues).toBe(false);
+    prefs.togglePanel('cores', true);
+    expect(prefs.panelsCollapsed.cores).toBe(true);
+    prefs.togglePanel('cores', true);
+    expect(prefs.panelsCollapsed.cores).toBe(true);
+  });
+
+  it('persists column widths and clamps to the minimum', () => {
+    const prefs = usePreferencesStore();
+    prefs.setColumnWidth('left', 50);
+    expect(prefs.columnWidths.leftPx).toBe(140);
+    prefs.setColumnWidth('left', 220);
+    expect(prefs.columnWidths.leftPx).toBe(220);
+    prefs.setColumnWidth('right', 100);
+    expect(prefs.columnWidths.rightPx).toBe(240);
+    prefs.setColumnWidth('right', 380);
+    expect(prefs.columnWidths.rightPx).toBe(380);
+  });
 });

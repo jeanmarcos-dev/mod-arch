@@ -18,6 +18,39 @@ export type Density = 'comfortable' | 'compact';
 // and modals mounted outside the shell root.
 export type Theme = 'amber' | 'green' | 'dark' | 'accesible';
 
+// PanelName enumerates the side panels whose collapse state is persisted
+// across reloads. Center column panels are tab-driven, not collapsible.
+export type PanelName = 'cores' | 'processes' | 'queues' | 'ipc';
+
+export interface PanelsCollapsed {
+  cores: boolean;
+  processes: boolean;
+  queues: boolean;
+  ipc: boolean;
+}
+
+export interface ColumnWidths {
+  leftPx: number;
+  rightPx: number;
+}
+
+export type ColumnSide = 'left' | 'right';
+
+// PanelHeights stores a flex-grow weight per right-column panel. Drag of the
+// horizontal handles between them rewrites the weights so the user can give
+// more vertical room to Procesos than to IPC, etc. Defaults are equal (1).
+// Cores lives in the left column and has only one panel, so no weight is
+// tracked for it.
+export type StackPanelName = 'processes' | 'queues' | 'ipc';
+
+export interface PanelHeights {
+  processes: number;
+  queues: number;
+  ipc: number;
+}
+
+export const PANEL_HEIGHT_MIN_WEIGHT = 0.15;
+
 interface PrefsState {
   sidebarCollapsed: boolean;
   mode: PresentationMode;
@@ -30,9 +63,24 @@ interface PrefsState {
   narratorMinTickMs: number;
   theme: Theme;
   locale: Locale;
+  panelsCollapsed: PanelsCollapsed;
+  columnWidths: ColumnWidths;
+  panelHeights: PanelHeights;
 }
 
 const STORAGE_KEY = 'modos-cpu:prefs:v1';
+
+// Minimum widths in pixels for each side column. The left column only hosts
+// the Cores panel, which needs less horizontal room than the right stack of
+// Procesos/Colas/IPC.
+export const COLUMN_MIN_PX: Record<ColumnSide, number> = {
+  left: 140,
+  right: 240,
+};
+
+// Cap each side column at one third of the viewport so the center never gets
+// squeezed below ~34%.
+export const COLUMN_MAX_PERCENT = 0.33;
 
 // Pedagogic is the default preset so a fresh visitor sees the animated
 // transitions out of the box (animationsEnabled is derived from mode in
@@ -48,7 +96,58 @@ const DEFAULTS: PrefsState = {
   narratorMinTickMs: 200,
   theme: 'amber',
   locale: DEFAULT_LOCALE,
+  panelsCollapsed: {
+    cores: false,
+    processes: false,
+    queues: false,
+    ipc: false,
+  },
+  columnWidths: {
+    leftPx: 160,
+    rightPx: 280,
+  },
+  panelHeights: {
+    processes: 1,
+    queues: 1,
+    ipc: 1,
+  },
 };
+
+function sanitizePanelsCollapsed(input: unknown): PanelsCollapsed {
+  const base: PanelsCollapsed = { ...DEFAULTS.panelsCollapsed };
+  if (!input || typeof input !== 'object') return base;
+  const src = input as Record<string, unknown>;
+  for (const k of Object.keys(base) as PanelName[]) {
+    if (typeof src[k] === 'boolean') base[k] = src[k] as boolean;
+  }
+  return base;
+}
+
+function sanitizeColumnWidths(input: unknown): ColumnWidths {
+  const base: ColumnWidths = { ...DEFAULTS.columnWidths };
+  if (!input || typeof input !== 'object') return base;
+  const src = input as Record<string, unknown>;
+  if (typeof src.leftPx === 'number' && Number.isFinite(src.leftPx)) {
+    base.leftPx = Math.max(COLUMN_MIN_PX.left, src.leftPx);
+  }
+  if (typeof src.rightPx === 'number' && Number.isFinite(src.rightPx)) {
+    base.rightPx = Math.max(COLUMN_MIN_PX.right, src.rightPx);
+  }
+  return base;
+}
+
+function sanitizePanelHeights(input: unknown): PanelHeights {
+  const base: PanelHeights = { ...DEFAULTS.panelHeights };
+  if (!input || typeof input !== 'object') return base;
+  const src = input as Record<string, unknown>;
+  for (const k of Object.keys(base) as StackPanelName[]) {
+    const v = src[k];
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
+      base[k] = Math.max(PANEL_HEIGHT_MIN_WEIGHT, v);
+    }
+  }
+  return base;
+}
 
 function isLocale(v: unknown): v is Locale {
   return typeof v === 'string' && (SUPPORTED_LOCALES as string[]).includes(v);
@@ -85,6 +184,14 @@ export function readStoredTheme(): Theme {
   return DEFAULTS.theme;
 }
 
+// Bumped when the meaning of the right-column panel toggles changed. Storage
+// written before this version may carry collapsed/height values that no
+// longer correspond to the current layout; we discard those toggle-specific
+// fields on load and start fresh from the all-expanded defaults. Other prefs
+// (theme, locale, sidebar, mode, density, narrators) are kept regardless,
+// since their schemas have not changed.
+const PANELS_RESET_VERSION = 2;
+
 function loadFromStorage(): PrefsState {
   if (typeof window === 'undefined') return DEFAULTS;
   try {
@@ -95,7 +202,24 @@ function loadFromStorage(): PrefsState {
     // the store ref reads 'es', leaving the Preferences switch out of sync
     // with the actual UI language on the user's first visit.
     if (!raw) return { ...DEFAULTS, locale: i18nReadStoredLocale() };
-    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<PrefsState>) };
+    const parsed = JSON.parse(raw) as Partial<PrefsState> & { panelsResetVersion?: number };
+    const upToDate = parsed.panelsResetVersion === PANELS_RESET_VERSION;
+    return {
+      ...DEFAULTS,
+      ...parsed,
+      // Nested objects need a deep merge so older storage payloads (missing
+      // panelsCollapsed/columnWidths) don't blow away the defaults. If the
+      // stored payload predates the toggle rework, reset panelsCollapsed and
+      // panelHeights so the user never inherits an opaque "all collapsed"
+      // state from a previous iteration.
+      panelsCollapsed: upToDate
+        ? sanitizePanelsCollapsed(parsed.panelsCollapsed)
+        : { ...DEFAULTS.panelsCollapsed },
+      panelHeights: upToDate
+        ? sanitizePanelHeights(parsed.panelHeights)
+        : { ...DEFAULTS.panelHeights },
+      columnWidths: sanitizeColumnWidths(parsed.columnWidths),
+    };
   } catch {
     return { ...DEFAULTS, locale: i18nReadStoredLocale() };
   }
@@ -110,6 +234,9 @@ export const usePreferencesStore = defineStore('preferences', () => {
   const narratorMinTickMs = ref(initial.narratorMinTickMs);
   const theme = ref<Theme>(initial.theme);
   const locale = ref<Locale>(isLocale(initial.locale) ? initial.locale : DEFAULT_LOCALE);
+  const panelsCollapsed = ref<PanelsCollapsed>({ ...initial.panelsCollapsed });
+  const columnWidths = ref<ColumnWidths>({ ...initial.columnWidths });
+  const panelHeights = ref<PanelHeights>({ ...initial.panelHeights });
 
   // Mobile drawer state is volatile by design: always starts closed so a
   // fresh reload doesn't reveal the sidebar over the content. Kept separate
@@ -122,26 +249,32 @@ export const usePreferencesStore = defineStore('preferences', () => {
   // observe the store itself.
   watch(theme, (t) => applyTheme(t), { immediate: false });
 
+  function serialize(): string {
+    return JSON.stringify({
+      panelsResetVersion: PANELS_RESET_VERSION,
+      sidebarCollapsed: sidebarCollapsed.value,
+      mode: mode.value,
+      density: density.value,
+      narratorsEnabled: narratorsEnabled.value,
+      narratorMinTickMs: narratorMinTickMs.value,
+      theme: theme.value,
+      locale: locale.value,
+      panelsCollapsed: panelsCollapsed.value,
+      columnWidths: columnWidths.value,
+      panelHeights: panelHeights.value,
+    });
+  }
+
   watch(
-    [sidebarCollapsed, mode, density, narratorsEnabled, narratorMinTickMs, theme, locale],
-    ([sc, m, d, n, nMin, t, l]) => {
+    [sidebarCollapsed, mode, density, narratorsEnabled, narratorMinTickMs, theme, locale, panelsCollapsed, columnWidths, panelHeights],
+    () => {
       try {
-        window.localStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify({
-            sidebarCollapsed: sc,
-            mode: m,
-            density: d,
-            narratorsEnabled: n,
-            narratorMinTickMs: nMin,
-            theme: t,
-            locale: l,
-          }),
-        );
+        window.localStorage.setItem(STORAGE_KEY, serialize());
       } catch {
         // Quota or private mode — silently fall back to in-memory state.
       }
     },
+    { deep: true },
   );
 
   // Auto-derived knobs that components consume directly. Keeping these as
@@ -156,6 +289,32 @@ export const usePreferencesStore = defineStore('preferences', () => {
 
   function toggleSidebar() {
     sidebarCollapsed.value = !sidebarCollapsed.value;
+  }
+
+  function togglePanel(name: PanelName, value?: boolean) {
+    const next = typeof value === 'boolean' ? value : !panelsCollapsed.value[name];
+    panelsCollapsed.value = { ...panelsCollapsed.value, [name]: next };
+  }
+
+  function setColumnWidth(side: ColumnSide, px: number) {
+    // Clamp at the lower bound here; the upper bound depends on the current
+    // viewport width and is enforced by useResizableColumn during drag and
+    // on window resize, so this action just sanitizes the persisted value.
+    const min = COLUMN_MIN_PX[side];
+    const clamped = Math.max(min, Math.round(px));
+    if (side === 'left') {
+      if (columnWidths.value.leftPx === clamped) return;
+      columnWidths.value = { ...columnWidths.value, leftPx: clamped };
+    } else {
+      if (columnWidths.value.rightPx === clamped) return;
+      columnWidths.value = { ...columnWidths.value, rightPx: clamped };
+    }
+  }
+
+  function setPanelHeight(name: StackPanelName, weight: number) {
+    const clamped = Math.max(PANEL_HEIGHT_MIN_WEIGHT, weight);
+    if (panelHeights.value[name] === clamped) return;
+    panelHeights.value = { ...panelHeights.value, [name]: clamped };
   }
 
   function openSidebarMobile() {
@@ -215,6 +374,9 @@ export const usePreferencesStore = defineStore('preferences', () => {
     narratorMinTickMs,
     theme,
     locale,
+    panelsCollapsed,
+    columnWidths,
+    panelHeights,
     rowDensity,
     animationsEnabled,
     animationSpeed,
@@ -225,5 +387,8 @@ export const usePreferencesStore = defineStore('preferences', () => {
     setMode,
     setTheme,
     setLocale,
+    togglePanel,
+    setColumnWidth,
+    setPanelHeight,
   };
 });
