@@ -69,11 +69,16 @@ func simClientRole(r sessions.Role) sim.ClientRole {
 type Command struct {
 	Cmd     string `json:"cmd"`
 	Program string `json:"program,omitempty"`
-	Speed   int    `json:"speed,omitempty"`
-	Quantum int    `json:"quantum,omitempty"`
-	Key     string `json:"key,omitempty"`
-	Alias   string `json:"alias,omitempty"`
-	Cores   int    `json:"cores,omitempty"`
+	// Speed is the legacy single-knob field kept for older clients. New
+	// clients send ClockHz + SpeedMul separately via set_clock_hz and
+	// set_speed_mul.
+	Speed    int     `json:"speed,omitempty"`
+	ClockHz  int     `json:"clockHz,omitempty"`
+	SpeedMul float64 `json:"speedMul,omitempty"`
+	Quantum  int     `json:"quantum,omitempty"`
+	Key      string  `json:"key,omitempty"`
+	Alias    string  `json:"alias,omitempty"`
+	Cores    int     `json:"cores,omitempty"`
 
 	// Owner-broadcasted presence payload: the section the host is currently
 	// presenting, the visible cores filter, the presentation mode preset and
@@ -345,6 +350,10 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 		sess.Sim.StartRun(cmd.Speed)
 	case "set_speed":
 		sess.Sim.SetSpeed(cmd.Speed)
+	case "set_clock_hz":
+		sess.Sim.SetClockHz(cmd.ClockHz)
+	case "set_speed_mul":
+		sess.Sim.SetSpeedMul(cmd.SpeedMul)
 	case "pause":
 		sess.Sim.StopRun()
 	case "reset":

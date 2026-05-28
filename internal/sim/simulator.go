@@ -93,10 +93,11 @@ type Simulator struct {
 	clients  map[*Client]struct{}
 	clientMu sync.RWMutex
 
-	running  bool
-	runStop  chan struct{}
-	stepHz   int
-	hzChange chan int
+	running         bool
+	runStop         chan struct{}
+	clockHz         int
+	speedMul        float64
+	intervalChange  chan time.Duration
 
 	// events is a rolling history of the most recent CPU events. Consumed by
 	// the tutor's tools so the LLM can ask "what happened in the last second?"
@@ -129,7 +130,8 @@ func New(cfg Config) *Simulator {
 		clients:  make(map[*Client]struct{}),
 		events:   NewEventRing(DefaultEventRingCapacity),
 		logger:   cfg.Logger,
-		stepHz:   4,
+		clockHz:  4,
+		speedMul: 1.0,
 	}
 }
 
@@ -225,35 +227,39 @@ func (s *Simulator) StepOnce() error {
 	return nil
 }
 
-// StartRun starts a loop that steps at hz Hz until pause/halt.
+// StartRun starts the auto-step loop. If hz > 0 it overrides the stored
+// clockHz before starting; pass 0 to honor the current clockHz × speedMul.
+// Loop cadence is intervalChange-driven so SetClockHz / SetSpeedMul can
+// retune the ticker without restarting the goroutine.
 func (s *Simulator) StartRun(hz int) {
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
 		return
 	}
-	if hz <= 0 {
-		hz = 4
+	if hz > 0 {
+		s.clockHz = clampClockHz(hz)
 	}
-	s.stepHz = hz
 	s.running = true
 	s.runStop = make(chan struct{})
-	s.hzChange = make(chan int, 1)
+	s.intervalChange = make(chan time.Duration, 1)
 	stop := s.runStop
-	hzCh := s.hzChange
-	interval := time.Second / time.Duration(hz)
+	intCh := s.intervalChange
+	interval := tickInterval(s.clockHz, s.speedMul)
 	// Boot dispatch: assign ready procs to idle cores so the first tick
 	// already has work to do and the READY→RUN transitions are observable
 	// in the event log before any instruction executes.
 	bootEvs := s.kernel.DispatchIdleCores()
 	tick := s.kernel.BootCPU().Tick
+	clockHz := s.clockHz
+	speedMul := s.speedMul
 	s.mu.Unlock()
 
 	for _, e := range bootEvs {
 		s.events.push(e, tick)
 		s.Broadcast(EventToWire(e))
 	}
-	s.Broadcast(map[string]any{"type": "state", "running": true, "hz": hz})
+	s.broadcastSpeedState(true, clockHz, speedMul, interval)
 
 	go func() {
 		ticker := time.NewTicker(interval)
@@ -262,9 +268,9 @@ func (s *Simulator) StartRun(hz int) {
 			select {
 			case <-stop:
 				return
-			case newHz := <-hzCh:
-				if newHz > 0 {
-					ticker.Reset(time.Second / time.Duration(newHz))
+			case newInterval := <-intCh:
+				if newInterval > 0 {
+					ticker.Reset(newInterval)
 				}
 			case <-ticker.C:
 				s.mu.Lock()
@@ -286,35 +292,118 @@ func (s *Simulator) StartRun(hz int) {
 	}()
 }
 
-// SetSpeed adjusts the run loop frequency on the fly. If the run loop is
-// active the ticker is reset without restarting the loop; otherwise only the
-// stored stepHz is updated so the next StartRun picks it up. A `state` event
-// announces the change to every connected client.
-func (s *Simulator) SetSpeed(hz int) {
-	if hz < 1 {
-		hz = 1
-	}
-	if hz > 60 {
-		hz = 60
-	}
+// SetClockHz changes the simulated CPU clock frequency (integer Hz, clamped to
+// [1, 60]). If the run loop is active the ticker is retuned without restarting
+// the goroutine; otherwise the new value is just stored for the next StartRun.
+// A `state` event broadcasts clockHz, speedMul and the resulting tickIntervalMs
+// so every client can re-render its speed UI consistently.
+func (s *Simulator) SetClockHz(hz int) {
+	hz = clampClockHz(hz)
 	s.mu.Lock()
-	if s.stepHz == hz {
+	if s.clockHz == hz {
 		s.mu.Unlock()
 		return
 	}
-	s.stepHz = hz
-	ch := s.hzChange
+	s.clockHz = hz
+	mul := s.speedMul
+	interval := tickInterval(hz, mul)
+	ch := s.intervalChange
 	running := s.running
 	s.mu.Unlock()
 	if running && ch != nil {
 		// Non-blocking send: the loop drains one value per iteration, and a
 		// previous unread value already reflects user intent close enough.
 		select {
-		case ch <- hz:
+		case ch <- interval:
 		default:
 		}
 	}
-	s.Broadcast(map[string]any{"type": "state", "hz": hz})
+	s.broadcastSpeedState(running, hz, mul, interval)
+}
+
+// SetSpeedMul changes the wall-clock multiplier (float, clamped to
+// [0.1, 5.0]). Same retune semantics as SetClockHz.
+func (s *Simulator) SetSpeedMul(mul float64) {
+	mul = clampSpeedMul(mul)
+	s.mu.Lock()
+	if s.speedMul == mul {
+		s.mu.Unlock()
+		return
+	}
+	s.speedMul = mul
+	hz := s.clockHz
+	interval := tickInterval(hz, mul)
+	ch := s.intervalChange
+	running := s.running
+	s.mu.Unlock()
+	if running && ch != nil {
+		select {
+		case ch <- interval:
+		default:
+		}
+	}
+	s.broadcastSpeedState(running, hz, mul, interval)
+}
+
+// SetSpeed is the legacy entry point kept around so the WS handler keeps
+// compiling; it forwards to SetClockHz. Remove once the frontend stops sending
+// the `set_speed` command.
+func (s *Simulator) SetSpeed(hz int) {
+	s.SetClockHz(hz)
+}
+
+// broadcastSpeedState fans out the speed-related fields. tickIntervalMs is
+// rounded to an int so the wire format stays small; the legacy `hz` field is
+// the effective rate (clockHz × speedMul) so old clients still see something
+// sensible without knowing about the multiplier.
+func (s *Simulator) broadcastSpeedState(running bool, hz int, mul float64, interval time.Duration) {
+	tickMs := int(interval / time.Millisecond)
+	if tickMs <= 0 {
+		tickMs = 1
+	}
+	effective := float64(hz) * mul
+	state := map[string]any{
+		"type":             "state",
+		"clockHz":          hz,
+		"speedMul":         mul,
+		"tickIntervalMs":   tickMs,
+		"hz":               effective,
+	}
+	if running {
+		state["running"] = true
+	}
+	s.Broadcast(state)
+}
+
+// tickInterval converts (clockHz, speedMul) into the time.Duration consumed by
+// the ticker. Caps the effective rate at 0.1 Hz on the low end to keep the
+// duration finite when callers pass a stale zero.
+func tickInterval(hz int, mul float64) time.Duration {
+	effective := float64(hz) * mul
+	if effective < 0.1 {
+		effective = 0.1
+	}
+	return time.Duration(float64(time.Second) / effective)
+}
+
+func clampClockHz(hz int) int {
+	if hz < 1 {
+		return 1
+	}
+	if hz > 60 {
+		return 60
+	}
+	return hz
+}
+
+func clampSpeedMul(mul float64) float64 {
+	if mul < 0.1 {
+		return 0.1
+	}
+	if mul > 5.0 {
+		return 5.0
+	}
+	return mul
 }
 
 // StopRun stops the run loop.
@@ -327,7 +416,7 @@ func (s *Simulator) StopRun() {
 	s.running = false
 	close(s.runStop)
 	s.runStop = nil
-	s.hzChange = nil
+	s.intervalChange = nil
 	s.mu.Unlock()
 	s.Broadcast(map[string]any{"type": "state", "running": false})
 }
@@ -463,11 +552,24 @@ func (s *Simulator) snapshotLocked() map[string]any {
 		"procs":         s.processListLocked(),
 		"sources":       s.procSources,
 		"source_maps":   s.procSourceMaps,
-		"cores":         cores,
-		"num_cores":     s.kernel.NumCores(),
-		"running":       s.running,
-		"hz":            s.stepHz,
+		"cores":            cores,
+		"num_cores":        s.kernel.NumCores(),
+		"running":          s.running,
+		"hz":               float64(s.clockHz) * s.speedMul,
+		"clockHz":          s.clockHz,
+		"speedMul":         s.speedMul,
+		"tickIntervalMs":   tickIntervalMs(s.clockHz, s.speedMul),
 	}
+}
+
+// tickIntervalMs returns the snapshot-friendly rounded millisecond value
+// derived from the same formula the ticker uses.
+func tickIntervalMs(hz int, mul float64) int {
+	ms := int(tickInterval(hz, mul) / time.Millisecond)
+	if ms <= 0 {
+		ms = 1
+	}
+	return ms
 }
 
 func coreSnapshot(core *kernel.Core) map[string]any {

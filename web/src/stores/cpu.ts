@@ -16,8 +16,8 @@ export type CpuEvent =
   | { type: 'page_fault'; core_id: number; addr: number; mode: number; perm_needed: string }
   | { type: 'halt'; core_id: number; pid?: number }
   | { type: 'tick'; value: number }
-  | { type: 'state'; halted?: boolean; running?: boolean; hz?: number }
-  | { type: 'snapshot'; regs: Record<string, number>; segments: Record<string, number>; mode: number; halted: boolean; tick: number; timer_quantum?: number; current_pid?: number; ready_queue?: number[]; wait_queue?: WaitInfo[]; procs?: PCBInfo[]; sources?: Record<string, string>; source_maps?: Record<string, SourceLine[]>; cores?: CoreInfo[]; num_cores?: number; running?: boolean; hz?: number }
+  | { type: 'state'; halted?: boolean; running?: boolean; hz?: number; clockHz?: number; speedMul?: number; tickIntervalMs?: number }
+  | { type: 'snapshot'; regs: Record<string, number>; segments: Record<string, number>; mode: number; halted: boolean; tick: number; timer_quantum?: number; current_pid?: number; ready_queue?: number[]; wait_queue?: WaitInfo[]; procs?: PCBInfo[]; sources?: Record<string, string>; source_maps?: Record<string, SourceLine[]>; cores?: CoreInfo[]; num_cores?: number; running?: boolean; hz?: number; clockHz?: number; speedMul?: number; tickIntervalMs?: number }
   | { type: 'programs'; list: ProgramInfo[] }
   | { type: 'loaded'; name: string; pids: number[]; procs: PCBInfo[]; sources: Record<string, string>; source_maps?: Record<string, SourceLine[]> }
   | { type: 'reset' }
@@ -213,7 +213,18 @@ export const useCpuStore = defineStore('cpu', () => {
   const halted = ref(false);
   const running = ref(false);
   const tick = ref(0);
-  const stepHz = ref(4);
+  // Speed model: clockHz is the simulated CPU clock (integer Hz the kernel
+  // would advertise); speedMul is the wall-clock playback multiplier the user
+  // drives from the TopBar. effectiveHz = clockHz × speedMul. stepHz is kept
+  // as a derived view so legacy consumers (SimBar bindings, snapshots) keep
+  // reading the same shape without knowing about the split.
+  const clockHz = ref(4);
+  const speedMul = ref(1.0);
+  const stepHz = computed(() => clockHz.value * speedMul.value);
+  const tickIntervalMs = computed(() => {
+    const hz = stepHz.value;
+    return hz > 0 ? Math.round(1000 / hz) : 10000;
+  });
   const timerQuantum = ref(8);
 
   // Registros que cambiaron en el último evento, para animar flash. Per-core:
@@ -678,7 +689,8 @@ export const useCpuStore = defineStore('cpu', () => {
         tick.value = ev.tick;
         if (ev.timer_quantum !== undefined) timerQuantum.value = ev.timer_quantum;
         if (ev.running !== undefined) running.value = ev.running;
-        if (ev.hz !== undefined) stepHz.value = ev.hz;
+        if (ev.clockHz !== undefined) clockHz.value = ev.clockHz;
+        if (ev.speedMul !== undefined) speedMul.value = ev.speedMul;
         if (ev.ready_queue) readyQueue.value = ev.ready_queue;
         if (ev.wait_queue) waitQueue.value = ev.wait_queue;
         if (ev.procs) procs.value = ev.procs;
@@ -793,7 +805,8 @@ export const useCpuStore = defineStore('cpu', () => {
       case 'state':
         if (ev.halted !== undefined) halted.value = ev.halted;
         if (ev.running !== undefined) running.value = ev.running;
-        if (ev.hz !== undefined) stepHz.value = ev.hz;
+        if (ev.clockHz !== undefined) clockHz.value = ev.clockHz;
+        if (ev.speedMul !== undefined) speedMul.value = ev.speedMul;
         break;
       case 'loaded':
         pushLog(`▸ loaded ${ev.name} (${ev.pids.length} proc) PIDs=${ev.pids.join(',')}`, 'green');
@@ -1090,9 +1103,23 @@ export const useCpuStore = defineStore('cpu', () => {
     timerQuantum.value = q;
     send({ cmd: 'timer_quantum', quantum: q });
   }
+  function setClockHz(hz: number) {
+    // The backend clamps to [1, 60] too; doing it here keeps the optimistic
+    // UI in sync with what the server will accept.
+    const clamped = Math.max(1, Math.min(60, Math.round(hz)));
+    clockHz.value = clamped;
+    send({ cmd: 'set_clock_hz', clockHz: clamped });
+  }
+  function setSpeedMul(mul: number) {
+    const clamped = Math.max(0.1, Math.min(5.0, mul));
+    speedMul.value = clamped;
+    send({ cmd: 'set_speed_mul', speedMul: clamped });
+  }
+  // setSpeed is the deprecated single-knob API; routes to setClockHz so the
+  // run loop's effective rate keeps matching the user's input until the last
+  // caller migrates.
   function setSpeed(hz: number) {
-    stepHz.value = hz;
-    send({ cmd: 'set_speed', speed: hz });
+    setClockHz(hz);
   }
   function pushKey(key: string) { send({ cmd: 'push_key', key }); }
   function share() { send({ cmd: 'share' }); }
@@ -1196,7 +1223,8 @@ export const useCpuStore = defineStore('cpu', () => {
   }
 
   return {
-    regs, segments, mode, halted, running, tick, stepHz, timerQuantum,
+    regs, segments, mode, halted, running, tick,
+    stepHz, clockHz, speedMul, tickIntervalMs, timerQuantum,
     changedRegs, changedRegsByCore,
     programs, selectedProgram, log, connected, hasEverConnected, lastError,
     reconnectAttempts, nextRetryAt, reconnectNow,
@@ -1211,7 +1239,8 @@ export const useCpuStore = defineStore('cpu', () => {
     glossarySearch, glossaryOpenSignal,
     sessionInfo, isViewer, viewerLink,
     lastPresence, handRaiseSignal, lastHandRaiseLabel, ownerGlossaryHover,
-    connect, load, step, run, pause, reset, clearLog, setQuantum, setSpeed, pushKey, openGlossary,
+    connect, load, step, run, pause, reset, clearLog, setQuantum,
+    setSpeed, setClockHz, setSpeedMul, pushKey, openGlossary,
     share, unshare, setAlias, setNumCores, sendPresence, sendFocus, raiseHand, sendPointer, sendPointerOff, sendClick, sendGlossaryHover, sendGlossaryHoverOff,
     // Tutor: keep the wire shape private to this store so consumers do not
     // have to know the WS command name.

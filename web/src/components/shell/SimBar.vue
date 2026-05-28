@@ -28,6 +28,7 @@ import ProgramPicker from '../ProgramPicker.vue';
 import ShareModal from '../ShareModal.vue';
 import Term from '../glossary/Term.vue';
 import SimStatusRow from './SimStatusRow.vue';
+import SpeedSlider from './SpeedSlider.vue';
 import HandRaiseBadge from './HandRaiseBadge.vue';
 
 const cpu = useCpuStore();
@@ -73,14 +74,14 @@ const SETTING_DEBOUNCE_MS = 200;
 let hzTimer: number | null = null;
 let qTimer: number | null = null;
 
-function onHz(e: Event) {
+function onClockHz(e: Event) {
   const v = Number((e.target as HTMLInputElement).value);
   if (!Number.isFinite(v)) return;
   const clamped = Math.max(1, Math.min(60, Math.round(v)));
   if (hzTimer !== null) window.clearTimeout(hzTimer);
   hzTimer = window.setTimeout(() => {
     hzTimer = null;
-    cpu.setSpeed(clamped);
+    cpu.setClockHz(clamped);
   }, SETTING_DEBOUNCE_MS);
 }
 
@@ -208,7 +209,7 @@ function dockHeaderDblClick() {
               class="sim-btn"
               :disabled="(cpu.halted && cpu.readyQueue.length === 0) || viewer"
               title="Ejecutar continuamente"
-              @click="cpu.run(cpu.stepHz)"
+              @click="cpu.run(0)"
             ><Play :size="14" :stroke-width="2" /><span>RUN</span></button>
             <button
               v-else
@@ -244,18 +245,19 @@ function dockHeaderDblClick() {
               @click="toggleSettings"
             ><Settings :size="16" :stroke-width="2" /></button>
             <div v-if="settingsOpen" class="sim-bar__popover" role="dialog" aria-label="Velocidad y quantum">
+              <SpeedSlider class="sim-bar__speed" :viewer="viewer" />
               <label class="sim-bar__field">
-                <span class="sim-bar__field-label">HZ</span>
+                <span class="sim-bar__field-label">CLOCK Hz</span>
                 <input
                   type="number"
                   min="1"
                   max="60"
-                  :value="cpu.stepHz"
+                  :value="cpu.clockHz"
                   :disabled="viewer"
-                  aria-label="Pasos por segundo en modo RUN"
-                  @input="onHz"
+                  aria-label="Frecuencia del clock simulado en Hz"
+                  @input="onClockHz"
                 />
-                <span class="sim-bar__field-help">Pasos por segundo en RUN (se aplica en caliente)</span>
+                <span class="sim-bar__field-help">Frecuencia del clock del CPU simulado. El multiplicador SPEED del TopBar la escala.</span>
               </label>
               <label class="sim-bar__field">
                 <Term term="Quantum" mode="label" class="sim-bar__field-label">QUANTUM</Term>
