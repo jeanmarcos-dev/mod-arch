@@ -8,9 +8,9 @@ import (
 	"github.com/jeanmarcos/modos-cpu/pkg/kernel"
 )
 
-const (
-	sharedCounterAddr = 0x3FFFE0
-	threadCounterAddr = 0x3F0000
+var (
+	sharedCounterAddr = SharedCounterAddr()
+	threadCounterAddr = ThreadCounterAddr()
 )
 
 // loadDemo wires a Demo's procs into a fresh single-core kernel and triggers
@@ -559,4 +559,132 @@ func TestThreadsSafe_AlwaysReachesFourHundred(t *testing.T) {
 	if got != 400 {
 		t.Errorf("counter = %d, want 400 (mutex must serialize the critical section)", got)
 	}
+}
+
+// TestBasicDemos_LoadAndComplete covers the nine demos that previously had no
+// behavioral assertions: add, counter, pushpop, callret, soft_int, timer_loop,
+// hello and badmem. Each demo is loaded into a single-core kernel with init at
+// PID 1; the demo body lives at PID 2 and is expected to zombify (cleanly via
+// sys_exit, or via page fault for badmem). When init reaps PID 2, we cross-
+// check the captured exit code against the demo's documented invariant.
+//
+// readkey is excluded — it deliberately blocks on sys_read forever — and is
+// covered by TestReadkey_BlocksWaitingForKey below.
+func TestBasicDemos_LoadAndComplete(t *testing.T) {
+	type expectation struct {
+		name      string
+		exitCode  uint32
+		checkExit bool
+		console   string
+		zombieBlk string
+		irqFires  []uint8
+		budget    int
+	}
+	cases := []expectation{
+		{name: "add", exitCode: 42, checkExit: true, budget: 500},
+		{name: "counter", exitCode: 10, checkExit: true, budget: 500},
+		{name: "pushpop", exitCode: 0xCAFE, checkExit: true, budget: 500},
+		{name: "callret", exitCode: 0x99, checkExit: true, budget: 500},
+		// soft_int fires INT 0x80 with EAX=1, which is sys_exit, so the
+		// process terminates at the first interrupt with whatever EBX held
+		// (0 at process start). The pedagogical value is the mode switch
+		// itself, not the exit code; we only assert termination.
+		{name: "soft_int", budget: 500, irqFires: []uint8{0x80}},
+		{name: "timer_loop", exitCode: 0, checkExit: true, budget: 500, irqFires: []uint8{0x20}},
+		{name: "hello", exitCode: 0, checkExit: true, console: "hola SO\n", budget: 1000, irqFires: []uint8{0x80}},
+		{name: "badmem", zombieBlk: "page_fault", budget: 500, irqFires: []uint8{0x0E}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			demo := findDemo(t, tc.name)
+			k := kernel.New(cpu.DefaultMemSize)
+			k.TimerQuantum = 4
+			loadDemo(t, k, demo)
+
+			const demoPID = 2
+			var (
+				reapedExit  uint32
+				reaped      bool
+				console     []byte
+				seenVec     = make(map[uint8]bool)
+				zombieBlock string
+			)
+			for step := 0; step < tc.budget && k.HasWork(); step++ {
+				evs, err := k.Step()
+				if err != nil {
+					t.Fatalf("step %d: %v", step, err)
+				}
+				for _, e := range evs {
+					switch ev := e.(type) {
+					case cpu.EventIRQFire:
+						seenVec[ev.Vector] = true
+					case cpu.EventConsoleOut:
+						if ev.Kind != "in" {
+							console = append(console, ev.Bytes...)
+						}
+					case cpu.EventWaitOp:
+						if ev.Op == "reap" && ev.ChildPID == demoPID {
+							reapedExit = ev.ExitCode
+							reaped = true
+						}
+					}
+				}
+				// Capture the zombie's BlockedOn while it still exists in
+				// the process table — init reaps it shortly after.
+				if p := k.Processes[demoPID]; p != nil && p.State == kernel.StateZombie && zombieBlock == "" {
+					zombieBlock = p.BlockedOn
+				}
+				if reaped && tc.zombieBlk == "" {
+					break
+				}
+			}
+
+			if tc.checkExit {
+				if !reaped {
+					t.Fatalf("init never reaped PID %d within %d steps", demoPID, tc.budget)
+				}
+				if reapedExit != tc.exitCode {
+					t.Errorf("exit code = 0x%X, want 0x%X", reapedExit, tc.exitCode)
+				}
+			}
+			if tc.zombieBlk != "" && zombieBlock != tc.zombieBlk {
+				t.Errorf("zombie BlockedOn = %q, want %q", zombieBlock, tc.zombieBlk)
+			}
+			if tc.console != "" {
+				if got := string(console); got != tc.console {
+					t.Errorf("console = %q, want %q", got, tc.console)
+				}
+			}
+			for _, v := range tc.irqFires {
+				if !seenVec[v] {
+					t.Errorf("IRQ 0x%02X never fired", v)
+				}
+			}
+		})
+	}
+}
+
+// TestReadkey_BlocksWaitingForKey asserts that readkey, with no key pushed
+// from the test, transitions to BLOCKED on sys_read and stays there. It is
+// the only "basic" demo that does not terminate by design.
+func TestReadkey_BlocksWaitingForKey(t *testing.T) {
+	demo := findDemo(t, "readkey")
+	k := kernel.New(cpu.DefaultMemSize)
+	k.TimerQuantum = 8
+	loadDemo(t, k, demo)
+
+	const demoPID = 2
+	for step := 0; step < 500; step++ {
+		if _, err := k.Step(); err != nil {
+			t.Fatalf("step %d: %v", step, err)
+		}
+		if p := k.Processes[demoPID]; p != nil && p.State == kernel.StateBlocked {
+			if p.BlockedOn != "keyboard" && p.BlockedOn != "sys_read" {
+				t.Errorf("BlockedOn = %q, want keyboard/sys_read", p.BlockedOn)
+			}
+			return
+		}
+	}
+	t.Fatal("readkey never reached BLOCKED state")
 }

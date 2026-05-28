@@ -520,9 +520,11 @@ int main(void) {
 		},
 
 		// ─── Concurrency demos ────────────────────────────────────────────
-		// Shared counter at 0x3FFFE0 (inside user_stack region, well above any
-		// process stack). Each worker iterates 200 times doing
-		// load → inc → store.
+		// Shared counter at SharedCounterAddr() (= 0x3FFFE0), sitting 16 bytes
+		// below the very top of physical memory. Slots 0..2 stacks top at
+		// 0x33FFF0 / 0x37FFF0 / 0x3BFFF0, so the workers (loaded into those
+		// slots) cannot clobber the counter via PUSH. Each worker iterates 200
+		// times doing load → inc → store.
 		{
 			Name:        "race_counter",
 			Category:    "concurrencia",
@@ -767,6 +769,7 @@ int main(void) {
 			Name:        "producer_consumer",
 			Category:    "concurrencia",
 			Description: "Productor y consumidor con un buffer de un slot, sincronizados por dos semáforos. Demuestra el patrón sem_wait/sem_signal sin necesidad de mutex porque solo hay un productor y un consumidor.",
+			Cores:       3,
 			Procs: []Proc{
 				{
 					Name: "setup_two_sems",
@@ -1539,7 +1542,7 @@ int main(void) {
 					0xCD, 0x80, // 0x0A: int 0x80
 					0xB8, 0x48, 0x4F, 0x4C, 0x41, // 0x0C: mov eax, 0x414C4F48 ("HOLA")
 					0xA3, 0x10, 0x00, 0x31, 0x00, // 0x11: mov [0x310010], eax
-					0xA1, 0x04, 0x00, 0x31, 0x00, // 0x16: mov eax, [0x350004] (fdW)
+					0xA1, 0x04, 0x00, 0x31, 0x00, // 0x16: mov eax, [0x310004] (fdW)
 					0x89, 0xC3, // 0x1B: mov ebx, eax
 					0xB8, 0x04, 0x00, 0x00, 0x00, // 0x1D: mov eax, 4 (SysWrite)
 					0xB9, 0x10, 0x00, 0x31, 0x00, // 0x22: mov ecx, 0x310010
@@ -1581,7 +1584,7 @@ int main(void) {
 					{Offset: 0x0A, Mnemonic: "INT 0x80", CLine: 8},
 					{Offset: 0x0C, Mnemonic: "MOV EAX, 0x414C4F48 ; \"HOLA\"", CLine: 9},
 					{Offset: 0x11, Mnemonic: "MOV [0x310010], EAX", CLine: 9},
-					{Offset: 0x16, Mnemonic: "MOV EAX, [0x350004] ; fdW", CLine: 9},
+					{Offset: 0x16, Mnemonic: "MOV EAX, [0x310004] ; fdW", CLine: 9},
 					{Offset: 0x1B, Mnemonic: "MOV EBX, EAX", CLine: 9},
 					{Offset: 0x1D, Mnemonic: "MOV EAX, 4       ; SysWrite", CLine: 9},
 					{Offset: 0x22, Mnemonic: "MOV ECX, 0x310010", CLine: 9},
