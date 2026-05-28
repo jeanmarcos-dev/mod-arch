@@ -91,13 +91,23 @@ func (s *Server) handleAdminSecurityPut(w http.ResponseWriter, r *http.Request) 
 // login page is worse than showing nothing.
 func (s *Server) handlePublicConfig(w http.ResponseWriter, r *http.Request) {
 	st := s.manager.Store()
-	out := map[string]any{"turnstile_sitekey": ""}
+	out := map[string]any{
+		"turnstile_sitekey": "",
+		"disabled_routes":   []string{},
+		"disabled_panels":   []string{},
+		"disabled_demos":    []string{},
+		"default_route":     DefaultRouteName,
+	}
 	if st != nil {
 		if cfg, err := loadSecurityConfig(r.Context(), st, s.encKey); err == nil {
 			if cfg.TurnstileSitekey != "" && cfg.TurnstileSecret != "" {
 				out["turnstile_sitekey"] = cfg.TurnstileSitekey
 			}
 		}
+		out["disabled_routes"] = readStringArraySetting(r.Context(), st, SettingUIDisabledRoutes)
+		out["disabled_panels"] = readStringArraySetting(r.Context(), st, SettingUIDisabledPanels)
+		out["disabled_demos"] = readStringArraySetting(r.Context(), st, SettingUIDisabledDemos)
+		out["default_route"] = readDefaultRoute(r.Context(), st)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

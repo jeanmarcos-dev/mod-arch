@@ -3,12 +3,35 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"slices"
 
 	"github.com/jeanmarcos/modos-cpu/internal/programs"
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
 	"github.com/jeanmarcos/modos-cpu/internal/store"
 )
+
+// demoCatalogEntry is the slim shape the admin SPA needs to render the
+// "disable demos" toggle table — name, description and optional category.
+// The runtime payload (bytes, source maps) is intentionally omitted so the
+// transfer stays under a couple of KB.
+type demoCatalogEntry struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Category    string `json:"category,omitempty"`
+}
+
+// handleAdminListDemos returns the static catalog of demos so the admin can
+// pick which ones to disable. The endpoint is read-only and lives on the
+// moderator surface; admin still owns the writes to disabled_demos.
+func (s *Server) handleAdminListDemos(w http.ResponseWriter, r *http.Request) {
+	all := programs.Demos()
+	out := make([]demoCatalogEntry, len(all))
+	for i, d := range all {
+		out[i] = demoCatalogEntry{Name: d.Name, Description: d.Description, Category: d.Category}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
 
 // Setting keys for the admin-curated UI surface.
 const (
@@ -110,6 +133,36 @@ func readDefaultRoute(ctx context.Context, st *store.Store) string {
 		return DefaultRouteName
 	}
 	return v
+}
+
+// demoBlockedForSession returns true when the demo identified by name is in
+// the disabled-demos list AND the user behind the session is a student (or
+// unauthenticated). Admins and moderators bypass the gate.
+func (s *Server) demoBlockedForSession(sess *sessions.Session, name string) bool {
+	if name == "" {
+		return false
+	}
+	st := s.manager.Store()
+	if st == nil {
+		return false
+	}
+	disabled := readStringArraySetting(context.Background(), st, SettingUIDisabledDemos)
+	if !slices.Contains(disabled, name) {
+		return false
+	}
+	uid := sess.UserID()
+	if uid == "" {
+		return true
+	}
+	u, err := st.GetUser(context.Background(), uid)
+	if err != nil {
+		return true
+	}
+	role := u.Role
+	if role == store.RoleAdmin || role == store.RoleModerator {
+		return false
+	}
+	return true
 }
 
 // validateStringArrayAgainst checks every element of raw against the given

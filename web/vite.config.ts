@@ -10,6 +10,14 @@ export default defineConfig({
     proxy: {
       '/api': backendHost,
       '/ws': { target: backendHost, ws: true, changeOrigin: true },
+      // The admin REST surface and the magic-link viewer entry must reach the
+      // Go backend in dev; without these rules Vite would serve them as
+      // static SPA paths and `admin.fetchMeStatus()` would return HTML, so
+      // the AdminShell would never render.
+      '/admin/api': backendHost,
+      '/admin/login': backendHost,
+      '/admin/logout': backendHost,
+      '/v': backendHost,
     },
   },
   build: {

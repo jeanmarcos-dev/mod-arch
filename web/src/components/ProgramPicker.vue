@@ -2,10 +2,16 @@
 import { useCpuStore } from '../stores/cpu';
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { ChevronDown } from '@lucide/vue';
+import { useI18n } from 'vue-i18n';
+import { ChevronDown, Lock } from '@lucide/vue';
+import { useAppConfigStore } from '../stores/appConfig';
+import { useIsStudent } from '../composables/useIsStudent';
 
 const cpu = useCpuStore();
 const route = useRoute();
+const appCfg = useAppConfigStore();
+const isStudent = useIsStudent();
+const { t } = useI18n();
 const open = ref(false);
 const root = ref<HTMLElement | null>(null);
 
@@ -22,11 +28,17 @@ const visiblePrograms = computed(() => {
   return cpu.programs.filter(p => (p.category ?? '') === cat);
 });
 
+function isDemoLocked(name: string): boolean {
+  if (!isStudent.value) return false;
+  return appCfg.disabledDemos.has(name);
+}
+
 function toggle() {
   open.value = !open.value;
 }
 
 function pick(name: string) {
+  if (isDemoLocked(name)) return;
   cpu.selectedProgram = name;
   open.value = false;
 }
@@ -68,9 +80,11 @@ onBeforeUnmount(() => {
         v-for="p in visiblePrograms"
         :key="p.name"
         class="opt"
-        :class="{ selected: p.name === cpu.selectedProgram }"
+        :class="{ selected: p.name === cpu.selectedProgram, locked: isDemoLocked(p.name) }"
         role="button"
         tabindex="0"
+        :aria-disabled="isDemoLocked(p.name) ? 'true' : undefined"
+        :title="isDemoLocked(p.name) ? t('programs.locked.tooltip') : undefined"
         @click="pick(p.name)"
         @keydown.enter="pick(p.name)"
         @keydown.space.prevent="pick(p.name)"
@@ -78,6 +92,7 @@ onBeforeUnmount(() => {
         <div class="opt-head">
           <span class="opt-name">{{ p.name }}</span>
           <span v-if="p.procs && p.procs.length > 1" class="opt-procs">{{ p.procs.length }} proc</span>
+          <Lock v-if="isDemoLocked(p.name)" class="opt-lock" :size="12" :stroke-width="2" />
         </div>
         <div class="opt-desc">{{ p.description }}</div>
       </div>
@@ -206,6 +221,21 @@ onBeforeUnmount(() => {
 
 .opt.selected .opt-name {
   color: var(--green);
+}
+
+.opt.locked {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.opt.locked:hover {
+  background: transparent;
+}
+
+.opt-lock {
+  margin-left: auto;
+  color: var(--text-muted);
+  opacity: 0.85;
 }
 
 .opt-head {

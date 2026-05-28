@@ -33,6 +33,10 @@ export interface AccessSettings {
   access_mode: 'open' | 'invite_only' | 'closed';
   viewer_password_required: boolean;
   viewer_password_set: boolean;
+  disabled_routes: string[];
+  disabled_panels: string[];
+  disabled_demos: string[];
+  default_route: string;
 }
 
 export interface UserSessionBrief {

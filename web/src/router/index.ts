@@ -92,6 +92,7 @@ export const router = createRouter({
         { path: 'tutor', name: 'admin-tutor-metrics', component: AdminTutorMetrics, meta: { titleKey: 'router.titles.adminTutorMetricsLong' } },
         { path: 'tutor/config', name: 'admin-tutor-config', component: AdminTutorConfig, meta: { titleKey: 'router.titles.adminTutorConfigLong' } },
         { path: 'seguridad', name: 'admin-security', component: AdminSecurity, meta: { titleKey: 'router.titles.adminSecurity' } },
+        { path: 'simulador', name: 'admin-simulator', component: AdminSimulator, meta: { titleKey: 'router.titles.adminSimulator' } },
       ],
     },
     {
@@ -102,9 +103,55 @@ export const router = createRouter({
   ],
 });
 
+// Routes the disabled-routes/default-route policy can touch. Excludes
+// authentication, admin and viewer-token URLs so a misconfigured default or
+// disabled list cannot lock a user out of the admin panel or the magic-link
+// landing page.
+const STUDENT_GATED_ROUTES = new Set([
+  'overview',
+  'processes',
+  'memory',
+  'interrupts',
+  'concurrency',
+  'x86-real',
+  'glossary',
+  'preferences',
+  'profile',
+]);
+
+// Fallback path used when the configured default route is itself disabled or
+// unknown. Keeps the student inside the SPA instead of bouncing to 404.
+const SAFE_FALLBACK_PATH = '/';
+
+function defaultPath(defaultRoute: string, disabled: Set<string>): string {
+  if (!STUDENT_GATED_ROUTES.has(defaultRoute) || disabled.has(defaultRoute)) {
+    return SAFE_FALLBACK_PATH;
+  }
+  const resolved = router.resolve({ name: defaultRoute });
+  return resolved?.path || SAFE_FALLBACK_PATH;
+}
+
 router.beforeEach(async (to, from) => {
   if (to.name === 'not-found') return true;
   const isAdminPath = to.path === '/admin' || to.path.startsWith('/admin/');
+
+  // Apply the disabled-routes lockdown to student-gated routes only.
+  // Admin/moderator bypass: the auth store is the authority on role, but if
+  // it has not been hydrated yet we treat the visit as a student visit
+  // (defense in depth — anything not proven privileged is restricted).
+  if (!isAdminPath && typeof to.name === 'string' && STUDENT_GATED_ROUTES.has(to.name)) {
+    const appCfg = useAppConfigStore();
+    const auth = useAuthStore();
+    if (!appCfg.loaded) await appCfg.load();
+    const role = auth.user?.role;
+    const isPrivileged = role === 'admin' || role === 'moderator';
+    if (!isPrivileged && appCfg.disabledRoutes.has(to.name)) {
+      const fallback = defaultPath(appCfg.defaultRoute, appCfg.disabledRoutes);
+      if (fallback !== to.path) return fallback;
+      return SAFE_FALLBACK_PATH;
+    }
+  }
+
   if (!isAdminPath) return true;
 
   const admin = useAdminStore();

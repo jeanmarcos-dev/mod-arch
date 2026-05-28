@@ -41,7 +41,19 @@ async function submit() {
       turnstile_token: turnstileEnabled.value ? turnstileToken.value : undefined,
     });
     if (outcome === 'direct') {
-      const next = (router.currentRoute.value.query.next as string) || '/';
+      const queryNext = router.currentRoute.value.query.next;
+      const next = typeof queryNext === 'string' && queryNext !== ''
+        ? queryNext
+        : (() => {
+            const cfgDefault = appCfg.defaultRoute;
+            if (!cfgDefault || cfgDefault === 'overview') return '/';
+            try {
+              const resolved = router.resolve({ name: cfgDefault });
+              return resolved?.path || '/';
+            } catch {
+              return '/';
+            }
+          })();
       await router.replace(next);
     } else if (outcome === 'error') {
       // A bad token taints the widget; force a refresh on next attempt.

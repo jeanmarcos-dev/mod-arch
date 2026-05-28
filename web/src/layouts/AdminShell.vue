@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { Gauge, Monitor, Users, Mail, Lock, Send, ScrollText, ExternalLink, LogOut, ShieldUser, BotMessageSquare, SlidersHorizontal, ShieldCheck } from '@lucide/vue';
+import { Gauge, Monitor, Users, Mail, Lock, Send, ScrollText, ExternalLink, LogOut, ShieldUser, BotMessageSquare, SlidersHorizontal, ShieldCheck, MonitorCog } from '@lucide/vue';
 import { useAdminStore } from '../stores/admin';
 import { useToastStore } from '../stores/toast';
 import Sidebar from '../components/shell/Sidebar.vue';
@@ -44,6 +44,7 @@ const items = computed(() => {
     { to: '/admin/tutor', label: t('router.titles.adminTutorMetrics'), icon: BotMessageSquare, group: grp },
     { to: '/admin/tutor/config', label: t('router.titles.adminTutorConfig'), icon: SlidersHorizontal, group: grp },
     { to: '/admin/seguridad', label: t('router.titles.adminSecurity'), icon: ShieldCheck, group: grp },
+    { to: '/admin/simulador', label: t('router.titles.adminSimulator'), icon: MonitorCog, group: grp },
   ];
   if (admin.isModerator) {
     return baseAll.filter(item =>
@@ -51,7 +52,8 @@ const items = computed(() => {
       item.to !== '/admin/accesos' &&
       item.to !== '/admin/smtp' &&
       item.to !== '/admin/tutor/config' &&
-      item.to !== '/admin/seguridad'
+      item.to !== '/admin/seguridad' &&
+      item.to !== '/admin/simulador'
     );
   }
   return baseAll;

@@ -178,6 +178,9 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/api/settings", s.requireAdminAPI(s.handleAdminGetSettings))
 	mux.HandleFunc("PUT /admin/api/settings", s.requireAdminAPI(s.requireCSRF(s.handleAdminSetSetting)))
 
+	// Demo catalog: read-only listing used by the admin "habilitar demos" UI.
+	mux.HandleFunc("GET /admin/api/demos", s.requireAdminAPI(s.handleAdminListDemos))
+
 	mux.HandleFunc("POST /admin/api/users/{id}/role", s.requireAdminAPI(s.requireCSRF(s.handleAdminSetUserRole)))
 
 	// Identity CRUD: create/edit/delete users from the admin panel. Role
