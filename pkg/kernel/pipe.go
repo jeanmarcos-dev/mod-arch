@@ -24,24 +24,28 @@ type Pipe struct {
 	IsFifo  bool
 }
 
-// allocFD finds the lowest unused index >= 3 in the caller's FDTable,
+// allocFD finds the lowest unused index >= 3 in the caller's FDSpace table,
 // grows the table as needed, and stamps the slot with the given Kind +
 // PipeID. Returns the fd number.
 func allocFD(pcb *PCB, kind string, pipeID int) uint32 {
+	fds := pcb.FDSpace()
+	if fds == nil {
+		return ^uint32(0)
+	}
 	// Reserve slots 0/1/2 so they stay aligned with stdin/stdout/stderr
 	// even though the actual stdio dispatch does not consult the table.
-	if len(pcb.FDTable) < 3 {
-		pcb.FDTable = append(pcb.FDTable, FD{}, FD{}, FD{})
-		pcb.FDTable = pcb.FDTable[:3]
+	if len(fds.Table) < 3 {
+		fds.Table = append(fds.Table, FD{}, FD{}, FD{})
+		fds.Table = fds.Table[:3]
 	}
-	for i := 3; i < len(pcb.FDTable); i++ {
-		if !pcb.FDTable[i].Used {
-			pcb.FDTable[i] = FD{Used: true, Kind: kind, PipeID: pipeID}
+	for i := 3; i < len(fds.Table); i++ {
+		if !fds.Table[i].Used {
+			fds.Table[i] = FD{Used: true, Kind: kind, PipeID: pipeID}
 			return uint32(i)
 		}
 	}
-	pcb.FDTable = append(pcb.FDTable, FD{Used: true, Kind: kind, PipeID: pipeID})
-	return uint32(len(pcb.FDTable) - 1)
+	fds.Table = append(fds.Table, FD{Used: true, Kind: kind, PipeID: pipeID})
+	return uint32(len(fds.Table) - 1)
 }
 
 // sysPipe implements sys_pipe(fd_pair_addr): create a new anonymous pipe,
@@ -92,10 +96,14 @@ func (k *Kernel) sysPipe(core *Core, fdPairAddr uint32) (uint32, []cpu.Event) {
 // object along with a flag for "this fd is the write end" (false = read
 // end). Returns nil if the fd is invalid or not a pipe.
 func (k *Kernel) resolvePipeFD(pcb *PCB, fd uint32) (*Pipe, bool, bool) {
-	if int(fd) >= len(pcb.FDTable) {
+	fds := pcb.FDSpace()
+	if fds == nil {
 		return nil, false, false
 	}
-	entry := pcb.FDTable[fd]
+	if int(fd) >= len(fds.Table) {
+		return nil, false, false
+	}
+	entry := fds.Table[fd]
 	if !entry.Used {
 		return nil, false, false
 	}

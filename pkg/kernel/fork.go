@@ -36,15 +36,20 @@ func (k *Kernel) sysFork(core *Core) (uint32, []cpu.Event) {
 	codeBase := processCodeBase(childPID)
 	stackTop := processStackTop(childPID)
 
+	parentMem := parent.MemSpace()
+	if parentMem == nil {
+		return ^uint32(0), nil
+	}
+
 	// Zero the child's code region before copying so stale bytes from a
 	// previous incarnation cannot leak in.
 	for i := codeBase; i < codeBase+ProcCodeSize; i++ {
 		k.Mem.Bytes[i] = 0
 	}
 	// Copy the parent's code into the child's slot. We copy exactly
-	// parent.CodeSize bytes — the rest stays zero.
-	for i := uint32(0); i < parent.CodeSize; i++ {
-		k.Mem.Bytes[codeBase+i] = k.Mem.Bytes[parent.CodeBase+i]
+	// parentMem.CodeSize bytes — the rest stays zero.
+	for i := uint32(0); i < parentMem.CodeSize; i++ {
+		k.Mem.Bytes[codeBase+i] = k.Mem.Bytes[parentMem.CodeBase+i]
 	}
 
 	// Copy the parent's stack region too. Even though the parent has not
@@ -62,21 +67,25 @@ func (k *Kernel) sysFork(core *Core) (uint32, []cpu.Event) {
 		Name:         fmt.Sprintf("%s-child", parent.Name),
 		State:        StateReady,
 		Mode:         parent.Mode,
-		CodeBase:     codeBase,
-		CodeSize:     parent.CodeSize,
 		StackTop:     stackTop,
 		Core:         -1,
+		TGID:         childPID,
 		ParentPID:    parentPID,
 		Regs:         parent.Regs,
 		SavedUserESP: parent.SavedUserESP,
 		SavedUserSS:  parent.SavedUserSS,
+		// Fresh AddressSpace at the child's slot — fork gives an
+		// independent copy, not a shared mapping.
+		memSpace: k.newMemSpace(codeBase, parentMem.CodeSize),
 		// Inherit a copy of the parent's open fds. Pipe entries refer
 		// to shared kernel Pipe objects so both processes can now
 		// reach the same channel — that is how parent/child pipelines
-		// work in Linux.
-		FDTable: append([]FD(nil), parent.FDTable...),
+		// work in Linux. cloneFDSpace duplicates the table contents
+		// into a fresh FDSpace so close/dup in one side does not
+		// affect the other.
+		fdSpace: k.cloneFDSpace(parent.FDSpace()),
 	}
-	for _, fd := range child.FDTable {
+	for _, fd := range child.FDSpace().Table {
 		if !fd.Used || fd.PipeID < 1 || fd.PipeID > len(k.Pipes) {
 			continue
 		}

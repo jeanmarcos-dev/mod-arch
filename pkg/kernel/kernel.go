@@ -91,6 +91,16 @@ type Kernel struct {
 	// loading their programs so the process tree always has a root.
 	InitPID int
 
+	// memSpaces and fdSpaces register the AddressSpace and FDSpace objects
+	// referenced by live PCBs. Sharing across tasks of the same thread group
+	// goes through these maps via shareMemSpace / shareFDSpace, which bump
+	// refcounts; releaseMemSpace / releaseFDSpace delete entries when no PCB
+	// references them anymore.
+	memSpaces      map[int]*AddressSpace
+	fdSpaces       map[int]*FDSpace
+	nextMemSpaceID int
+	nextFDSpaceID  int
+
 	nextPID int
 }
 
@@ -145,6 +155,8 @@ func NewMulti(memSize, numCores int) *Kernel {
 		TimerQuantum: 8,
 		Processes:    make(map[int]*PCB),
 		Ready:        NewReadyQueue(),
+		memSpaces:    make(map[int]*AddressSpace),
+		fdSpaces:     make(map[int]*FDSpace),
 		nextPID:      1,
 	}
 	k.InstallDefaultIDT()
@@ -233,6 +245,13 @@ func (k *Kernel) Reset() {
 	k.InitPID = 0
 	k.Pipes = nil
 	k.FifoByName = nil
+	// AddressSpace and FDSpace registries must be cleared too: a leftover
+	// pointer in the old map would survive into the next demo and break
+	// refcount accounting for fork/vfork/clone.
+	k.memSpaces = make(map[int]*AddressSpace)
+	k.fdSpaces = make(map[int]*FDSpace)
+	k.nextMemSpaceID = 0
+	k.nextFDSpaceID = 0
 	// The IDT lives in kernel memory and CPU.Reset does not touch it, but
 	// reinstall defensively in case a test mutated entries.
 	k.InstallDefaultIDT()
@@ -273,10 +292,11 @@ func (k *Kernel) AddProcess(name string, code []byte) (int, error) {
 		Name:     name,
 		State:    StateReady,
 		Mode:     cpu.ModeUser,
-		CodeBase: codeBase,
-		CodeSize: uint32(len(code)),
 		StackTop: stackTop,
 		Core:     -1,
+		TGID:     pid,
+		memSpace: k.newMemSpace(codeBase, uint32(len(code))),
+		fdSpace:  k.newFDSpace(),
 	}
 	// Initial state: as if the process were saved right before its first
 	// instruction. EIP at the code base, ESP at the top of its stack, EFLAGS

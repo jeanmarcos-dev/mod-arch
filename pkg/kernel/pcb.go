@@ -53,12 +53,28 @@ type PCB struct {
 	// in kernel mode).
 	Mode uint8
 
-	// CodeBase, CodeSize and StackTop describe the in-memory layout: where
-	// .text was loaded and the initial ESP (stack grows downward from
-	// StackTop).
-	CodeBase uint32
-	CodeSize uint32
+	// StackTop is the initial ESP for this task (stack grows downward).
+	// Each PCB owns its own stack region even when several PCBs share an
+	// AddressSpace through CLONE_VM, so the layout stays here on the PCB
+	// rather than inside AddressSpace.
 	StackTop uint32
+
+	// memSpace points to the AddressSpace this task lives in. fork() gives
+	// the child a fresh one; vfork() and clone(CLONE_VM) share with the
+	// parent so threads of the same process see the same .text and globals.
+	// AddressSpace carries CodeBase / CodeSize.
+	memSpace *AddressSpace
+
+	// fdSpace points to the file-descriptor table this task sees. fork()
+	// copies; clone(CLONE_FILES) shares so dup/close ripple to siblings.
+	// FDSpace owns the underlying []FD.
+	fdSpace *FDSpace
+
+	// TGID (Thread Group ID) is the PID of the thread-group leader. For a
+	// fork()-created process, TGID == PID. clone(CLONE_THREAD) inherits the
+	// parent's TGID so getpid()-style lookups can group threads under their
+	// process.
+	TGID int
 
 	// Core is the ID of the core that currently owns this PCB (RUN), or -1
 	// when the process is READY/BLOCKED/ZOMBIE and no core holds it.
@@ -94,13 +110,6 @@ type PCB struct {
 	// Zero means "not a vfork child".
 	VforkParent int
 
-	// FDTable maps a file-descriptor index to the open object it refers
-	// to. Indices 0/1/2 are dispatched directly by number (stdin/stdout/
-	// stderr) for backward compat with the existing sys_read/sys_write
-	// fast paths; only indices >= 3 are populated, pointing at pipes
-	// allocated through sys_pipe.
-	FDTable []FD
-
 	// PendingReaps queues zombie child PIDs that this PCB must collect
 	// before it can resume user code. notifyParentOfExit appends to this
 	// list and wakes the parent to READY; the scheduler drains the list
@@ -122,9 +131,25 @@ type FD struct {
 	PipeID int
 }
 
+// MemSpace returns the AddressSpace this PCB is bound to. Nil means the
+// PCB has not been initialised yet (only the init PCB before SpawnInit
+// finishes wiring it up).
+func (p *PCB) MemSpace() *AddressSpace { return p.memSpace }
+
+// FDSpace returns the file-descriptor table this PCB sees. Nil only on a
+// half-initialised PCB.
+func (p *PCB) FDSpace() *FDSpace { return p.fdSpace }
+
 // Snapshot returns a JSON-friendly representation of the PCB for the frontend.
+// CodeBase / CodeSize are sourced from the AddressSpace so threads of the same
+// process (sharing one MemSpace) all report the same base.
 func (p *PCB) Snapshot() map[string]any {
 	children := append([]int(nil), p.Children...)
+	var codeBase, codeSize uint32
+	if p.memSpace != nil {
+		codeBase = p.memSpace.CodeBase
+		codeSize = p.memSpace.CodeSize
+	}
 	return map[string]any{
 		"pid":        p.PID,
 		"name":       p.Name,
@@ -136,8 +161,8 @@ func (p *PCB) Snapshot() map[string]any {
 			"EIP": p.Regs.EIP, "EFLAGS": p.Regs.EFLAGS,
 		},
 		"saved_user_esp": p.SavedUserESP,
-		"code_base":      p.CodeBase,
-		"code_size":      p.CodeSize,
+		"code_base":      codeBase,
+		"code_size":      codeSize,
 		"stack_top":      p.StackTop,
 		"parent_pid":     p.ParentPID,
 		"children":       children,

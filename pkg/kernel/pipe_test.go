@@ -44,8 +44,9 @@ func TestSysPipe_AllocatesTwoDistinctFDs(t *testing.T) {
 
 	// Resolving each fd must yield the same pipe but with opposite ends.
 	caller := k.Processes[pid]
-	rEntry := caller.FDTable[fdR]
-	wEntry := caller.FDTable[fdW]
+	table := caller.FDSpace().Table
+	rEntry := table[fdR]
+	wEntry := table[fdW]
 	if rEntry.Kind != "pipe-read" || wEntry.Kind != "pipe-write" {
 		t.Errorf("fd kinds = (%s, %s), want (pipe-read, pipe-write)", rEntry.Kind, wEntry.Kind)
 	}

@@ -109,20 +109,22 @@ func TestSysFork_ChildCodeIsCopy(t *testing.T) {
 
 	parent := k.Processes[1]
 	child := k.Processes[childPID]
-	if parent.CodeBase == child.CodeBase {
-		t.Fatalf("parent and child share CodeBase 0x%X — fork must allocate a new slot", parent.CodeBase)
+	parentBase := parent.MemSpace().CodeBase
+	childBase := child.MemSpace().CodeBase
+	if parentBase == childBase {
+		t.Fatalf("parent and child share CodeBase 0x%X — fork must allocate a new slot", parentBase)
 	}
 
 	// Mutate one byte in the parent's code region; the child's must stay put.
-	parentByte0, _ := k.Mem.Read8(nil, parent.CodeBase, cpu.ModeKernel)
-	childByte0, _ := k.Mem.Read8(nil, child.CodeBase, cpu.ModeKernel)
+	parentByte0, _ := k.Mem.Read8(nil, parentBase, cpu.ModeKernel)
+	childByte0, _ := k.Mem.Read8(nil, childBase, cpu.ModeKernel)
 	if parentByte0 != childByte0 {
 		t.Fatalf("byte at code_base differs before mutation: parent=0x%02X child=0x%02X", parentByte0, childByte0)
 	}
 
-	k.Mem.Bytes[parent.CodeBase] = 0x90 // NOP
-	afterParent := k.Mem.Bytes[parent.CodeBase]
-	afterChild := k.Mem.Bytes[child.CodeBase]
+	k.Mem.Bytes[parentBase] = 0x90 // NOP
+	afterParent := k.Mem.Bytes[parentBase]
+	afterChild := k.Mem.Bytes[childBase]
 	if afterParent == afterChild {
 		t.Fatal("mutating parent code byte changed the child too — child is not an independent copy")
 	}

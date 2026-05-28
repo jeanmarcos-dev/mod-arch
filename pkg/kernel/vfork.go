@@ -37,20 +37,35 @@ func (k *Kernel) sysVfork(core *Core) (uint32, []cpu.Event, bool) {
 	childPID := k.nextPID
 	k.nextPID++
 
+	parentMem := parent.MemSpace()
+	if parentMem == nil {
+		return ^uint32(0), nil, false
+	}
+
 	child := &PCB{
 		PID:          childPID,
 		Name:         fmt.Sprintf("%s-vfork", parent.Name),
 		State:        StateReady,
 		Mode:         parent.Mode,
-		CodeBase:     parent.CodeBase, // SAME slot — memory is shared
-		CodeSize:     parent.CodeSize,
 		StackTop:     parent.StackTop,
 		Core:         -1,
+		TGID:         childPID,
 		ParentPID:    parentPID,
 		VforkParent:  parentPID,
 		Regs:         parent.Regs,
 		SavedUserESP: parent.SavedUserESP,
 		SavedUserSS:  parent.SavedUserSS,
+		// vfork shares the parent's AddressSpace — same physical .text,
+		// same data — until the child exits. shareMemSpace bumps the
+		// refcount so releaseMemSpace on the child's exit keeps the
+		// parent's view valid.
+		memSpace: k.shareMemSpace(parentMem),
+		// Preserve the historical simplification: vfork child starts
+		// with an empty FDSpace rather than inheriting the parent's
+		// open pipes. Real POSIX vfork shares fds with the parent;
+		// clone(CLONE_VM|CLONE_FILES) will model that path properly
+		// once threads land.
+		fdSpace: k.newFDSpace(),
 	}
 
 	// Child resumes at the byte after `int 0x80` exactly where the parent
