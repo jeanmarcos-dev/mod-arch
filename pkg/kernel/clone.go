@@ -139,12 +139,31 @@ func (k *Kernel) Clone(core *Core, parent *PCB, flags CloneFlags, opts cloneOpti
 	parent.Children = append(parent.Children, childPID)
 	k.Ready.Push(childPID)
 
-	events := []cpu.Event{
-		cpu.EventFork{
+	var head cpu.Event
+	if flags&CloneThread != 0 {
+		// Sibling thread: the UI groups it under its leader (TGID) rather
+		// than tacking it on the fork tree. EventFork is suppressed in
+		// favour of the dedicated event so a panel that listens only for
+		// fork transitions does not draw a process-tree branch for a
+		// thread.
+		head = cpu.EventThreadCreate{
+			TID:       childPID,
+			TGID:      child.TGID,
+			LeaderPID: child.TGID,
+			CreatorID: parent.PID,
+			FnEIP:     opts.childEIP,
+			StackTop:  childStackTop,
+		}
+	} else {
+		head = cpu.EventFork{
 			ParentPID: parent.PID,
 			ChildPID:  childPID,
 			IsVfork:   flags&CloneVfork != 0,
-		},
+		}
+	}
+
+	events := []cpu.Event{
+		head,
 		cpu.EventProcessState{
 			PID:    childPID,
 			State:  string(StateReady),

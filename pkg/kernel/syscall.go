@@ -262,11 +262,23 @@ func (k *Kernel) sysWrite(core *Core, fd, bufAddr, count uint32) (uint32, []cpu.
 // away and the parent moves back to READY with the reaped PID in EAX.
 func (k *Kernel) sysExit(core *Core, code uint32) []cpu.Event {
 	pcb := k.Processes[core.CurrentPID]
+	var out []cpu.Event
 	if pcb != nil {
 		pcb.Regs.EAX = code
 		pcb.ExitCode = code
+		// A task whose TGID differs from its PID was spawned via
+		// clone(CLONE_THREAD): it is a thread of its leader, not a
+		// process exit. Emit the dedicated event so the UI can fold
+		// the join under the leader's subtree.
+		if pcb.TGID != pcb.PID {
+			out = append(out, cpu.EventThreadExit{
+				TID:    pcb.PID,
+				TGID:   pcb.TGID,
+				Retval: code,
+			})
+		}
 	}
-	out := k.killCurrent(core, "exit")
+	out = append(out, k.killCurrent(core, "exit")...)
 	if pcb != nil {
 		out = append(out, k.notifyParentOfExit(pcb)...)
 	}

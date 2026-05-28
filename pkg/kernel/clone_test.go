@@ -57,10 +57,67 @@ func TestClone_ThreadModeSharesMemoryAndFDs(t *testing.T) {
 		t.Errorf("child VforkParent=%d, want 0 (CLONE_THREAD is not vfork)", child.VforkParent)
 	}
 
-	if forkEv, ok := findEvent[cpu.EventFork](events); !ok {
-		t.Error("no EventFork emitted by Clone in thread mode")
-	} else if forkEv.IsVfork {
-		t.Error("EventFork.IsVfork=true on CLONE_THREAD — must be false")
+	threadEv, ok := findEvent[cpu.EventThreadCreate](events)
+	if !ok {
+		t.Fatal("no EventThreadCreate emitted by Clone in thread mode")
+	}
+	if threadEv.TID != child.PID {
+		t.Errorf("EventThreadCreate.TID=%d, want %d", threadEv.TID, child.PID)
+	}
+	if threadEv.TGID != parent.TGID {
+		t.Errorf("EventThreadCreate.TGID=%d, want %d", threadEv.TGID, parent.TGID)
+	}
+	if threadEv.LeaderPID != parent.TGID {
+		t.Errorf("EventThreadCreate.LeaderPID=%d, want %d", threadEv.LeaderPID, parent.TGID)
+	}
+	if threadEv.FnEIP != threadFn {
+		t.Errorf("EventThreadCreate.FnEIP=0x%X, want 0x%X", threadEv.FnEIP, threadFn)
+	}
+	if threadEv.StackTop != threadStack {
+		t.Errorf("EventThreadCreate.StackTop=0x%X, want 0x%X", threadEv.StackTop, threadStack)
+	}
+	// EventFork must NOT be emitted on thread create — the UI distinguishes
+	// "spawned a thread" from "forked a child" via this very signal.
+	if _, ok := findEvent[cpu.EventFork](events); ok {
+		t.Error("EventFork emitted on CLONE_THREAD — expected only EventThreadCreate")
+	}
+}
+
+// TestPCBSnapshot_ExposesThreadGroupFields anchors the JSON contract toward
+// the frontend: every PCB snapshot must carry tgid / tid / is_leader so the
+// UI can fold sibling threads under their leader without inferring the
+// relationship from the PID layout.
+func TestPCBSnapshot_ExposesThreadGroupFields(t *testing.T) {
+	k := newTestKernel(t, []byte{0xF4})
+	parent := k.Processes[1]
+	child, _, err := k.Clone(k.Cores[0], parent, CloneVM|CloneFiles|CloneThread, cloneOptions{
+		childStackTop: 0x3A0000,
+		childEIP:      0x200080,
+	})
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+
+	leaderSnap := parent.Snapshot()
+	if leaderSnap["tgid"] != parent.TGID {
+		t.Errorf("leader snapshot tgid=%v, want %d", leaderSnap["tgid"], parent.TGID)
+	}
+	if leaderSnap["tid"] != parent.PID {
+		t.Errorf("leader snapshot tid=%v, want %d", leaderSnap["tid"], parent.PID)
+	}
+	if leaderSnap["is_leader"] != true {
+		t.Errorf("leader snapshot is_leader=%v, want true", leaderSnap["is_leader"])
+	}
+
+	threadSnap := child.Snapshot()
+	if threadSnap["tgid"] != parent.TGID {
+		t.Errorf("thread snapshot tgid=%v, want %d (leader's TGID)", threadSnap["tgid"], parent.TGID)
+	}
+	if threadSnap["tid"] != child.PID {
+		t.Errorf("thread snapshot tid=%v, want %d", threadSnap["tid"], child.PID)
+	}
+	if threadSnap["is_leader"] != false {
+		t.Errorf("thread snapshot is_leader=%v, want false", threadSnap["is_leader"])
 	}
 }
 

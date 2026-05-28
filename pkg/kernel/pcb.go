@@ -168,5 +168,13 @@ func (p *PCB) Snapshot() map[string]any {
 		"children":       children,
 		"exit_code":      p.ExitCode,
 		"vfork_parent":   p.VforkParent,
+		// Thread group fields: tid is just PID under a name the frontend
+		// can branch on without parsing semantics, tgid groups siblings,
+		// and is_leader flags the task that owns the address space — the
+		// one that should render the "process" card with threads nested
+		// under it.
+		"tgid":      p.TGID,
+		"tid":       p.PID,
+		"is_leader": p.TGID == p.PID,
 	}
 }
