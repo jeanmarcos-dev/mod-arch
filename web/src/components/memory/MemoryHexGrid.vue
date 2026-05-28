@@ -2,6 +2,7 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue';
 import Card from '../ui/Card.vue';
 import { fmtAddr, fmtByte, regionFor, coreColorVar } from '../../lib/memoryLayout';
+import type { CoreMarker } from '../../lib/memoryOwners';
 
 export interface HeatEntry {
   /** Monotonic id used to force animation restart on each new event. */
@@ -28,6 +29,11 @@ const props = defineProps<{
   /** Monotonic counter — bumps on every new highlight so the CSS animation
    *  restarts even when the user jumps to the same row twice in a row. */
   highlightSeq?: number;
+  /** Floating markers showing where each visible core is currently looking
+   *  (EIP / ESP). Cores do not own memory — these are pointers into the
+   *  shared global RAM. Only markers whose addr falls in the visible window
+   *  are rendered. */
+  coreMarkers?: CoreMarker[];
 }>();
 
 const emit = defineEmits<{
@@ -42,6 +48,28 @@ const rows = computed(() => {
   }
   return out;
 });
+
+const markersByRow = computed<Map<number, CoreMarker[]>>(() => {
+  const map = new Map<number, CoreMarker[]>();
+  const markers = props.coreMarkers ?? [];
+  const winEnd = props.baseAddr + props.rowCount * 16;
+  for (const m of markers) {
+    if (m.addr < props.baseAddr || m.addr >= winEnd) continue;
+    const rowAddr = props.baseAddr + Math.floor((m.addr - props.baseAddr) / 16) * 16;
+    const list = map.get(rowAddr);
+    if (list) list.push(m);
+    else map.set(rowAddr, [m]);
+  }
+  return map;
+});
+
+function markerStyle(m: CoreMarker): Record<string, string> {
+  return { '--core-color': coreColorVar(m.coreId) };
+}
+
+function markerCellOffset(m: CoreMarker): number {
+  return m.addr % 16;
+}
 
 // ─── Popover state ──────────────────────────────────────────────────────────
 // Click on a cell opens a small floating panel anchored to it. Keyed by
@@ -236,6 +264,16 @@ function ensureTicker() {
           <transition name="digit-fade">
             <span :key="byte" class="hexgrid__digit">{{ fmtByte(byte) }}</span>
           </transition>
+        </span>
+        <span
+          v-for="m in markersByRow.get(row.addr) ?? []"
+          :key="`${m.coreId}-${m.kind}`"
+          :class="['hexgrid__marker', `hexgrid__marker--${m.kind.toLowerCase()}`]"
+          :style="{ ...markerStyle(m), gridColumn: `${markerCellOffset(m) + 2}` }"
+          :title="`C${m.coreId} · ${m.kind} · PID ${m.pid || '—'}`"
+        >
+          <span class="hexgrid__marker-caret" aria-hidden="true">▾</span>
+          <span class="hexgrid__marker-label">C{{ m.coreId }}:{{ m.kind }}</span>
         </span>
       </div>
     </div>
@@ -548,6 +586,52 @@ function ensureTicker() {
 .hexgrid__popover-stats dd {
   color: var(--text);
   font-size: 10.5px;
+}
+
+/* ─── Core markers ─────────────────────────────────────────────────────── */
+
+/* Floating chip above the cell pointed to by Cx:EIP/ESP. Cores do NOT own
+   memory; this badge just tells the student "this core's pointer lands on
+   this byte right now." Multiple markers on the same row stack vertically
+   via the second marker rule below. */
+.hexgrid__marker {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  top: -14px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  color: var(--core-color, var(--amber));
+  text-shadow: 0 0 6px var(--core-color, var(--amber));
+  white-space: nowrap;
+  pointer-events: auto;
+  z-index: 3;
+  transform: translateX(-50%);
+  padding: 0 2px;
+  background: color-mix(in oklab, var(--surface-2) 88%, transparent);
+  border: 1px solid var(--core-color, var(--amber));
+  border-radius: 2px;
+  line-height: 1.1;
+}
+
+/* When EIP and ESP from the same core fall in the same row we stack them
+   vertically so neither disappears. ESP sits below to mirror the natural
+   "instruction up / data down" reading. */
+.hexgrid__marker--esp { top: auto; bottom: -14px; }
+
+.hexgrid__marker-caret {
+  font-size: 8px;
+  line-height: 1;
+}
+
+.hexgrid__marker--esp .hexgrid__marker-caret {
+  transform: scaleY(-1);
+}
+
+.hexgrid__marker-label {
+  font-weight: 600;
 }
 
 @media (prefers-reduced-motion: reduce) {

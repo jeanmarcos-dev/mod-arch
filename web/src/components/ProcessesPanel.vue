@@ -341,20 +341,16 @@ function regsSrcTitle(p: PCBInfo): string {
             :stroke-width="2"
             class="proc-card__chevron"
           />
-          <span class="proc-card__state" :class="stateClass(node.proc.state)">{{ node.proc.state }}</span>
+          <span class="proc-card__pid">{{ node.isThread ? 'T' : 'P' }}{{ node.proc.pid }}</span>
+          <span class="proc-card__name" :title="t('panels.processes.nameTooltip', { name: node.proc.name, eip: hex(pcbEIP(node.proc), 8) })">{{ node.proc.name }}</span>
+          <span class="proc-card__head-spacer" />
           <span
             v-if="coreOfPid(node.proc.pid) !== null"
             class="proc-card__core"
             :style="{ color: `var(--core-${(coreOfPid(node.proc.pid) as number) % 4})` }"
             :title="t('panels.processes.coreRunning', { core: coreOfPid(node.proc.pid) ?? 0 })"
           >C{{ coreOfPid(node.proc.pid) }}</span>
-          <span class="proc-card__pid">{{ node.isThread ? 'T' : 'P' }}{{ node.proc.pid }}</span>
-          <span class="proc-card__name" :title="t('panels.processes.nameTooltip', { name: node.proc.name, eip: hex(pcbEIP(node.proc), 8) })">{{ node.proc.name }}</span>
-          <span
-            v-if="node.realDepth > TREE_DEPTH_CAP"
-            class="proc-card__depth-chip"
-            :title="t('panels.processes.depthChipTitle', { depth: node.realDepth, cap: TREE_DEPTH_CAP })"
-          >↳ d{{ node.realDepth }}</span>
+          <span class="proc-card__state" :class="stateClass(node.proc.state)">{{ node.proc.state }}</span>
           <span
             v-if="node.isThread"
             class="proc-card__thread-chip"
@@ -365,6 +361,11 @@ function regsSrcTitle(p: PCBInfo): string {
             class="proc-card__parent-chip"
             :title="t('panels.processes.parentChipTitle', { pid: node.proc.parent_pid })"
           >↑P{{ node.proc.parent_pid }}</span>
+          <span
+            v-if="node.realDepth > TREE_DEPTH_CAP"
+            class="proc-card__depth-chip"
+            :title="t('panels.processes.depthChipTitle', { depth: node.realDepth, cap: TREE_DEPTH_CAP })"
+          >↳ d{{ node.realDepth }}</span>
         </header>
 
         <div v-if="isExpanded(node.proc.pid)" class="proc-card__body">
@@ -541,13 +542,15 @@ function regsSrcTitle(p: PCBInfo): string {
 
 .proc-card__head {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
   padding: 5px 8px;
   cursor: pointer;
   user-select: none;
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
+  min-width: 0;
 }
 
 .proc-card__head:hover {
@@ -600,11 +603,15 @@ function regsSrcTitle(p: PCBInfo): string {
 
 .proc-card__name {
   color: var(--text);
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.proc-card__head-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* Tree-view chips: parent pointer and depth-cap badge ride at the end of
@@ -694,7 +701,7 @@ function regsSrcTitle(p: PCBInfo): string {
 
 .proc-card__regs {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 3px 12px;
   font-size: 12px;
 }
@@ -702,7 +709,12 @@ function regsSrcTitle(p: PCBInfo): string {
 .proc-card__regs > span {
   display: flex;
   justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
   cursor: help;
+}
+.proc-card__regs .r-val {
+  flex-shrink: 0;
 }
 
 .r-name {

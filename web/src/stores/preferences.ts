@@ -122,7 +122,7 @@ const DEFAULTS: PrefsState = {
     ipc: false,
   },
   columnWidths: {
-    leftPx: 250,
+    leftPx: 280,
     rightPx: 400,
   },
   panelHeights: {

@@ -11,10 +11,11 @@ import ByteFlightNarrator from '../../components/narrators/ByteFlightNarrator.vu
 import Term from '../../components/glossary/Term.vue';
 import { Target, Pin as PinIcon } from '@lucide/vue';
 import MemoryMinimap, { type Pin } from '../../components/memory/MemoryMinimap.vue';
-import MemoryCoreChip from '../../components/memory/MemoryCoreChip.vue';
+import MemoryOwnerChip from '../../components/memory/MemoryOwnerChip.vue';
 import MemoryHexGrid, { type HeatEntry } from '../../components/memory/MemoryHexGrid.vue';
 import MemoryActivityFeed, { type FeedEntry } from '../../components/memory/MemoryActivityFeed.vue';
 import { fmtAddr, regionFor, MEM_TOTAL } from '../../lib/memoryLayout';
+import { buildOwners, buildCoreMarkers } from '../../lib/memoryOwners';
 
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
@@ -287,6 +288,30 @@ cpu.subscribe((ev) => {
     setTimeout(() => { jumpTo(presets[1].resolve()); }, 200);
   }
 });
+
+// ─── Owners + regions + core markers ──────────────────────────────────────
+// The sidebar used to list cores ("C0/C1/..."), implying cores owned memory.
+// They don't: RAM is global and owned by the kernel and the live processes.
+// Cores reappear as floating markers in the hex grid, showing where their
+// EIP/ESP pointers currently land — never as owners.
+
+const owners = computed(() => buildOwners(cpu.procs, cpu.cores));
+
+const coreMarkers = computed(() => buildCoreMarkers(cpu.cores, new Set(cpu.selectedCoreIds)));
+
+const selectedOwnerId = ref<string | null>(null);
+
+function onOwnerSelect(id: string) {
+  selectedOwnerId.value = id;
+}
+
+function onOwnerJumpCode(addr: number) {
+  jumpToAndHighlight(addr);
+}
+
+function onOwnerJumpStack(addr: number) {
+  jumpToAndHighlight(addr);
+}
 </script>
 
 <template>
@@ -303,6 +328,7 @@ cpu.subscribe((ev) => {
             <span class="memory-page__title-perm">user {{ currentRegion.userPerm }} · kernel {{ currentRegion.kernPerm }}</span>
           </template>
         </span>
+        <span class="memory-page__title-hint">{{ t('sections.memory.globalHint') }}</span>
       </div>
 
       <MemoryMinimap
@@ -358,16 +384,23 @@ cpu.subscribe((ev) => {
     </div>
 
     <div class="memory-page__body">
-      <aside class="memory-page__cores">
-        <MemoryCoreChip
-          v-for="c in cpu.cores"
-          :key="c.id"
-          :core="c"
-          :selected="c.id === cpu.selectedCoreId"
-          :hidden-by-filter="!cpu.isCoreVisible(c.id)"
-          @select="cpu.setSelectedCore"
-          @jump="jumpToAndHighlight"
-        />
+      <aside class="memory-page__sidebar">
+        <section class="memory-page__sidebar-section">
+          <h3 class="memory-page__sidebar-title" :title="t('sections.memory.ownersHint')">
+            {{ t('sections.memory.ownersTitle') }}
+          </h3>
+          <div class="memory-page__sidebar-list">
+            <MemoryOwnerChip
+              v-for="o in owners"
+              :key="o.id"
+              :owner="o"
+              :selected="o.id === selectedOwnerId"
+              @select="onOwnerSelect"
+              @jump-code="onOwnerJumpCode"
+              @jump-stack="onOwnerJumpStack"
+            />
+          </div>
+        </section>
       </aside>
 
       <MemoryHexGrid
@@ -381,6 +414,7 @@ cpu.subscribe((ev) => {
         :error-message="fetchError"
         :highlighted-addr="highlightedAddr"
         :highlight-seq="highlightSeq"
+        :core-markers="coreMarkers"
         @scroll-by="scrollBy"
       />
 
@@ -583,12 +617,45 @@ cpu.subscribe((ev) => {
   min-height: 0;
 }
 
-.memory-page__cores {
+.memory-page__sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 2px;
+}
+
+.memory-page__sidebar-section {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  overflow-y: auto;
-  min-height: 0;
+}
+
+.memory-page__sidebar-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  padding-bottom: 2px;
+  border-bottom: 1px dashed var(--border);
+}
+
+.memory-page__sidebar-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.memory-page__title-hint {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-style: italic;
+  margin-top: 2px;
+  max-width: 360px;
+  line-height: 1.35;
 }
 
 .memory-page__grid {
@@ -609,12 +676,17 @@ cpu.subscribe((ev) => {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr auto;
   }
-  .memory-page__cores {
+  .memory-page__sidebar {
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+  .memory-page__sidebar-list {
     flex-direction: row;
     overflow-x: auto;
   }
-  .memory-page__cores > * {
+  .memory-page__sidebar-list > * {
     min-width: 180px;
+    flex-shrink: 0;
   }
 }
 </style>

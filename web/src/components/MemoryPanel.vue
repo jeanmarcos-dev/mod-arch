@@ -1,71 +1,39 @@
 <script setup lang="ts">
 import { useCpuStore } from '../stores/cpu';
 import type { CoreInfo } from '../stores/cpu';
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, ref, watch, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { ChevronDown, ChevronRight } from '@lucide/vue';
 
 const cpu = useCpuStore();
 const { t } = useI18n();
 
-// View tabs are global across the accordion. EIP/ESP make each card center on
-// its own core; Custom collapses the accordion into a single full-width dump.
+// View tabs: EIP and ESP show one window that follows the selected core's
+// pointer (cores do not own memory — they just point into a single shared
+// RAM). Custom takes an arbitrary base address.
 const view = ref<'eip' | 'esp' | 'custom'>('eip');
 const customAddr = ref('0x100000');
 
-interface CardData {
+// Core to follow in the EIP/ESP views. Null means "track whatever
+// cpu.selectedCoreId is right now"; clicking the segmented selector pins
+// the panel to that specific core.
+const followedCoreId = ref<number | null>(null);
+
+const effectiveCoreId = computed(() => followedCoreId.value ?? cpu.selectedCoreId);
+const followedCore = computed<CoreInfo | undefined>(
+  () => cpu.cores.find(c => c.id === effectiveCoreId.value),
+);
+
+interface DumpData {
   bytes: number[];
   baseAddr: number;
   loading: boolean;
   error: string;
 }
 
-// Per-core fetched payloads. Keyed by coreId so we can keep dumps across
-// collapse/expand cycles without re-fetching.
-const fetchedByCore = ref<Record<number, CardData>>({});
-// Single-dump state for the Custom tab. Shared RAM, no point in replicating
-// the same bytes once per card.
-const customData = ref<CardData>({ bytes: [], baseAddr: 0, loading: false, error: '' });
-
-const EXPANDED_KEY = 'modos.memory.expandedCores';
-
-function loadExpanded(): Set<number> {
-  if (typeof window === 'undefined') return new Set([0]);
-  try {
-    const raw = window.localStorage.getItem(EXPANDED_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return new Set(parsed.filter((x: unknown): x is number => typeof x === 'number'));
-      }
-    }
-  } catch { /* corrupt entry, fall back to default */ }
-  return new Set([0]);
-}
-
-function persistExpanded() {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(EXPANDED_KEY, JSON.stringify([...expandedCores.value]));
-  } catch { /* quota / private mode → keep in memory only */ }
-}
-
-const expandedCores = ref<Set<number>>(loadExpanded());
-
-function isExpanded(coreId: number): boolean {
-  return expandedCores.value.has(coreId);
-}
-
-function toggleExpanded(coreId: number) {
-  const next = new Set(expandedCores.value);
-  if (next.has(coreId)) next.delete(coreId);
-  else next.add(coreId);
-  expandedCores.value = next;
-  persistExpanded();
-  if (next.has(coreId) && view.value !== 'custom') {
-    loadCore(coreId);
-  }
-}
+// Single window for the EIP/ESP tabs. RAM is global so there is no point in
+// fetching one slice per core.
+const followed = ref<DumpData>({ bytes: [], baseAddr: 0, loading: false, error: '' });
+const customData = ref<DumpData>({ bytes: [], baseAddr: 0, loading: false, error: '' });
 
 function parseUserAddr(s: string): number {
   s = s.trim();
@@ -79,42 +47,32 @@ function parseUserAddr(s: string): number {
 
 function targetAddrFor(c: CoreInfo): number {
   if (view.value === 'esp') return (c.regs.ESP ?? 0) >>> 0;
-  // EIP context: show 16 bytes before EIP so the executing instruction sits
-  // a few bytes into the dump and the user can also see what was just run.
+  // EIP context: pad 16 bytes before EIP so the instruction about to run
+  // sits a few rows into the dump and the user also sees what just ran.
   return Math.max(0, ((c.regs.EIP ?? 0) >>> 0) - 16);
 }
 
-async function loadCore(coreId: number) {
+async function loadFollowed() {
   if (!cpu.connected) return;
   if (view.value === 'custom') return;
-  const core = cpu.cores.find(c => c.id === coreId);
-  if (!core) return;
-  const addr = targetAddrFor(core);
-  const prev = fetchedByCore.value[coreId];
-  fetchedByCore.value = {
-    ...fetchedByCore.value,
-    [coreId]: { ...(prev ?? { bytes: [], baseAddr: 0 }), loading: true, error: '' } as CardData,
-  };
+  const c = followedCore.value;
+  if (!c) {
+    followed.value = { bytes: [], baseAddr: 0, loading: false, error: '' };
+    return;
+  }
+  const addr = targetAddrFor(c);
+  const prev = followed.value;
+  followed.value = { ...prev, loading: true, error: '' };
   try {
     const res = await fetch(`/api/memory?addr=0x${addr.toString(16)}&len=128`);
     if (!res.ok) {
-      const text = await res.text();
-      fetchedByCore.value = {
-        ...fetchedByCore.value,
-        [coreId]: { bytes: prev?.bytes ?? [], baseAddr: prev?.baseAddr ?? 0, loading: false, error: text },
-      };
+      followed.value = { bytes: prev.bytes, baseAddr: prev.baseAddr, loading: false, error: await res.text() };
       return;
     }
     const data = await res.json();
-    fetchedByCore.value = {
-      ...fetchedByCore.value,
-      [coreId]: { bytes: data.bytes, baseAddr: data.addr, loading: false, error: '' },
-    };
+    followed.value = { bytes: data.bytes, baseAddr: data.addr, loading: false, error: '' };
   } catch (e) {
-    fetchedByCore.value = {
-      ...fetchedByCore.value,
-      [coreId]: { bytes: prev?.bytes ?? [], baseAddr: prev?.baseAddr ?? 0, loading: false, error: String(e) },
-    };
+    followed.value = { bytes: prev.bytes, baseAddr: prev.baseAddr, loading: false, error: String(e) };
   }
 }
 
@@ -139,30 +97,43 @@ async function loadCustom() {
   }
 }
 
-// Refetch every expanded card whenever the relevant inputs change. The
-// dependency string covers EIP/ESP/current_pid per visible core so any
-// instruction stepped on any core triggers an update — without this, a card
-// for C1 would freeze while the user focused C0.
+// Refetch when the active view, tick, connection, followed core or its
+// EIP/ESP/current_pid changes. The dependency string compresses the
+// followed-core registers so a step on the followed core triggers a refresh
+// without thrashing on unrelated cores.
 watch(
-  () => [
-    view.value,
-    cpu.tick,
-    cpu.connected,
-    cpu.visibleCores
-      .map(c => `${c.id}:${c.regs.EIP ?? 0}:${c.regs.ESP ?? 0}:${c.current_pid}`)
-      .join('|'),
-  ],
+  () => {
+    const c = followedCore.value;
+    return [
+      view.value,
+      cpu.tick,
+      cpu.connected,
+      effectiveCoreId.value,
+      c ? `${c.regs.EIP ?? 0}:${c.regs.ESP ?? 0}:${c.current_pid}` : '',
+    ];
+  },
   () => {
     if (view.value === 'custom') { loadCustom(); return; }
-    for (const c of cpu.visibleCores) {
-      if (expandedCores.value.has(c.id)) loadCore(c.id);
-    }
+    loadFollowed();
   },
 );
 
 watch(() => customAddr.value, () => {
   if (view.value === 'custom') loadCustom();
 });
+
+// If the followed core gets filtered out via the SimBar visibility toggle,
+// snap to the first still-visible core so the panel never points at a
+// hidden core.
+watch(
+  () => cpu.visibleCores.map(c => c.id).join(','),
+  () => {
+    if (followedCoreId.value === null) return;
+    if (!cpu.isCoreVisible(followedCoreId.value)) {
+      followedCoreId.value = cpu.visibleCores[0]?.id ?? null;
+    }
+  },
+);
 
 // External "jump to address" intent (currently fired by ProcessesPanel when
 // the user clicks → on a PCB row). We switch to the Custom view because that
@@ -177,7 +148,7 @@ watch(() => cpu.pendingMemoryJump, (addr) => {
 
 onMounted(() => {
   if (view.value === 'custom') loadCustom();
-  else for (const c of cpu.visibleCores) if (expandedCores.value.has(c.id)) loadCore(c.id);
+  else loadFollowed();
 });
 
 function hex(n: number, w = 2) {
@@ -198,7 +169,7 @@ function regionOf(addr: number): string {
   return 'oob';
 }
 
-function linesFor(data: CardData) {
+function linesFor(data: DumpData) {
   const out: { addr: number; bytes: number[]; ascii: string }[] = [];
   for (let i = 0; i < data.bytes.length; i += 16) {
     const chunk = data.bytes.slice(i, i + 16);
@@ -208,9 +179,6 @@ function linesFor(data: CardData) {
   return out;
 }
 
-// Per-card hit detection: each card only highlights its own EIP/ESP. Two
-// cards can sit next to each other and each paints its own cursor on its own
-// bytes — no ambiguity about which core a highlight belongs to.
 function isEipHit(coreId: number, addr: number): boolean {
   const c = cpu.cores.find(x => x.id === coreId);
   if (!c) return false;
@@ -234,10 +202,6 @@ function hitStyle(coreId: number, addr: number): Record<string, string> | undefi
   return undefined;
 }
 
-function pidFor(coreId: number): number {
-  return cpu.cores.find(c => c.id === coreId)?.current_pid ?? 0;
-}
-
 function eipFor(coreId: number): number {
   return (cpu.cores.find(c => c.id === coreId)?.regs.EIP ?? 0) >>> 0;
 }
@@ -255,19 +219,26 @@ function regionLabel(addr: number): string {
   return t('panels.memory.regions.none');
 }
 
-function cardData(coreId: number): CardData {
-  return fetchedByCore.value[coreId] ?? { bytes: [], baseAddr: 0, loading: false, error: '' };
+function pidNameFor(coreId: number): string {
+  const pid = cpu.cores.find(c => c.id === coreId)?.current_pid ?? 0;
+  if (!pid) return '';
+  return cpu.procs.find(p => p.pid === pid)?.name ?? '';
 }
 
-// When only one core is visible the chevron and click-to-collapse are not
-// useful — the body should be permanently visible like in the pre-multicore
-// design. With 2+ cores the accordion behavior kicks in.
-const collapsibleMode = computed(() => cpu.visibleCores.length > 1);
+const followedAddr = computed(() => {
+  const c = followedCore.value;
+  if (!c) return 0;
+  return view.value === 'esp' ? espFor(c.id) : eipFor(c.id);
+});
 
-// Effective expansion: in single-core mode every card is forced expanded; in
-// multicore the user's persisted set decides.
-function effectivelyExpanded(coreId: number): boolean {
-  return !collapsibleMode.value || isExpanded(coreId);
+const followedRegLabel = computed(() => (view.value === 'esp' ? 'ESP' : 'EIP'));
+
+// Switch to Custom and jump the dump to the start of a memory region. Used by
+// the clickable legend chips below the dump — EIP/ESP would snap back to the
+// live pointers on the next tick so Custom is the only honest target.
+function jumpToRegion(addr: number) {
+  view.value = 'custom';
+  customAddr.value = `0x${addr.toString(16).toUpperCase()}`;
 }
 </script>
 
@@ -293,6 +264,27 @@ function effectivelyExpanded(coreId: number): boolean {
           :title="t('panels.memory.tabHints.custom')"
         >{{ t('panels.memory.tabs.custom') }}</button>
       </div>
+
+      <div
+        v-if="view !== 'custom' && cpu.visibleCores.length > 1"
+        class="core-selector"
+        :title="t('panels.memory.coreSelectorHint')"
+        role="radiogroup"
+        :aria-label="t('panels.memory.coreSelectorLabel')"
+      >
+        <span class="core-selector__label">{{ t('panels.memory.coreSelectorLabel') }}</span>
+        <button
+          v-for="c in cpu.visibleCores"
+          :key="c.id"
+          type="button"
+          :class="['core-selector__btn', { active: c.id === effectiveCoreId }]"
+          :style="{ '--core-color': `var(--core-${c.id % 4})` }"
+          :aria-checked="c.id === effectiveCoreId"
+          role="radio"
+          @click="followedCoreId = c.id"
+        >C{{ c.id }}</button>
+      </div>
+
       <input
         v-if="view === 'custom'"
         v-model="customAddr"
@@ -303,8 +295,23 @@ function effectivelyExpanded(coreId: number): boolean {
       />
     </div>
 
-    <!-- Custom: single full-width dump. Shared RAM ⇒ replicating across cards
-         would just show the same bytes N times. -->
+    <div v-if="view !== 'custom' && followedCore" class="following-line">
+      <span class="following-line__label">{{ t('panels.memory.followingLabel') }}</span>
+      <span
+        class="following-line__core"
+        :style="{ color: `var(--core-${followedCore.id % 4})`, borderColor: `var(--core-${followedCore.id % 4})` }"
+      >C{{ followedCore.id }}:{{ followedRegLabel }}</span>
+      <span class="following-line__addr">@ {{ fmtAddr(followedAddr) }}</span>
+      <span v-if="followedCore.current_pid" class="following-line__pid">
+        · {{ t('panels.memory.followingPid', { pid: followedCore.current_pid, name: pidNameFor(followedCore.id) || '—' }) }}
+      </span>
+      <span class="following-line__region">{{ regionLabel(followedAddr) }}</span>
+    </div>
+    <div v-else-if="view !== 'custom'" class="following-line following-line--empty">
+      {{ t('panels.memory.followingNoCore') }}
+    </div>
+
+    <!-- Custom: single full-width dump. -->
     <div v-if="view === 'custom'" class="memory-stack">
       <section class="memory-card memory-card--custom">
         <header class="memory-card__head">
@@ -335,80 +342,67 @@ function effectivelyExpanded(coreId: number): boolean {
       </section>
     </div>
 
-    <!-- EIP / ESP: one card per visible core. Header is always visible so a
-         collapsed card still tells the user where C<id> is pointing. -->
+    <!-- EIP / ESP: a single hex window that follows the selected core. RAM is
+         global; cores are just pointers into it. -->
     <div v-else class="memory-stack">
       <section
-        v-for="c in cpu.visibleCores"
-        :key="c.id"
+        v-if="followedCore"
         class="memory-card"
-        :class="[
-          `memory-card--core-${c.id % 4}`,
-          { 'memory-card--collapsed': collapsibleMode && !effectivelyExpanded(c.id) },
-        ]"
+        :class="`memory-card--core-${followedCore.id % 4}`"
       >
-        <header
-          class="memory-card__head"
-          :class="{ 'memory-card__head--clickable': collapsibleMode }"
-          :role="collapsibleMode ? 'button' : undefined"
-          :tabindex="collapsibleMode ? 0 : undefined"
-          :aria-expanded="collapsibleMode ? effectivelyExpanded(c.id) : undefined"
-          @click="collapsibleMode && toggleExpanded(c.id)"
-          @keydown.enter.prevent="collapsibleMode && toggleExpanded(c.id)"
-          @keydown.space.prevent="collapsibleMode && toggleExpanded(c.id)"
-        >
-          <component
-            v-if="collapsibleMode"
-            :is="effectivelyExpanded(c.id) ? ChevronDown : ChevronRight"
-            :size="12"
-            :stroke-width="2"
-            class="memory-card__chevron"
-          />
-          <span
-            class="memory-card__label"
-            :style="{ color: `var(--core-${c.id % 4})`, borderColor: `var(--core-${c.id % 4})` }"
-          >C{{ c.id }}</span>
-          <span class="memory-card__pid">PID {{ pidFor(c.id) || '—' }}</span>
-          <span class="memory-card__reg">EIP {{ fmtAddr(eipFor(c.id)) }}</span>
-          <span class="memory-card__reg">ESP {{ fmtAddr(espFor(c.id)) }}</span>
-          <span class="memory-card__region">{{ regionLabel(view === 'esp' ? espFor(c.id) : eipFor(c.id)) }}</span>
-        </header>
-
-        <div v-if="effectivelyExpanded(c.id)" class="memory-card__body">
-          <div v-if="cardData(c.id).error" class="error">{{ cardData(c.id).error }}</div>
-          <pre v-else class="hex-dump">
-            <div
-              v-for="(line, i) in linesFor(cardData(c.id))"
-              :key="i"
-              class="hex-line"
-              :class="regionOf(line.addr)"
-            >
-              <span class="hex-addr">{{ hex(line.addr, 6) }}</span>
-              <span class="hex-bytes">
-                <span
-                  v-for="(b, j) in line.bytes"
-                  :key="j"
-                  class="hex-byte"
-                  :class="{
-                    'hex-byte--eip': isEipHit(c.id, line.addr + j),
-                    'hex-byte--esp': isEspHit(c.id, line.addr + j) && !isEipHit(c.id, line.addr + j),
-                  }"
-                  :style="hitStyle(c.id, line.addr + j)"
-                  :data-mem-addr="`0x${(line.addr + j).toString(16).toLowerCase()}`"
-                >{{ hex(b) }}</span>
-              </span>
-              <span class="hex-ascii">{{ line.ascii }}</span>
-            </div>
-          </pre>
-        </div>
+        <div v-if="followed.error" class="error">{{ followed.error }}</div>
+        <pre v-else class="hex-dump">
+          <div
+            v-for="(line, i) in linesFor(followed)"
+            :key="i"
+            class="hex-line"
+            :class="regionOf(line.addr)"
+          >
+            <span class="hex-addr">{{ hex(line.addr, 6) }}</span>
+            <span class="hex-bytes">
+              <span
+                v-for="(b, j) in line.bytes"
+                :key="j"
+                class="hex-byte"
+                :class="{
+                  'hex-byte--eip': isEipHit(followedCore.id, line.addr + j),
+                  'hex-byte--esp': isEspHit(followedCore.id, line.addr + j) && !isEipHit(followedCore.id, line.addr + j),
+                }"
+                :style="hitStyle(followedCore.id, line.addr + j)"
+                :data-mem-addr="`0x${(line.addr + j).toString(16).toLowerCase()}`"
+              >{{ hex(b) }}</span>
+            </span>
+            <span class="hex-ascii">{{ line.ascii }}</span>
+          </div>
+        </pre>
       </section>
     </div>
 
     <div class="legend">
-      <span class="leg leg-reserved">{{ t('panels.memory.legend.reserved') }}</span>
-      <span class="leg leg-kernel">{{ t('panels.memory.legend.kernel') }}</span>
-      <span class="leg leg-user_code">{{ t('panels.memory.legend.userCode') }}</span>
-      <span class="leg leg-user_stack">{{ t('panels.memory.legend.userStack') }}</span>
+      <button
+        type="button"
+        class="leg leg-reserved"
+        :title="t('shell.memoryRegionChip.jumpHint', { name: t('panels.memory.legend.reserved') })"
+        @click="jumpToRegion(0x000000)"
+      >{{ t('panels.memory.legend.reserved') }}</button>
+      <button
+        type="button"
+        class="leg leg-kernel"
+        :title="t('shell.memoryRegionChip.jumpHint', { name: t('panels.memory.legend.kernel') })"
+        @click="jumpToRegion(0x100000)"
+      >{{ t('panels.memory.legend.kernel') }}</button>
+      <button
+        type="button"
+        class="leg leg-user_code"
+        :title="t('shell.memoryRegionChip.jumpHint', { name: t('panels.memory.legend.userCode') })"
+        @click="jumpToRegion(0x200000)"
+      >{{ t('panels.memory.legend.userCode') }}</button>
+      <button
+        type="button"
+        class="leg leg-user_stack"
+        :title="t('shell.memoryRegionChip.jumpHint', { name: t('panels.memory.legend.userStack') })"
+        @click="jumpToRegion(0x300000)"
+      >{{ t('panels.memory.legend.userStack') }}</button>
     </div>
   </div>
 </template>
@@ -448,6 +442,50 @@ function effectivelyExpanded(coreId: number): boolean {
   border-color: var(--amber);
 }
 
+.core-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 4px 2px 6px;
+  background: var(--surface-overlay);
+}
+
+.core-selector__label {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-right: 2px;
+}
+
+.core-selector__btn {
+  background: transparent;
+  border: 1px solid var(--core-color, var(--border));
+  border-radius: var(--radius-sm);
+  color: var(--core-color, var(--text-dim));
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  padding: 1px 6px;
+  cursor: pointer;
+  min-height: unset;
+  letter-spacing: 0.5px;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.core-selector__btn:hover {
+  background: color-mix(in oklab, var(--core-color) 18%, transparent);
+  color: var(--core-color);
+}
+
+.core-selector__btn.active {
+  background: var(--core-color);
+  color: var(--core-fg, var(--surface-base));
+  border-color: var(--core-color);
+  box-shadow: 0 0 6px var(--core-color);
+}
+
 .addr-input {
   background: var(--surface-overlay);
   border: 1px solid var(--border);
@@ -456,6 +494,54 @@ function effectivelyExpanded(coreId: number): boolean {
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   width: 110px;
+}
+
+.following-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  padding: 4px 6px;
+  margin-bottom: 6px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--surface-overlay) 60%, transparent);
+}
+
+.following-line__label {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.following-line__core {
+  border: 1px solid;
+  padding: 0 6px;
+  font-weight: 700;
+}
+
+.following-line__addr {
+  color: var(--amber);
+}
+
+.following-line__pid {
+  color: var(--text);
+}
+
+.following-line__region {
+  margin-left: auto;
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.following-line--empty {
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .memory-stack {
@@ -495,34 +581,14 @@ function effectivelyExpanded(coreId: number): boolean {
   flex-wrap: wrap;
 }
 
-.memory-card__head--clickable {
-  cursor: pointer;
-  user-select: none;
-}
-
-.memory-card__head--clickable:hover {
-  background: rgba(var(--accent-rgb), 0.06);
-}
-
-.memory-card__head--clickable:focus-visible {
-  outline: 1px solid var(--amber);
-  outline-offset: -1px;
-}
-
-.memory-card__chevron {
-  width: 10px;
-  color: var(--text-dim);
-  flex-shrink: 0;
-}
-
 .memory-card__label {
   font-weight: 700;
-  border: 1px solid;
+  border: 1px solid var(--amber);
+  color: var(--amber);
   padding: 1px 6px;
   font-size: 11px;
 }
 
-.memory-card__pid,
 .memory-card__reg {
   color: var(--text);
 }
@@ -535,16 +601,12 @@ function effectivelyExpanded(coreId: number): boolean {
   letter-spacing: 1px;
 }
 
-.memory-card__body {
-  padding: 4px 10px 8px;
-  border-top: 1px dashed var(--border);
-}
-
 .hex-dump {
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   line-height: 1.4;
   margin: 0;
+  padding: 4px 10px 8px;
 }
 
 .hex-line {
@@ -598,6 +660,22 @@ function effectivelyExpanded(coreId: number): boolean {
   padding: 1px 6px;
   border: 1px solid;
   font-family: 'JetBrains Mono', monospace;
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
+  min-height: unset;
+  letter-spacing: 0;
+  transition: background var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.leg:hover {
+  background: color-mix(in oklab, currentColor 14%, transparent);
+  box-shadow: 0 0 6px color-mix(in oklab, currentColor 50%, transparent);
+}
+
+.leg:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 1px;
 }
 
 .leg-reserved { color: var(--text-dim); border-color: var(--text-dim); }
@@ -616,6 +694,11 @@ function effectivelyExpanded(coreId: number): boolean {
     padding: 10px 12px;
     font-size: 13px;
     min-height: 40px;
+  }
+
+  .core-selector__btn {
+    padding: 6px 10px;
+    font-size: 12px;
   }
 
   .hex-dump {
