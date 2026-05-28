@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jeanmarcos/modos-cpu/internal/server/i18n"
 )
 
 // RateLimiter is a fixed-window per-IP limiter intended for low-frequency
@@ -106,8 +108,7 @@ func (s *Server) limitByIP(rl *RateLimiter, next http.HandlerFunc) http.HandlerF
 			}
 			w.Header().Set("Retry-After", strconv.Itoa(secs))
 			s.logger.Info("rate limit hit", "ip", ip, "path", r.URL.Path, "retry_after_s", secs)
-			writeJSON(w, http.StatusTooManyRequests, map[string]any{
-				"error":       "demasiados intentos, intente de nuevo en unos minutos",
+			i18n.WriteErrorAlong(w, r, http.StatusTooManyRequests, i18n.CodeRateLimitTooMany, nil, map[string]any{
 				"retry_after": secs,
 			})
 			return

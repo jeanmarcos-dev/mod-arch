@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jeanmarcos/modos-cpu/internal/server/i18n"
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
 	"github.com/jeanmarcos/modos-cpu/internal/store"
 )
@@ -55,28 +56,28 @@ type userPublic struct {
 func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "JSON inválido"})
+		i18n.WriteError(w, r, http.StatusBadRequest, i18n.CodeAuthInvalidJSON, nil)
 		return
 	}
 	name, err := cleanName(req.Name)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		i18n.WriteError(w, r, http.StatusBadRequest, i18n.CodeAuthValidationFailed, map[string]string{"reason": err.Error()})
 		return
 	}
 	email, err := cleanEmail(req.Email)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		i18n.WriteError(w, r, http.StatusBadRequest, i18n.CodeAuthValidationFailed, map[string]string{"reason": err.Error()})
 		return
 	}
 	sid, err := cleanStudentID(req.StudentID)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		i18n.WriteError(w, r, http.StatusBadRequest, i18n.CodeAuthValidationFailed, map[string]string{"reason": err.Error()})
 		return
 	}
 
 	st := s.manager.Store()
 	if st == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "persistencia deshabilitada"})
+		i18n.WriteError(w, r, http.StatusServiceUnavailable, i18n.CodeAuthPersistenceDisabled, nil)
 		return
 	}
 
@@ -89,24 +90,24 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := verifyTurnstile(r.Context(), secCfg.TurnstileSecret, req.TurnstileToken, r.RemoteAddr); err != nil {
 		if errors.Is(err, errTurnstileFailed) {
-			writeJSON(w, http.StatusForbidden, map[string]any{"error": "verificación antibot falló", "code": "turnstile_failed"})
+			i18n.WriteError(w, r, http.StatusForbidden, i18n.CodeAuthAntibotFailed, nil)
 			return
 		}
 		s.logger.Warn("auth: turnstile verify error", "err", err)
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "no fue posible verificar el desafío antibot"})
+		i18n.WriteError(w, r, http.StatusServiceUnavailable, i18n.CodeAuthAntibotUnavailable, nil)
 		return
 	}
 
 	user, err := s.upsertUser(r.Context(), st, name, email, sid)
 	if err != nil {
 		s.logger.Warn("auth: upsert user failed", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "no fue posible crear el usuario"})
+		i18n.WriteError(w, r, http.StatusInternalServerError, i18n.CodeAuthUserCreateFailed, nil)
 		return
 	}
 
 	sess, err := s.getOrCreateSession(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "no hay cupo para sesiones nuevas"})
+		i18n.WriteError(w, r, http.StatusServiceUnavailable, i18n.CodeAuthNoSessionQuota, nil)
 		return
 	}
 
@@ -263,7 +264,7 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 	s.ensureCSRFCookie(w, r)
 	user, ok := s.currentUser(r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "no autenticado"})
+		i18n.WriteError(w, r, http.StatusUnauthorized, i18n.CodeAuthUnauthenticated, nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"user": publicUser(user)})
@@ -274,18 +275,18 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAuthMySessions(w http.ResponseWriter, r *http.Request) {
 	user, ok := s.currentUser(r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "no autenticado"})
+		i18n.WriteError(w, r, http.StatusUnauthorized, i18n.CodeAuthUnauthenticated, nil)
 		return
 	}
 	st := s.manager.Store()
 	if st == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "persistencia deshabilitada"})
+		i18n.WriteError(w, r, http.StatusServiceUnavailable, i18n.CodeAuthPersistenceDisabled, nil)
 		return
 	}
 	rows, err := st.ListSessionsByUserID(r.Context(), user.ID)
 	if err != nil {
 		s.logger.Warn("auth: list user sessions failed", "user", user.ID, "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "error interno"})
+		i18n.WriteError(w, r, http.StatusInternalServerError, i18n.CodeAuthInternalError, nil)
 		return
 	}
 	type item struct {

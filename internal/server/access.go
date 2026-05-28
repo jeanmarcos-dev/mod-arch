@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/jeanmarcos/modos-cpu/internal/server/i18n"
 	"github.com/jeanmarcos/modos-cpu/internal/store"
 )
 
@@ -96,10 +97,14 @@ func (s *Server) canCreateSession(ctx context.Context) (bool, string) {
 }
 
 // writeAccessDeniedHTML serves a friendly 503 page for blocked HTML requests.
-func (s *Server) writeAccessDeniedHTML(w http.ResponseWriter, reason string) {
+func (s *Server) writeAccessDeniedHTML(w http.ResponseWriter, r *http.Request, reason string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusServiceUnavailable)
-	if err := accessDeniedTmpl.Execute(w, map[string]any{"Reason": reason}); err != nil {
+	data := map[string]any{
+		"Reason": reason,
+		"Lang":   i18n.ResolveLang(r),
+	}
+	if err := accessDeniedTmpl.Execute(w, data); err != nil {
 		s.logger.Warn("access_denied template execute failed", "err", err)
 	}
 }
@@ -142,12 +147,16 @@ func (s *Server) viewerPasswordCookieValue() string {
 
 // writeViewerPasswordForm renders the gate page that POSTs the password to
 // /v/{token}/auth. errMsg, when non-empty, surfaces the previous failure.
-func (s *Server) writeViewerPasswordForm(w http.ResponseWriter, token, errMsg string) {
+func (s *Server) writeViewerPasswordForm(w http.ResponseWriter, r *http.Request, token, errMsg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if errMsg != "" {
 		w.WriteHeader(http.StatusUnauthorized)
 	}
-	data := map[string]any{"Token": token, "Error": errMsg}
+	data := map[string]any{
+		"Token": token,
+		"Error": errMsg,
+		"Lang":  i18n.ResolveLang(r),
+	}
 	if err := viewerPasswordTmpl.Execute(w, data); err != nil {
 		s.logger.Warn("viewer_password template execute failed", "err", err)
 	}
@@ -158,7 +167,7 @@ func (s *Server) writeViewerPasswordForm(w http.ResponseWriter, token, errMsg st
 func (s *Server) handleViewerAuth(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 	if s.manager.GetByViewToken(token) == nil {
-		http.Error(w, "vista no encontrada", http.StatusNotFound)
+		i18n.HTTPError(w, r, http.StatusNotFound, i18n.CodeViewerNotFound, nil)
 		return
 	}
 	required, hash := s.viewerPasswordRequired(r.Context())
@@ -167,17 +176,17 @@ func (s *Server) handleViewerAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "form inválido", http.StatusBadRequest)
+		i18n.HTTPError(w, r, http.StatusBadRequest, i18n.CodeViewerFormInvalid, nil)
 		return
 	}
 	pass := r.PostFormValue("password")
 	if pass == "" {
-		s.writeViewerPasswordForm(w, token, "ingrese una contraseña")
+		s.writeViewerPasswordForm(w, r, token, i18n.T(i18n.ResolveLang(r), i18n.CodeViewerEmptyPassword, nil))
 		return
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(pass)); err != nil {
 		s.auditFromContext(r, "anon", "viewer_pw.fail", token, "")
-		s.writeViewerPasswordForm(w, token, "contraseña incorrecta")
+		s.writeViewerPasswordForm(w, r, token, i18n.T(i18n.ResolveLang(r), i18n.CodeViewerBadPassword, nil))
 		return
 	}
 	value := s.viewerPasswordCookieValue()

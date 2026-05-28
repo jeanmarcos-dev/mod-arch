@@ -6,20 +6,61 @@ import (
 	"io/fs"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
+
+	"github.com/jeanmarcos/modos-cpu/internal/server/i18n"
 )
 
 //go:embed templates/*.html templates/*.css
 var templateFS embed.FS
 
+// templateFuncs is shared by every server-rendered HTML so they all support
+// `{{ T .Lang "key" }}`. T resolves through the i18n catalog with optional
+// key=value pairs as interpolation params, e.g.
+//
+//	{{ T .Lang "full.lead_stat" "full" .Full "max" .MaxPublic }}
+var templateFuncs = template.FuncMap{
+	"T": func(lang, code string, args ...any) string {
+		params := map[string]string{}
+		for i := 0; i+1 < len(args); i += 2 {
+			k, ok := args[i].(string)
+			if !ok {
+				continue
+			}
+			params[k] = sprintAny(args[i+1])
+		}
+		return i18n.T(lang, code, params)
+	},
+}
+
+func sprintAny(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case int:
+		return strconv.Itoa(x)
+	case int64:
+		return strconv.FormatInt(x, 10)
+	case uint:
+		return strconv.FormatUint(uint64(x), 10)
+	case uint64:
+		return strconv.FormatUint(x, 10)
+	default:
+		return ""
+	}
+}
+
 // mustParseTemplate parses a single HTML file from templateFS or panics.
 // Each top-level template is parsed in isolation so they remain independent.
+// Every parsed template gets the shared FuncMap so the `T` helper is always
+// available inside server-rendered HTML.
 func mustParseTemplate(name, filePath string) *template.Template {
 	b, err := fs.ReadFile(templateFS, filePath)
 	if err != nil {
 		panic("server: read template " + filePath + ": " + err.Error())
 	}
-	return template.Must(template.New(name).Parse(string(b)))
+	return template.Must(template.New(name).Funcs(templateFuncs).Parse(string(b)))
 }
 
 // readStaticAsset returns the raw bytes of a file from templateFS. It panics

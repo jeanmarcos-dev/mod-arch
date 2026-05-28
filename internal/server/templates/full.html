@@ -1,19 +1,18 @@
 <!doctype html>
-<html lang="es">
+<html lang="{{ .Lang }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Capacidad llena · MODOS_CPU</title>
+  <title>{{ T .Lang "full.title_tab" }}</title>
   <link href="https://fonts.googleapis.com/css2?family=Major+Mono+Display&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/_assets/full.css">
 </head>
 <body>
   <div class="container">
-    <h1>▸ Capacidad temporal alcanzada</h1>
+    <h1>{{ T .Lang "full.heading" }}</h1>
     <p class="lead">
-      <span class="stat">{{.Full}} / {{.MaxPublic}} sesiones</span>
-      Hay {{.Full}} sesiones activas en este servidor (cap configurado: {{.MaxPublic}}).
-      Espere unos minutos y refresque, o únase a una sesión existente como espectador:
+      <span class="stat">{{ T .Lang "full.lead_stat" "full" .Full "max" .MaxPublic }}</span>
+      {{ T .Lang "full.lead_active" "full" .Full "max" .MaxPublic }}
     </p>
     {{if .Sessions}}
     <ul class="session-list">
@@ -21,21 +20,17 @@
       <li class="session">
         <div class="session-info">
           <strong>{{.Label}}</strong>
-          <div class="session-meta">{{.ViewersCount}} viewers · creada hace {{.AgeMinutes}} min</div>
+          <div class="session-meta">{{ T $.Lang "full.session_meta" "viewers" .ViewersCount "age" .AgeMinutes }}</div>
         </div>
-        <a class="btn" href="/v/{{.ViewToken}}">VER →</a>
+        <a class="btn" href="/v/{{.ViewToken}}">{{ T $.Lang "full.session_action" }}</a>
       </li>
       {{end}}
     </ul>
     {{else}}
-    <p class="empty">
-      Por ahora ningún propietario activó el compartido, así que no hay sesiones
-      públicas que visualizar. Refresque esta página cuando alguien lo haga,
-      o intente más tarde para crear su propia sesión.
-    </p>
+    <p class="empty">{{ T .Lang "full.empty" }}</p>
     {{end}}
     <p class="footer">
-      ◆ Demo SO · UCV · <a href="/api/health">api/health</a>
+      {{ T .Lang "full.footer" }} · <a href="/api/health">api/health</a>
     </p>
   </div>
   <script>setTimeout(function(){ location.reload(); }, 20000);</script>

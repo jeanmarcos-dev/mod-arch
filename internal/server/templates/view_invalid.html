@@ -1,13 +1,13 @@
 <!doctype html>
-<html lang="es">
+<html lang="{{ .Lang }}">
 <head>
   <meta charset="utf-8">
-  <title>Enlace inválido</title>
+  <title>{{ T .Lang "view_invalid.title_tab" }}</title>
   <link rel="stylesheet" href="/_assets/view_invalid.css">
 </head>
 <body>
-  <h1>▸ Enlace de espectador inválido</h1>
-  <p>Este enlace no corresponde a ninguna sesión activa. Es posible que el propietario haya desactivado el compartido o cerrado la sesión.</p>
-  <p><a href="/">→ Crear una sesión nueva</a></p>
+  <h1>{{ T .Lang "view_invalid.heading" }}</h1>
+  <p>{{ T .Lang "view_invalid.lead" }}</p>
+  <p><a href="/">{{ T .Lang "view_invalid.create_new" }}</a></p>
 </body>
 </html>

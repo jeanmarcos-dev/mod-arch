@@ -22,6 +22,7 @@ import (
 
 	"github.com/jeanmarcos/modos-cpu/internal/crypto"
 
+	"github.com/jeanmarcos/modos-cpu/internal/server/i18n"
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
 	"github.com/jeanmarcos/modos-cpu/internal/tutor"
 )
@@ -112,6 +113,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v/{token}/auth", s.handleViewerAuth)
 	mux.HandleFunc("POST /v/leave", s.handleViewerLeave)
 	mux.HandleFunc("GET /_assets/{name}", s.handleAsset)
+	mux.HandleFunc("POST /api/i18n/lang", s.handleSetLang)
 	s.registerAdminRoutes(mux)
 	s.registerAuthRoutes(mux)
 	mux.HandleFunc("/", s.handleRoot)
@@ -172,7 +174,7 @@ func (s *Server) handleSessionError(w http.ResponseWriter, r *http.Request, err 
 	}
 	if errors.Is(err, ErrAccessDenied) {
 		_, reason := s.canCreateSession(r.Context())
-		s.writeAccessDeniedHTML(w, reason)
+		s.writeAccessDeniedHTML(w, r, reason)
 		return true
 	}
 	http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -375,6 +377,35 @@ func (s *Server) handleViewerLeave(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleSetLang persists the locale selected by the SPA in a cookie so the
+// server-side templates (full.html, viewer_password.html, etc.) render in the
+// same idiom on the next paint. The frontend keeps its own copy in
+// localStorage; this endpoint is fire-and-forget from the client point of
+// view — failures fall back to the previous locale silently.
+func (s *Server) handleSetLang(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Locale string `json:"locale"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		i18n.WriteError(w, r, http.StatusBadRequest, i18n.CodeAuthInvalidJSON, nil)
+		return
+	}
+	body.Locale = strings.ToLower(strings.TrimSpace(body.Locale))
+	supported := false
+	for _, l := range i18n.SupportedLocales {
+		if body.Locale == l {
+			supported = true
+			break
+		}
+	}
+	if !supported {
+		i18n.WriteError(w, r, http.StatusBadRequest, i18n.CodeAdminI18nUnsupportedLocale, nil)
+		return
+	}
+	i18n.SetLangCookie(w, body.Locale)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleViewer handles /v/{token}: sets the viewer cookie, drops the owner
 // cookie if any (so the viewer cannot accidentally inherit owner powers), and
 // serves the frontend index.html. When a viewer password is configured, the
@@ -385,14 +416,14 @@ func (s *Server) handleViewer(w http.ResponseWriter, r *http.Request) {
 	if sess == nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write(readStaticAsset("templates/view_invalid.html"))
+		s.renderViewInvalid(w, r)
 		return
 	}
 	sess.Touch()
 
 	if required, _ := s.viewerPasswordRequired(r.Context()); required {
 		if !s.hasValidViewerPasswordCookie(r) {
-			s.writeViewerPasswordForm(w, token, "")
+			s.writeViewerPasswordForm(w, r, token, "")
 			return
 		}
 	}
@@ -428,7 +459,7 @@ func clearCookie(w http.ResponseWriter, name string) {
 }
 
 // handleFull serves the cap-full page with the list of public sessions.
-func (s *Server) handleFull(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleFull(w http.ResponseWriter, r *http.Request) {
 	type sessItem struct {
 		ViewToken    string
 		Label        string
@@ -455,6 +486,7 @@ func (s *Server) handleFull(w http.ResponseWriter, _ *http.Request) {
 		"Full":      full,
 		"MaxPublic": s.manager.MaxPublic(),
 		"Sessions":  items,
+		"Lang":      i18n.ResolveLang(r),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.fullTmpl.Execute(w, data); err != nil {
@@ -476,10 +508,28 @@ func parseHexOrDec(s string) (uint32, error) {
 	return v, err
 }
 
-func (s *Server) handlePlaceholder(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handlePlaceholder(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(readStaticAsset("templates/placeholder.html"))
+	data := map[string]any{"Lang": i18n.ResolveLang(r)}
+	if err := placeholderTmpl.Execute(w, data); err != nil {
+		s.logger.Warn("placeholder template execute failed", "err", err)
+	}
 }
+
+// renderViewInvalid serves the 404 HTML for unknown viewer tokens. Lives on
+// the Server so callers can hand the request through and the template
+// resolves the locale from the cookie/headers.
+func (s *Server) renderViewInvalid(w http.ResponseWriter, r *http.Request) {
+	data := map[string]any{"Lang": i18n.ResolveLang(r)}
+	if err := viewInvalidTmpl.Execute(w, data); err != nil {
+		s.logger.Warn("view_invalid template execute failed", "err", err)
+	}
+}
+
+var (
+	placeholderTmpl = mustParseTemplate("placeholder", "templates/placeholder.html")
+	viewInvalidTmpl = mustParseTemplate("view_invalid", "templates/view_invalid.html")
+)
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

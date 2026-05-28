@@ -11,6 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/jeanmarcos/modos-cpu/internal/server/i18n"
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
 	"github.com/jeanmarcos/modos-cpu/internal/sim"
 	"github.com/jeanmarcos/modos-cpu/internal/tutor"
@@ -147,7 +148,7 @@ type FocusInput struct {
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	sess, role := s.resolveSessionAndRole(r)
 	if sess == nil {
-		http.Error(w, "no hay sesión — refresque la página", http.StatusUnauthorized)
+		i18n.HTTPError(w, r, http.StatusUnauthorized, i18n.CodeAuthUnauthenticated, nil)
 		return
 	}
 	sess.Touch()
@@ -263,7 +264,12 @@ func (s *Server) wsReadLoop(ctx context.Context, conn *websocket.Conn, sess *ses
 		}
 		var cmd Command
 		if err := json.Unmarshal(data, &cmd); err != nil {
-			c.Send <- map[string]any{"type": "error", "message": "json: " + err.Error()}
+			c.Send <- map[string]any{
+				"type":    "error",
+				"code":    i18n.CodeWSJSONError,
+				"message": i18n.T(i18n.DefaultLocale, i18n.CodeWSJSONError, map[string]string{"err": err.Error()}),
+				"params":  map[string]string{"err": err.Error()},
+			}
 			continue
 		}
 		s.dispatch(cmd, sess, role, c)
@@ -330,19 +336,29 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 	if role == sessions.RoleViewer && !viewerSafeCommands[cmd.Cmd] {
 		c.Send <- map[string]any{
 			"type":    "error",
-			"message": "modo espectador de solo lectura: el propietario es quien controla la sesión",
+			"code":    i18n.CodeWSViewerReadonly,
+			"message": i18n.T(i18n.DefaultLocale, i18n.CodeWSViewerReadonly, nil),
 		}
 		return
 	}
 	if role != sessions.RoleOwner && ownerOnlyCommands[cmd.Cmd] {
 		c.Send <- map[string]any{
 			"type":    "error",
-			"message": "comando reservado al anfitrión de la sesión",
+			"code":    i18n.CodeWSHostOnly,
+			"message": i18n.T(i18n.DefaultLocale, i18n.CodeWSHostOnly, nil),
 		}
 		return
 	}
 	switch cmd.Cmd {
 	case "load":
+		if s.demoBlockedForSession(sess, cmd.Program) {
+			c.Send <- map[string]any{
+				"type":    "error",
+				"code":    "demo_disabled",
+				"message": "Esta demo está deshabilitada por el administrador.",
+			}
+			return
+		}
 		if err := sess.Sim.LoadProgram(cmd.Program); err != nil {
 			c.Send <- map[string]any{"type": "error", "message": err.Error()}
 		}
@@ -401,7 +417,12 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 	case "ask":
 		s.handleTutorAsk(cmd, sess, c)
 	default:
-		c.Send <- map[string]any{"type": "error", "message": "comando desconocido: " + cmd.Cmd}
+		c.Send <- map[string]any{
+			"type":    "error",
+			"code":    i18n.CodeWSUnknownCommand,
+			"message": i18n.T(i18n.DefaultLocale, i18n.CodeWSUnknownCommand, map[string]string{"cmd": cmd.Cmd}),
+			"params":  map[string]string{"cmd": cmd.Cmd},
+		}
 	}
 }
 

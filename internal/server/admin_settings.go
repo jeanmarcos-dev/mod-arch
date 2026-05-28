@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -12,9 +13,13 @@ import (
 )
 
 type settingsResponse struct {
-	AccessMode             string `json:"access_mode"`
-	ViewerPasswordRequired bool   `json:"viewer_password_required"`
-	ViewerPasswordSet      bool   `json:"viewer_password_set"`
+	AccessMode             string   `json:"access_mode"`
+	ViewerPasswordRequired bool     `json:"viewer_password_required"`
+	ViewerPasswordSet      bool     `json:"viewer_password_set"`
+	DisabledRoutes         []string `json:"disabled_routes"`
+	DisabledPanels         []string `json:"disabled_panels"`
+	DisabledDemos          []string `json:"disabled_demos"`
+	DefaultRoute           string   `json:"default_route"`
 }
 
 // handleAdminGetSettings returns the access-related settings as a flat object
@@ -37,6 +42,10 @@ func (s *Server) handleAdminGetSettings(w http.ResponseWriter, r *http.Request) 
 		AccessMode:             mode,
 		ViewerPasswordRequired: required && hash != "",
 		ViewerPasswordSet:      hash != "",
+		DisabledRoutes:         readStringArraySetting(r.Context(), st, SettingUIDisabledRoutes),
+		DisabledPanels:         readStringArraySetting(r.Context(), st, SettingUIDisabledPanels),
+		DisabledDemos:          readStringArraySetting(r.Context(), st, SettingUIDisabledDemos),
+		DefaultRoute:           readDefaultRoute(r.Context(), st),
 	})
 }
 
@@ -92,9 +101,65 @@ func (s *Server) applySetting(r *http.Request, st *store.Store, key, value strin
 		return persistSetting(r, st, key, value, actor, now)
 	case "viewer_password":
 		return s.applyViewerPassword(r, st, value, actor, now)
+	case SettingUIDisabledRoutes:
+		return applyUIArraySetting(r, st, key, value, isValidRouteName, actor, now)
+	case SettingUIDisabledPanels:
+		return applyUIArraySetting(r, st, key, value, isValidPanelID, actor, now)
+	case SettingUIDisabledDemos:
+		return applyUIArraySetting(r, st, key, value, isValidDemoName, actor, now)
+	case SettingUIDefaultRoute:
+		return applyUIDefaultRoute(r, st, value, actor, now)
 	default:
 		return http.StatusBadRequest, "clave desconocida"
 	}
+}
+
+// applyUIArraySetting validates a JSON array of strings against the given
+// member validator and persists the normalized form. Duplicates are
+// collapsed; unknown identifiers are rejected with a 400 so the SPA cannot
+// poison the catalog with typos.
+func applyUIArraySetting(r *http.Request, st *store.Store, key, value string, valid func(string) bool, actor string, now int64) (int, string) {
+	arr, ok, offender := validateStringArrayAgainst(value, valid)
+	if !ok {
+		if offender != "" {
+			return http.StatusBadRequest, "identificador desconocido: " + offender
+		}
+		return http.StatusBadRequest, "valor inválido: se esperaba un arreglo JSON de strings"
+	}
+	// If the disabled-routes set would swallow the configured default route,
+	// reject the change up front instead of leaving the SPA without a landing
+	// page for students. The admin can either drop the offending route from
+	// the list or move the default first.
+	if key == SettingUIDisabledRoutes {
+		current := readDefaultRoute(r.Context(), st)
+		if slices.Contains(arr, current) {
+			return http.StatusConflict, "no puede deshabilitar la pantalla por defecto (" + current + "); cambie el default primero"
+		}
+	}
+	normalized, err := json.Marshal(arr)
+	if err != nil {
+		return http.StatusInternalServerError, "no se pudo serializar"
+	}
+	return persistSetting(r, st, key, string(normalized), actor, now)
+}
+
+// applyUIDefaultRoute validates that the chosen route exists and is not in
+// the currently-disabled set. Empty value resets the default.
+func applyUIDefaultRoute(r *http.Request, st *store.Store, value, actor string, now int64) (int, string) {
+	if value == "" {
+		if err := st.DeleteSetting(r.Context(), SettingUIDefaultRoute); err != nil {
+			return http.StatusInternalServerError, "no se pudo guardar"
+		}
+		return http.StatusOK, ""
+	}
+	if !isValidRouteName(value) {
+		return http.StatusBadRequest, "ruta desconocida: " + value
+	}
+	disabled := readStringArraySetting(r.Context(), st, SettingUIDisabledRoutes)
+	if slices.Contains(disabled, value) {
+		return http.StatusConflict, "la ruta " + value + " está deshabilitada; habilítela antes de fijarla como default"
+	}
+	return persistSetting(r, st, SettingUIDefaultRoute, value, actor, now)
 }
 
 func persistSetting(r *http.Request, st *store.Store, key, value, actor string, now int64) (int, string) {
