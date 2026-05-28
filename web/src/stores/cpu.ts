@@ -23,6 +23,11 @@ export type CpuEvent =
   | { type: 'loaded'; name: string; pids: number[]; procs: PCBInfo[]; sources: Record<string, string>; source_maps?: Record<string, SourceLine[]> }
   | { type: 'reset' }
   | { type: 'procs'; procs: PCBInfo[] }
+  | { type: 'pipe_create'; pipe_id: number; owner_pid: number; fd_r: number; fd_w: number; is_fifo: boolean; name?: string }
+  | { type: 'pipe_op'; pipe_id: number; pid: number; op: 'read' | 'write'; bytes?: number[]; buf_level: number; buf_cap: number }
+  | { type: 'fork'; parent_pid: number; child_pid: number; is_vfork: boolean }
+  | { type: 'reparent'; pid: number; old_parent: number; new_parent: number }
+  | { type: 'wait_op'; pid: number; child_pid: number; op: string; exit_code?: number }
   | { type: 'pcb_save'; core_id: number; pid: number; regs: Record<string, number> }
   | { type: 'pcb_restore'; core_id: number; pid: number; regs: Record<string, number> }
   | { type: 'sched_decision'; from_pid: number; to_pid: number; reason?: string; ready_queue: number[] }
@@ -39,7 +44,7 @@ export type CpuEvent =
   | { type: 'owner_pointer'; anchor?: string; offset_x?: number; offset_y?: number; route?: string; ts?: number; off?: boolean }
   | { type: 'owner_click'; anchor?: string; offset_x?: number; offset_y?: number; route?: string; ts?: number }
   | { type: 'owner_glossary_hover'; term?: string; off?: boolean; ts?: number }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string; code?: string; params?: Record<string, string> };
 
 export interface CoreInfo {
   id: number;
@@ -125,6 +130,30 @@ export interface PCBInfo {
   code_base: number;
   code_size: number;
   stack_top: number;
+  // Process-tree relationships introduced with sys_fork / sys_vfork.
+  // parent_pid = 0 means "no parent" (top-level process, e.g. init).
+  parent_pid?: number;
+  children?: number[];
+  exit_code?: number;
+  vfork_parent?: number;
+}
+
+// One IPC channel (pipe or FIFO) tracked in the store. Buffer is held
+// modulo the cap; level is decoupled from buffer.length to keep the
+// UI rendering simple even when there is no pipe_op event in the last
+// window. Name is only set for FIFOs.
+export interface PipeInfo {
+  pipe_id: number;
+  owner_pid: number;
+  fd_r: number;
+  fd_w: number;
+  is_fifo: boolean;
+  name?: string;
+  buf_level: number;
+  buf_cap: number;
+  last_bytes?: number[];
+  last_op?: 'read' | 'write';
+  last_pid?: number;
 }
 
 // SourceLine bridges one machine instruction back to its C line of origin.
@@ -262,6 +291,9 @@ export const useCpuStore = defineStore('cpu', () => {
   const currentPID = ref(0);
   const readyQueue = ref<number[]>([]);
   const waitQueue = ref<WaitInfo[]>([]);
+  // IPC channels created via sys_pipe / sys_mknod; the IpcPanel reads
+  // from here and renders the buffer state per channel.
+  const pipes = ref<PipeInfo[]>([]);
 
   // Cross-panel intent: when a row of the PCB table requests "jump to my
   // memory", it writes the target address here. Simulator switches the
@@ -812,6 +844,9 @@ export const useCpuStore = defineStore('cpu', () => {
       case 'loaded':
         pushLog(formatLog.loaded(ev.name, ev.pids.length, ev.pids), 'green');
         procs.value = ev.procs;
+        // A new demo starts with no open IPC channels — the kernel
+        // resets its Pipes registry alongside its process table.
+        pipes.value = [];
         if (ev.sources) {
           procSources.value = {};
           for (const [pid, src] of Object.entries(ev.sources)) {
@@ -840,6 +875,7 @@ export const useCpuStore = defineStore('cpu', () => {
         procSourceMaps.value = {};
         mutexes.value = [];
         semaphores.value = [];
+        pipes.value = [];
         activeFrameByCore.value = {};
         lastFiredHandlerByVector.value = {};
         pendingMemoryJump.value = null;
@@ -961,7 +997,11 @@ export const useCpuStore = defineStore('cpu', () => {
         break;
       case 'error':
         lastError.value = ev.message;
-        pushLog(formatLog.genericErr(ev.message), 'red');
+        if (ev.code) {
+          pushLog(formatLog.backendError(ev.code, ev.params, ev.message), 'red');
+        } else {
+          pushLog(formatLog.genericErr(ev.message), 'red');
+        }
         break;
       case 'mem_read':
       case 'mem_write': {
@@ -1021,6 +1061,77 @@ export const useCpuStore = defineStore('cpu', () => {
           case 'rejected':
             pushLog(formatLog.mutexRejected(ev.mutex_id, ev.pid), 'red');
             break;
+        }
+        break;
+      }
+      case 'pipe_create': {
+        // Avoid duplicates if the server replays the snapshot after a
+        // reconnect — the kernel guarantees pipe_id is monotonic per
+        // session, so an existing entry just refreshes its metadata.
+        const existing = pipes.value.find(p => p.pipe_id === ev.pipe_id);
+        if (existing) {
+          existing.owner_pid = ev.owner_pid;
+          existing.fd_r = ev.fd_r;
+          existing.fd_w = ev.fd_w;
+          existing.is_fifo = ev.is_fifo;
+          existing.name = ev.name;
+        } else {
+          pipes.value.push({
+            pipe_id: ev.pipe_id, owner_pid: ev.owner_pid,
+            fd_r: ev.fd_r, fd_w: ev.fd_w,
+            is_fifo: ev.is_fifo, name: ev.name,
+            buf_level: 0, buf_cap: 16,
+          });
+        }
+        break;
+      }
+      case 'pipe_op': {
+        const p = pipes.value.find(x => x.pipe_id === ev.pipe_id);
+        if (p) {
+          p.buf_level = ev.buf_level;
+          p.buf_cap = ev.buf_cap;
+          p.last_bytes = ev.bytes;
+          p.last_op = ev.op;
+          p.last_pid = ev.pid;
+        }
+        break;
+      }
+      case 'fork': {
+        // Tree shape is rebuilt from the next 'procs' snapshot; here we
+        // just flash both PCBs so the user notices the relationship.
+        flashPID(ev.parent_pid);
+        flashPID(ev.child_pid);
+        pushLog(formatLog.forkSpawn(ev.parent_pid, ev.child_pid, ev.is_vfork), 'cyan');
+        break;
+      }
+      case 'reparent': {
+        // Same as fork: the periodic procs snapshot carries the new
+        // parent_pid. We flash the affected PCB so the move is visible.
+        flashPID(ev.pid);
+        // Update parent_pid locally so the tree re-renders without
+        // waiting for the next procs snapshot.
+        const moved = procs.value.find(x => x.pid === ev.pid);
+        if (moved) moved.parent_pid = ev.new_parent;
+        pushLog(formatLog.reparent(ev.pid, ev.old_parent, ev.new_parent), 'cyan');
+        break;
+      }
+      case 'wait_op': {
+        if (ev.op === 'reap') {
+          // Drop the reaped zombie from the local snapshot so the panel
+          // empties at the same tick the kernel emits the event. Without
+          // this the zombie sticks around until the next procs broadcast
+          // (which never comes when AllHalted fires immediately after).
+          procs.value = procs.value.filter(x => x.pid !== ev.child_pid);
+          // Drop the orphan from the parent's children list too.
+          const parent = procs.value.find(x => x.pid === ev.pid);
+          if (parent && Array.isArray(parent.children)) {
+            parent.children = parent.children.filter(c => c !== ev.child_pid);
+          }
+          flashPID(ev.pid);
+          const byInit = ev.pid === 1; // init PID convention; sufficient until the store carries InitPID explicitly
+          pushLog(formatLog.waitReap(ev.pid, ev.child_pid, ev.exit_code ?? 0, byInit), 'yellow');
+        } else if (ev.op === 'call') {
+          pushLog(formatLog.waitCall(ev.pid, ev.child_pid), 'cyan');
         }
         break;
       }
@@ -1232,7 +1343,7 @@ export const useCpuStore = defineStore('cpu', () => {
     pendingMemoryJump, requestMemoryJump, clearMemoryJump, lastMnemonic,
     cores, numCores, selectedCoreId, selectedCoreIds, visibleCores, isCoreVisible,
     toggleCoreSelection, selectAllCores, selectOnlyCore, setSelectedCore, setVisibleCores,
-    mutexes, semaphores,
+    mutexes, semaphores, pipes,
     activeFrameByCore, lastFiredHandlerByVector,
     subscribe,
     consoleChunks, faultShake,

@@ -7,6 +7,7 @@ import { useViewerMirrorStore } from '../stores/viewerMirror';
 import CpuPanel from '../components/CpuPanel.vue';
 import EventsLog from '../components/EventsLog.vue';
 import ProcessesPanel from '../components/ProcessesPanel.vue';
+import IpcPanel from '../components/IpcPanel.vue';
 import ConsolePanel from '../components/ConsolePanel.vue';
 import MemoryPanel from '../components/MemoryPanel.vue';
 import CodeAsmSplit from '../components/CodeAsmSplit.vue';
@@ -161,7 +162,10 @@ onUnmounted(() => {
         <MemoryPanel v-show="visible.memory" />
         <ConsolePanel v-show="visible.console" />
       </div>
-      <ProcessesPanel v-show="visible.procs" class="col-right" />
+      <div v-show="visible.procs" class="col-right col-right--stack">
+        <ProcessesPanel class="col-right__top" />
+        <IpcPanel class="col-right__bottom" />
+      </div>
     </main>
 
     <!-- Narrators are mounted at the Overview root so byte-flight, PCB-copy
@@ -174,11 +178,6 @@ onUnmounted(() => {
     <ByteFlightNarrator />
     <ModeFlipNarrator />
     <PCBCopyNarrator />
-
-    <div class="credit" :title="t('credit.hint')">
-      <span class="credit-tag">{{ t('credit.tag') }}</span>
-      <span class="credit-name">{{ t('credit.name') }}</span>
-    </div>
   </div>
 </template>
 
@@ -197,6 +196,33 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 8px;
   min-width: 0;
+}
+
+/* Right column splits vertically: ProcessesPanel on top (60%) and
+   IpcPanel below (40%). Both panels already cap their width at 280px,
+   so on desktop the split affects height only. */
+.col-right--stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.col-right__top {
+  flex: 0 1 60%;
+  min-height: 0;
+}
+
+.col-right__bottom {
+  flex: 0 1 40%;
+  min-height: 0;
+}
+
+@media (max-width: 768px) {
+  /* On mobile only one panel is shown at a time; let both children
+     fill the available space when the column is the active view. */
+  .col-right__top, .col-right__bottom { flex: 1 1 auto; }
 }
 
 .middle-tabs {
@@ -242,42 +268,6 @@ onUnmounted(() => {
   border-color: var(--amber);
   background: rgba(var(--accent-rgb), 0.1);
   box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.2);
-}
-
-.credit {
-  position: fixed;
-  bottom: 6px;
-  right: 10px;
-  z-index: 100;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
-  pointer-events: none;
-  user-select: none;
-  font-family: 'JetBrains Mono', monospace;
-  line-height: 1.1;
-  opacity: 0.65;
-  transition: opacity 0.2s ease;
-}
-
-.credit:hover {
-  opacity: 1;
-}
-
-.credit-tag {
-  font-family: var(--font-display);
-  font-size: 11px;
-  color: var(--accent);
-  letter-spacing: 3px;
-  text-shadow: var(--shadow-glow-amber);
-}
-
-.credit-name {
-  font-size: 10px;
-  color: var(--text-dim);
-  letter-spacing: 1px;
-  text-transform: uppercase;
 }
 
 .root {
@@ -355,15 +345,5 @@ onUnmounted(() => {
   .desktop-only {
     display: none !important;
   }
-
-  /* Credit más discreto en mobile, no estorba */
-  .credit {
-    bottom: 4px;
-    right: 6px;
-    opacity: 0.35;
-  }
-
-  .credit-tag { font-size: 9px; letter-spacing: 2px; }
-  .credit-name { font-size: 8px; }
 }
 </style>

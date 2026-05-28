@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Hourglass } from '@lucide/vue';
 import { useCpuStore, type CpuEvent, type PCBInfo } from '../../stores/cpu';
 import { usePreferencesStore } from '../../stores/preferences';
+
+const { t } = useI18n();
 import PCBCopyNarrator from '../../components/narrators/PCBCopyNarrator.vue';
 import Term from '../../components/glossary/Term.vue';
 // Scheduler-metrics widgets used in the template. vue-tsc's unused-locals
@@ -102,9 +105,9 @@ onBeforeUnmount(() => window.clearInterval(tickHandle));
 
 function timeAgo(ts: number): string {
   const diff = Math.max(0, now.value - ts);
-  if (diff < 1000) return 'ahora';
-  if (diff < 60_000) return `${Math.floor(diff / 1000)}s`;
-  return `${Math.floor(diff / 60_000)}m`;
+  if (diff < 1000) return t('sections.shared.timeAgoNow');
+  if (diff < 60_000) return t('sections.shared.timeAgoSec', { n: Math.floor(diff / 1000) });
+  return t('sections.shared.timeAgoMin', { n: Math.floor(diff / 60_000) });
 }
 
 function stateClass(state: string): string {
@@ -114,7 +117,7 @@ function stateClass(state: string): string {
 const narratorHint = computed(() =>
   prefs.narratorsEnabled
     ? null
-    : 'Active los narradores en Preferencias para ver los registros viajando entre CPU y PCB.',
+    : t('sections.processes.narratorHint'),
 );
 
 const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
@@ -127,16 +130,9 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
     <div class="procs-page__content">
       <header class="procs-page__hero">
         <h2 class="procs-page__title">
-          <Term term="PCB" mode="title">Procesos</Term>
+          <Term term="PCB" mode="title">{{ t('sections.processes.title') }}</Term>
         </h2>
-        <p class="procs-page__tagline">
-          La CPU sólo ejecuta uno a la vez. Cuando el
-          <Term term="Round-Robin">scheduler</Term> decide cambiar
-          (por timer o por bloqueo), el kernel <strong>copia</strong> los
-          registros del CPU al <Term term="PCB" as="code">PCB</Term> del proceso saliente y carga
-          los del entrante. Cargue <code>two_procs</code>, <code>three_procs</code>
-          o <code>sleep</code> y avance para ver el viaje.
-        </p>
+        <p class="procs-page__tagline">{{ t('sections.processes.tagline') }}</p>
         <p v-if="narratorHint" class="procs-page__hint">{{ narratorHint }}</p>
       </header>
 
@@ -150,9 +146,9 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
           :data-narrator-anchor="`cpu-${core.id}`"
         >
           <div class="cpu-strip__head">
-            <span class="cpu-strip__label">{{ cpu.numCores > 1 ? `CORE C${core.id}` : 'CPU en uso' }}</span>
+            <span class="cpu-strip__label">{{ cpu.numCores > 1 ? `CORE C${core.id}` : t('sections.processes.cpuInUse') }}</span>
             <span v-if="core.current_pid" class="cpu-strip__pid">P{{ core.current_pid }}</span>
-            <span v-else class="cpu-strip__pid cpu-strip__pid--idle">— ocioso —</span>
+            <span v-else class="cpu-strip__pid cpu-strip__pid--idle">{{ t('sections.processes.cpuIdle') }}</span>
             <span v-if="core.halted" class="cpu-strip__tag cpu-strip__tag--halt">HALT</span>
           </div>
           <div class="cpu-strip__regs">
@@ -185,26 +181,26 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
               <Term :term="r" mode="label" class="pcb-card__reg-name">{{ r }}</Term>
               <span
                 :class="['pcb-card__reg-val', { 'pcb-card__reg-val--live': isLive(p) }]"
-                :title="isLive(p) ? 'Valor live del CPU — la copia del PCB se actualiza en el próximo pcb_save' : 'Valor congelado: snapshot guardado por el kernel'"
+                :title="isLive(p) ? t('sections.processes.valLive') : t('sections.processes.valSaved')"
               >
                 {{ hex(pcbValue(p, r), 8) }}
               </span>
             </li>
           </ul>
           <footer class="pcb-card__foot">
-            <span title="Base del segmento de código de este proceso.">{{ hex(p.code_base) }}</span>
+            <span :title="t('sections.processes.codeBaseHint')">{{ hex(p.code_base) }}</span>
             <span v-if="p.blocked_on" class="pcb-card__blocked"><Hourglass :size="11" :stroke-width="2" /> {{ p.blocked_on }}</span>
           </footer>
         </article>
       </section>
       <div v-else class="pcb-grid__empty">
-        Sin procesos cargados. Use el selector del topbar para cargar una demo.
+        {{ t('sections.processes.pcbEmpty') }}
       </div>
 
       <div class="procs-page__grid">
         <section class="procs-page__panel">
           <header class="procs-page__panel-head">
-            <h3><Term term="Round-Robin" mode="title">Scheduler</Term></h3>
+            <h3><Term term="Round-Robin" mode="title">{{ t('sections.processes.schedulerTitle') }}</Term></h3>
             <span class="procs-page__panel-hint">
               <Term term="Round-Robin">Round-Robin</Term> ·
               <Term term="Quantum" as="code">quantum={{ cpu.timerQuantum }}</Term>
@@ -213,19 +209,19 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
           <div class="sched-row">
             <Term term="Ready queue" mode="label" class="sched-row__label">READY</Term>
             <div class="sched-row__pills">
-              <span v-if="cpu.readyQueue.length === 0" class="sched-row__empty">— vacía —</span>
+              <span v-if="cpu.readyQueue.length === 0" class="sched-row__empty">{{ t('sections.processes.queueEmpty') }}</span>
               <span v-for="pid in cpu.readyQueue" :key="`r-${pid}`" class="sched-pill sched-pill--ready">P{{ pid }}</span>
             </div>
           </div>
           <div class="sched-row">
             <Term term="Waiting queue" mode="label" class="sched-row__label">WAIT</Term>
             <div class="sched-row__pills">
-              <span v-if="cpu.waitQueue.length === 0" class="sched-row__empty">— vacía —</span>
+              <span v-if="cpu.waitQueue.length === 0" class="sched-row__empty">{{ t('sections.processes.queueEmpty') }}</span>
               <span
                 v-for="w in cpu.waitQueue"
                 :key="`w-${w.pid}`"
                 class="sched-pill sched-pill--wait"
-                :title="`Esperando: ${w.reason}`"
+                :title="t('sections.processes.waitingTooltip', { reason: w.reason })"
               >
                 P{{ w.pid }} · {{ w.reason }}
               </span>
@@ -235,20 +231,20 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
 
         <section class="procs-page__panel">
           <header class="procs-page__panel-head">
-            <h3><Term term="Context switch" mode="title">Últimos cambios de contexto</Term></h3>
+            <h3><Term term="Context switch" mode="title">{{ t('sections.processes.ctxSwitchesTitle') }}</Term></h3>
             <span class="procs-page__panel-hint">
-              <Term term="Preemption">sched_decision</Term> en vivo
+              <Term term="Preemption">sched_decision</Term>
             </span>
           </header>
           <div v-if="switches.length === 0" class="ctx-feed__empty">
-            Sin cambios de contexto aún. Cargue un demo multi-proceso o avance hasta que el timer dispare.
+            {{ t('sections.processes.ctxFeedEmpty') }}
           </div>
           <ol v-else class="ctx-feed">
             <li v-for="s in switches" :key="s.id" class="ctx-feed__row">
               <span class="ctx-feed__pid">P{{ s.fromPid }}</span>
               <span class="ctx-feed__arrow">→</span>
               <span class="ctx-feed__pid ctx-feed__pid--to">P{{ s.toPid }}</span>
-              <span v-if="s.reason" class="ctx-feed__reason">· por {{ s.reason }}</span>
+              <span v-if="s.reason" class="ctx-feed__reason">{{ t('sections.processes.ctxFeedReason', { reason: s.reason }) }}</span>
               <span class="ctx-feed__ready">ready=[{{ s.ready.join(',') || '∅' }}]</span>
               <span class="ctx-feed__time">{{ timeAgo(s.ts) }}</span>
             </li>
@@ -258,8 +254,8 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
 
       <section class="procs-page__panel">
         <header class="procs-page__panel-head">
-          <h3><Term term="Round-Robin (RR)" mode="title">Métricas del scheduler</Term></h3>
-          <span class="procs-page__panel-hint">demo actual · ticks simulados</span>
+          <h3><Term term="Round-Robin (RR)" mode="title">{{ t('sections.processes.metricsTitle') }}</Term></h3>
+          <span class="procs-page__panel-hint">{{ t('sections.processes.metricsHint') }}</span>
         </header>
         <SchedMetricsTable
           :metrics="sched.metrics"
@@ -271,16 +267,16 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
 
       <section class="procs-page__panel">
         <header class="procs-page__panel-head">
-          <h3><Term term="Quantum" mode="title">Quantums por proceso</Term></h3>
-          <span class="procs-page__panel-hint">color: completos · rayado: parciales</span>
+          <h3><Term term="Quantum" mode="title">{{ t('sections.processes.quantumsTitle') }}</Term></h3>
+          <span class="procs-page__panel-hint">{{ t('sections.processes.quantumsHint') }}</span>
         </header>
         <QuantumBarGraph :metrics="sched.metrics" />
       </section>
 
       <section class="procs-page__panel">
         <header class="procs-page__panel-head">
-          <h3><Term term="Context switch" mode="title">Timeline de quantums</Term></h3>
-          <span class="procs-page__panel-hint">últimos 200 ticks · una banda por core visible</span>
+          <h3><Term term="Context switch" mode="title">{{ t('sections.processes.timelineTitle') }}</Term></h3>
+          <span class="procs-page__panel-hint">{{ t('sections.processes.timelineHint') }}</span>
         </header>
         <QuantumTimeline
           :metrics="sched.metrics"

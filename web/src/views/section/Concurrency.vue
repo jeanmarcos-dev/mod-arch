@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useCpuStore } from '../../stores/cpu';
 import Term from '../../components/glossary/Term.vue';
 
+const { t } = useI18n();
 const cpu = useCpuStore();
 
 onMounted(() => { cpu.connect(); });
@@ -47,18 +49,12 @@ function pidShort(pid: number) {
 <template>
   <section class="conc" data-pizarra-anchor="view-concurrencia">
     <header class="conc__head">
-      <h1><Term term="Critical section" mode="title">Concurrencia</Term></h1>
+      <h1><Term term="Critical section" mode="title">{{ t('sections.concurrency.title') }}</Term></h1>
       <div class="conc__hint" v-if="singleCoreHint">
-        Hoy este simulador está corriendo con <strong>{{ cpu.numCores }}</strong> core.
-        Para activar las animaciones de competencia real entre cores, el operador
-        debe relanzar el servidor con <code>MODOS_CPU_CORES=2</code> (o más, hasta 4).
-        Los demos siguen ejecutándose; el timer del kernel intercala los procesos
-        en un solo core mientras tanto.
+        {{ t('sections.concurrency.singleCoreHintPrefix') }}<strong>{{ cpu.numCores }}</strong>{{ t('sections.concurrency.singleCoreHintBody') }}<code>{{ t('sections.concurrency.singleCoreHintEnv') }}</code>{{ t('sections.concurrency.singleCoreHintSuffix') }}
       </div>
       <div class="conc__hint" v-else>
-        Cores activos: <strong>{{ cpu.numCores }}</strong>. Los workers de cada
-        demo se reparten entre los cores; el <Term term="Mutex">mutex</Term> serializa
-        la <Term term="Critical section">sección crítica</Term> cuando lo piden.
+        {{ t('sections.concurrency.multiCoreHintPrefix') }}<strong>{{ cpu.numCores }}</strong>{{ t('sections.concurrency.multiCoreHintSuffix') }}
       </div>
     </header>
 
@@ -99,17 +95,16 @@ function pidShort(pid: number) {
 
       <aside class="conc__locks">
         <section class="lock-block">
-          <h2><Term term="Mutex" mode="title">Mutexes</Term></h2>
+          <h2><Term term="Mutex" mode="title">{{ t('sections.concurrency.mutexesTitle') }}</Term></h2>
           <p v-if="cpu.mutexes.length === 0" class="empty">
-            Ningún <Term term="Mutex">mutex</Term> activo. Cargue
-            <Term term="safe_counter" as="code">safe_counter</Term> para crear uno.
+            {{ t('sections.concurrency.mutexEmpty') }}
           </p>
           <table v-else>
             <thead>
               <tr>
-                <th>ID</th>
-                <th><Term term="Mutex" mode="label">Holder</Term></th>
-                <th><Term term="Waiting queue" mode="label">Cola</Term></th>
+                <th>{{ t('sections.concurrency.colId') }}</th>
+                <th><Term term="Mutex" mode="label">{{ t('sections.concurrency.colHolder') }}</Term></th>
+                <th><Term term="Waiting queue" mode="label">{{ t('sections.concurrency.colQueue') }}</Term></th>
               </tr>
             </thead>
             <tbody>
@@ -120,7 +115,7 @@ function pidShort(pid: number) {
                 :class="{ free: m.holder < 0 }"
               >
                 <td>#{{ m.id }}</td>
-                <td><code v-if="m.holder >= 0" :title="pidName(m.holder)">P{{ m.holder }}</code><span v-else class="muted">libre</span></td>
+                <td><code v-if="m.holder >= 0" :title="pidName(m.holder)">P{{ m.holder }}</code><span v-else class="muted">{{ t('sections.concurrency.holderFree') }}</span></td>
                 <td>
                   <span v-if="m.waiters.length === 0" class="muted">—</span>
                   <span v-else class="waiters">{{ m.waiters.map(w => 'P' + w).join(' → ') }}</span>
@@ -131,16 +126,16 @@ function pidShort(pid: number) {
         </section>
 
         <section class="lock-block">
-          <h2><Term term="Semaphore" mode="title">Semáforos</Term></h2>
+          <h2><Term term="Semaphore" mode="title">{{ t('sections.concurrency.semsTitle') }}</Term></h2>
           <p v-if="cpu.semaphores.length === 0" class="empty">
-            Ningún <Term term="Semaphore">semáforo</Term> activo todavía.
+            {{ t('sections.concurrency.semsEmpty') }}
           </p>
           <table v-else>
             <thead>
               <tr>
-                <th>ID</th>
-                <th><Term term="Semaphore" mode="label">Count</Term></th>
-                <th><Term term="Waiting queue" mode="label">Cola</Term></th>
+                <th>{{ t('sections.concurrency.colId') }}</th>
+                <th><Term term="Semaphore" mode="label">{{ t('sections.concurrency.colCount') }}</Term></th>
+                <th><Term term="Waiting queue" mode="label">{{ t('sections.concurrency.colQueue') }}</Term></th>
               </tr>
             </thead>
             <tbody>
@@ -157,14 +152,14 @@ function pidShort(pid: number) {
         </section>
 
         <section class="lock-block">
-          <h2><Term term="PCB" mode="title">Procesos · estado</Term></h2>
+          <h2><Term term="PCB" mode="title">{{ t('sections.concurrency.procStateTitle') }}</Term></h2>
           <table>
             <thead>
               <tr>
                 <th><Term term="PID" mode="label">PID</Term></th>
-                <th>Nombre</th>
-                <th>Estado</th>
-                <th><Term term="BLOCKED" mode="label">Bloqueado en</Term></th>
+                <th>{{ t('sections.concurrency.colName') }}</th>
+                <th>{{ t('sections.concurrency.colState') }}</th>
+                <th><Term term="BLOCKED" mode="label">{{ t('sections.concurrency.colBlockedOn') }}</Term></th>
               </tr>
             </thead>
             <tbody>

@@ -31,6 +31,46 @@ const EFLAGS_BITS: Array<{ name: FlagName; mask: number }> = [
 // al crear cada proceso, así que esto equivale al orden de carga del kernel.
 const sortedProcs = computed(() => [...cpu.procs].sort((a, b) => a.pid - b.pid));
 
+// Tree-view nodes: depth-first walk of the process tree, with each proc
+// tagged with its nesting depth so the template can render the indent
+// guideline. Depth is capped at 4 (deeper subtrees show a ↳ dN chip but
+// stop accumulating horizontal indent — the col-right column is narrow).
+interface ProcTreeNode {
+  proc: PCBInfo;
+  depth: number;
+  realDepth: number;
+}
+const TREE_DEPTH_CAP = 4;
+const treeNodes = computed<ProcTreeNode[]>(() => {
+  const byParent = new Map<number, PCBInfo[]>();
+  for (const p of cpu.procs) {
+    const pp = p.parent_pid ?? 0;
+    if (!byParent.has(pp)) byParent.set(pp, []);
+    byParent.get(pp)!.push(p);
+  }
+  for (const list of byParent.values()) list.sort((a, b) => a.pid - b.pid);
+  const out: ProcTreeNode[] = [];
+  const visit = (parent: number, depth: number) => {
+    const kids = byParent.get(parent);
+    if (!kids) return;
+    for (const k of kids) {
+      out.push({ proc: k, depth: Math.min(depth, TREE_DEPTH_CAP), realDepth: depth });
+      visit(k.pid, depth + 1);
+    }
+  };
+  visit(0, 0);
+  // Fallback for demos that haven't seeded parent_pid on every proc yet
+  // (e.g. older snapshots arriving during a reload): append any procs the
+  // walk missed so they remain visible instead of vanishing.
+  if (out.length < cpu.procs.length) {
+    const seen = new Set(out.map(n => n.proc.pid));
+    for (const p of sortedProcs.value) {
+      if (!seen.has(p.pid)) out.push({ proc: p, depth: 0, realDepth: 0 });
+    }
+  }
+  return out;
+});
+
 const EXPANDED_KEY = 'modos.procs.expandedPids';
 
 function loadExpanded(): Set<number> {
@@ -109,20 +149,17 @@ function coreOfPid(pid: number): number | null {
   return null;
 }
 
-// Live register block: when the proc is RUN on a visible core we read the
-// core's CPU registers (they tick every instruction). When the proc is
-// READY/BLOCKED/NEW/ZOMBIE the CPU is busy with someone else, so we read its
-// last saved PCB copy. This makes the "save → restore" mechanic visible: the
-// numbers freeze the moment a context switch parks the proc.
-function liveRegs(p: PCBInfo): Record<string, number> {
-  const coreId = coreOfPid(p.pid);
-  if (coreId === null) return p.regs;
-  const c = cpu.cores.find(x => x.id === coreId);
-  return c ? c.regs : p.regs;
+// PCB-visible register file: always the kernel-saved snapshot from the last
+// context switch. While the process is RUN the live regs tick in the assigned
+// core (see Cores panel); these numbers stay frozen until the scheduler emits
+// the next `pcb_save`, which mirrors the real "context save on dispatch out"
+// mechanic of the OS.
+function pcbRegs(p: PCBInfo): Record<string, number> {
+  return p.regs;
 }
 
-function liveEIP(p: PCBInfo): number {
-  return (liveRegs(p).EIP ?? 0) >>> 0;
+function pcbEIP(p: PCBInfo): number {
+  return (pcbRegs(p).EIP ?? 0) >>> 0;
 }
 
 function regsList(regs: Record<string, number>): Array<{ name: string; val: number }> {
@@ -136,7 +173,7 @@ function flagOn(eflags: number, mask: number): boolean {
 
 function regsSource(p: PCBInfo): string {
   return coreOfPid(p.pid) !== null
-    ? t('panels.processes.regsSrcLive')
+    ? t('panels.processes.regsSrcPreDispatch')
     : t('panels.processes.regsSrcSaved');
 }
 
@@ -170,14 +207,14 @@ function flagChipTitle(name: FlagName, on: boolean): string {
 
 function regCellTitle(reg: string, p: PCBInfo): string {
   const cell = coreOfPid(p.pid) !== null
-    ? t('panels.processes.regCellLive', { reg })
+    ? t('panels.processes.regCellPreDispatch', { reg })
     : t('panels.processes.regCellSaved', { reg });
   return t('panels.processes.regCellTitle', { cell, pid: p.pid });
 }
 
 function regsSrcTitle(p: PCBInfo): string {
   const desc = coreOfPid(p.pid) !== null
-    ? t('panels.processes.regsHintLive')
+    ? t('panels.processes.regsHintPreDispatch')
     : t('panels.processes.regsHintSaved');
   return t('panels.processes.regsValuesAre', { desc });
 }
@@ -209,62 +246,79 @@ function regsSrcTitle(p: PCBInfo): string {
       {{ t('panels.processes.emptyDemo') }}
     </div>
 
-    <div v-if="sortedProcs.length > 0" class="proc-list">
+    <div v-if="treeNodes.length > 0" class="proc-list">
       <section
-        v-for="p in sortedProcs"
-        :key="p.pid"
+        v-for="node in treeNodes"
+        :key="node.proc.pid"
         class="proc-card"
         :class="[
-          stateClass(p.state),
+          stateClass(node.proc.state),
           {
-            'proc-card--running': coreOfPid(p.pid) !== null,
-            'proc-card--expanded': isExpanded(p.pid),
-            'proc-card--flash': cpu.flashingPIDs.has(p.pid),
+            'proc-card--running': coreOfPid(node.proc.pid) !== null,
+            'proc-card--expanded': isExpanded(node.proc.pid),
+            'proc-card--flash': cpu.flashingPIDs.has(node.proc.pid),
+            'proc-card--child': node.depth > 0,
           },
         ]"
-        :data-narrator-anchor="`pcb-${p.pid}`"
+        :style="node.depth > 0 ? { marginLeft: (node.depth * 14) + 'px', borderLeft: '1px solid var(--border)' } : undefined"
+        :data-narrator-anchor="`pcb-${node.proc.pid}`"
       >
         <header
           class="proc-card__head"
           role="button"
           tabindex="0"
-          :aria-expanded="isExpanded(p.pid)"
-          :title="stateTitle(p)"
-          @click="toggleExpanded(p)"
-          @keydown.enter.prevent="toggleExpanded(p)"
-          @keydown.space.prevent="toggleExpanded(p)"
+          :aria-expanded="isExpanded(node.proc.pid)"
+          :title="stateTitle(node.proc)"
+          @click="toggleExpanded(node.proc)"
+          @keydown.enter.prevent="toggleExpanded(node.proc)"
+          @keydown.space.prevent="toggleExpanded(node.proc)"
         >
-          <span class="proc-card__chevron">{{ isExpanded(p.pid) ? '▾' : '▸' }}</span>
-          <span class="proc-card__state" :class="stateClass(p.state)">{{ p.state }}</span>
+          <span class="proc-card__chevron">{{ isExpanded(node.proc.pid) ? '▾' : '▸' }}</span>
+          <span class="proc-card__state" :class="stateClass(node.proc.state)">{{ node.proc.state }}</span>
           <span
-            v-if="coreOfPid(p.pid) !== null"
+            v-if="coreOfPid(node.proc.pid) !== null"
             class="proc-card__core"
-            :style="{ color: `var(--core-${(coreOfPid(p.pid) as number) % 4})` }"
-            :title="t('panels.processes.coreRunning', { core: coreOfPid(p.pid) ?? 0 })"
-          >C{{ coreOfPid(p.pid) }}</span>
-          <span class="proc-card__pid">P{{ p.pid }}</span>
-          <span class="proc-card__name" :title="t('panels.processes.nameTooltip', { name: p.name, eip: hex(liveEIP(p), 8) })">{{ p.name }}</span>
+            :style="{ color: `var(--core-${(coreOfPid(node.proc.pid) as number) % 4})` }"
+            :title="t('panels.processes.coreRunning', { core: coreOfPid(node.proc.pid) ?? 0 })"
+          >C{{ coreOfPid(node.proc.pid) }}</span>
+          <span class="proc-card__pid">P{{ node.proc.pid }}</span>
+          <span class="proc-card__name" :title="t('panels.processes.nameTooltip', { name: node.proc.name, eip: hex(pcbEIP(node.proc), 8) })">{{ node.proc.name }}</span>
+          <span
+            v-if="node.realDepth > TREE_DEPTH_CAP"
+            class="proc-card__depth-chip"
+            :title="t('panels.processes.depthChipTitle', { depth: node.realDepth, cap: TREE_DEPTH_CAP })"
+          >↳ d{{ node.realDepth }}</span>
+          <span
+            v-if="(node.proc.parent_pid ?? 0) > 0"
+            class="proc-card__parent-chip"
+            :title="t('panels.processes.parentChipTitle', { pid: node.proc.parent_pid })"
+          >↑P{{ node.proc.parent_pid }}</span>
         </header>
 
-        <div v-if="isExpanded(p.pid)" class="proc-card__body">
+        <div v-if="isExpanded(node.proc.pid)" class="proc-card__body">
           <div class="proc-card__meta">
             <span class="proc-card__addr" :title="t('panels.processes.addrHint')">
-              @ {{ hex(p.code_base, 8) }}
+              @ {{ hex(node.proc.code_base, 8) }}
             </span>
-            <span class="proc-card__regs-src" :title="regsSrcTitle(p)">
-              {{ regsSource(p) }}
+            <span class="proc-card__regs-src" :title="regsSrcTitle(node.proc)">
+              {{ regsSource(node.proc) }}
             </span>
+            <span
+              v-if="node.proc.state === 'ZOMBIE' && node.proc.exit_code !== undefined"
+              class="proc-card__exit"
+              :title="t('panels.processes.exitCodeTitle')"
+            >exit={{ node.proc.exit_code }}</span>
           </div>
 
-          <div v-if="p.state === 'BLOCKED' && p.blocked_on" class="proc-card__blocked">
-            {{ t('panels.processes.blockedWaiting', { reason: p.blocked_on }) }}
+          <div v-if="node.proc.state === 'BLOCKED' && node.proc.blocked_on" class="proc-card__blocked">
+            {{ t('panels.processes.blockedWaiting', { reason: node.proc.blocked_on }) }}
           </div>
 
           <div class="proc-card__regs">
             <span
-              v-for="r in regsList(liveRegs(p))"
+              v-for="r in regsList(pcbRegs(node.proc))"
               :key="r.name"
-              :title="regCellTitle(r.name, p)"
+              :title="regCellTitle(r.name, node.proc)"
             >
               <span class="r-name">{{ r.name }}</span>
               <span class="r-val">{{ hex(r.val, 8) }}</span>
@@ -281,8 +335,8 @@ function regsSrcTitle(p: PCBInfo): string {
               v-for="f in EFLAGS_BITS"
               :key="f.name"
               class="pcb-flag"
-              :class="{ 'pcb-flag--on': flagOn(liveRegs(p).EFLAGS ?? 0, f.mask) }"
-              :title="flagChipTitle(f.name, flagOn(liveRegs(p).EFLAGS ?? 0, f.mask))"
+              :class="{ 'pcb-flag--on': flagOn(pcbRegs(node.proc).EFLAGS ?? 0, f.mask) }"
+              :title="flagChipTitle(f.name, flagOn(pcbRegs(node.proc).EFLAGS ?? 0, f.mask))"
             >{{ f.name }}</span>
           </div>
         </div>
@@ -515,6 +569,48 @@ function regsSrcTitle(p: PCBInfo): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Tree-view chips: parent pointer and depth-cap badge ride at the end of
+   the card header. Tight typography so two of them still fit in the
+   narrow col-right column on desktop. */
+.proc-card__parent-chip,
+.proc-card__depth-chip {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.proc-card__depth-chip {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+
+.proc-card__exit {
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+}
+
+/* Zombies should read as "ya no están corriendo": faded card, no flash
+   border, and the state chip stays muted. */
+.proc-card.state-zombie {
+  opacity: 0.6;
+}
+.proc-card.state-zombie .proc-card__name {
+  text-decoration: line-through;
+  text-decoration-color: var(--text-muted);
+}
+
+/* Child cards in the tree get a subtle border-left guideline. The
+   indent is applied inline via :style so we can cap it at depth 4. */
+.proc-card--child {
+  border-left-color: var(--accent) !important;
+  border-left-style: dotted !important;
 }
 
 .proc-card__body {

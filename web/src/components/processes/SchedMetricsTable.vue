@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import type { SchedulerMetricsState } from '../../composables/useSchedulerMetrics';
 import { useCpuStore } from '../../stores/cpu';
 import { pidColor } from '../../lib/pidColors';
 import Term from '../glossary/Term.vue';
+
+const { t } = useI18n();
 
 const props = defineProps<{
   metrics: SchedulerMetricsState;
@@ -56,13 +59,13 @@ function stateClass(state: string): string {
 <template>
   <div class="sched-metrics">
     <div v-if="rows.length === 0" class="sched-metrics__empty">
-      Sin procesos cargados. Use el selector del topbar para cargar una demo.
+      {{ t('shell.schedMetrics.empty') }}
     </div>
     <table v-else class="sched-metrics__table">
       <thead>
         <tr>
-          <th class="sched-metrics__col-pid">PID</th>
-          <th class="sched-metrics__col-state">Estado</th>
+          <th class="sched-metrics__col-pid">{{ t('shell.schedMetrics.colPid') }}</th>
+          <th class="sched-metrics__col-state">{{ t('shell.schedMetrics.colState') }}</th>
           <th class="sched-metrics__col-num">
             <Term term="Turnaround" mode="label">TAT</Term>
           </th>
@@ -72,8 +75,8 @@ function stateClass(state: string): string {
           <th class="sched-metrics__col-num">
             <Term term="Response time" mode="label">RT</Term>
           </th>
-          <th class="sched-metrics__col-num" title="Quantums completos (preempt por timer)">Q✓</th>
-          <th class="sched-metrics__col-num" title="Quantums parciales (bloqueo/exit)">Q◐</th>
+          <th class="sched-metrics__col-num" :title="t('shell.schedMetrics.colQokTitle')">Q✓</th>
+          <th class="sched-metrics__col-num" :title="t('shell.schedMetrics.colQpartialTitle')">Q◐</th>
         </tr>
       </thead>
       <tbody>
@@ -93,17 +96,17 @@ function stateClass(state: string): string {
         <span>
           <Term term="Throughput" mode="label">Throughput</Term>:
           <strong>{{ throughputPerKTick.toFixed(2) }}</strong>
-          procs / 1000 ticks
+          {{ t('shell.schedMetrics.throughputUnit') }}
         </span>
         <span>
           <Term term="Quantum" mode="label">TimerQuantum</Term>:
-          <strong>{{ cpu.timerQuantum }}</strong> ticks
+          <strong>{{ cpu.timerQuantum }}</strong> {{ t('shell.schedMetrics.timerQuantumUnit') }}
         </span>
       </div>
       <div class="sched-metrics__foot-row sched-metrics__foot-row--hint">
-        <span>Procesos completados: <strong>{{ metrics.completedProcs }}</strong></span>
+        <span>{{ t('shell.schedMetrics.completed') }}: <strong>{{ metrics.completedProcs }}</strong></span>
         <span class="sched-metrics__hint">
-          1 quantum ≈ {{ quantumMsHint.toFixed(1) }} ms simulados (HZ={{ hzSim }})
+          {{ t('shell.schedMetrics.quantumHint', { ms: quantumMsHint.toFixed(1), hz: hzSim }) }}
         </span>
       </div>
     </footer>
