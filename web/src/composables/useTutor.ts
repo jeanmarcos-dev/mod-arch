@@ -43,11 +43,21 @@ export function useTutor() {
     const trimmed = question.trim();
     if (!trimmed) return;
     const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    // Build the multi-turn history from prior messages (newest last). The
+    // server enforces both a hard cap (20 entries) and the admin-configured
+    // HistoryWindowTurns, so a generous slice of 20 here is safe.
+    const history = tutor.messages
+      .filter((m) => !m.error && !m.pending && m.text.trim().length > 0)
+      .slice(-20)
+      .map((m) => ({
+        role: (m.role === 'student' ? 'user' : 'assistant') as 'user' | 'assistant',
+        text: m.text,
+      }));
     // Mode is controlled by the admin globally; the client just sends the
     // question and lets the server pick the system prompt.
     tutor.startAsk(trimmed, requestId);
     try {
-      cpu.sendTutorAsk(trimmed, requestId);
+      cpu.sendTutorAsk(trimmed, requestId, history);
     } catch (err) {
       tutor.failPending(requestId, String(err));
     }

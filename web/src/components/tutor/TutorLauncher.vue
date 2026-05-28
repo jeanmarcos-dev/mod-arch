@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { BotMessageSquare, LogIn, Minus } from '@lucide/vue';
 
 import TutorPanel from './TutorPanel.vue';
+import TutorBotIcon from './TutorBotIcon.vue';
 import { useTutorStore, type TutorCitation } from '../../stores/tutor';
 import { useCpuStore } from '../../stores/cpu';
 import { useToastStore } from '../../stores/toast';
@@ -24,11 +25,8 @@ function goToLogin() {
   tutor.setOpen(false);
 }
 
-const unreadHint = computed(() => {
-  if (tutor.open) return 0;
-  if (!tutor.lastMessage || tutor.lastMessage.role === 'student') return 0;
-  return tutor.lastMessage.pending ? 0 : 1;
-});
+const unreadCount = computed(() => (tutor.open ? 0 : tutor.unreadCount));
+const unreadLabel = computed(() => (unreadCount.value > 9 ? '9+' : String(unreadCount.value)));
 
 const isExpanded = computed(() => tutor.displayMode === 'expanded');
 
@@ -96,14 +94,16 @@ function onBackdropClick() {
     <button
       v-if="!tutor.open"
       class="fab"
-      :class="{ has_hint: unreadHint > 0 }"
-      title="Hablar con el tutor"
-      aria-label="Abrir tutor"
+      :class="{ has_hint: unreadCount > 0 }"
+      :title="unreadCount > 0 ? `Tutor — ${unreadCount} mensaje(s) nuevo(s)` : 'Hablar con el tutor'"
+      :aria-label="unreadCount > 0 ? `Abrir tutor, ${unreadCount} mensajes nuevos` : 'Abrir tutor'"
       @click="tutor.setOpen(true)"
     >
-      <span class="fab-glow" aria-hidden="true" />
-      <BotMessageSquare :size="22" :stroke-width="1.75" />
-      <span v-if="unreadHint > 0" class="hint-dot" aria-hidden="true" />
+      <TutorBotIcon :size="22" :stroke-width="1.75" />
+      <span v-if="unreadCount > 0" class="hint-badge" aria-hidden="true">
+        <span class="hint-pulse" />
+        <span class="hint-num">{{ unreadLabel }}</span>
+      </span>
     </button>
 
     <!-- Docked mode: panel anchored to the corner with a slide transition. -->
@@ -113,7 +113,7 @@ function onBackdropClick() {
           <button class="gate-close" @click="tutor.setOpen(false)" aria-label="Minimizar" title="Minimizar">
             <Minus :size="14" :stroke-width="2.5" />
           </button>
-          <div class="gate-icon"><BotMessageSquare :size="32" :stroke-width="1.4" /></div>
+          <div class="gate-icon"><TutorBotIcon :size="32" :stroke-width="1.4" /></div>
           <h3 class="gate-title">Tutor protegido</h3>
           <p class="gate-text">
             Para conversar con el tutor de Sistemas Operativos debe iniciar
@@ -148,7 +148,7 @@ function onBackdropClick() {
               <button class="gate-close" @click="tutor.setOpen(false)" aria-label="Minimizar" title="Minimizar">
                 <Minus :size="16" :stroke-width="2.5" />
               </button>
-              <div class="gate-icon"><BotMessageSquare :size="44" :stroke-width="1.4" /></div>
+              <div class="gate-icon"><TutorBotIcon :size="44" :stroke-width="1.4" /></div>
               <h3 class="gate-title">Tutor protegido</h3>
               <p class="gate-text">
                 Para conversar con el tutor de Sistemas Operativos debe
@@ -195,64 +195,76 @@ function onBackdropClick() {
   bottom: 0;
   width: 3.25rem;
   height: 3.25rem;
-  border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, rgba(var(--accent-rgb), 0.35), rgba(var(--accent-rgb), 0.12) 65%, rgba(0, 0, 0, 0.6) 100%);
-  border: 1px solid rgba(var(--accent-rgb), 0.8);
+  border-radius: var(--radius-sm);
+  background: radial-gradient(circle at 30% 30%, rgba(var(--accent-rgb), 0.35), rgba(var(--accent-rgb), 0.05) 70%);
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
   color: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  backdrop-filter: blur(8px);
-  box-shadow:
-    0 0 0 4px rgba(var(--accent-rgb), 0.05),
-    0 8px 24px rgba(0, 0, 0, 0.65),
-    0 0 18px rgba(var(--accent-rgb), 0.35);
+  box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.30);
   transition: transform 140ms ease, box-shadow 140ms ease, color 140ms ease;
-  animation: idle-pulse 3.6s ease-in-out infinite;
+  animation: tutor-bounce 4.8s ease-in-out infinite;
 }
 .fab:hover {
   transform: translateY(-3px) scale(1.04);
   color: var(--text);
-  box-shadow:
-    0 0 0 4px rgba(var(--accent-rgb), 0.12),
-    0 12px 28px rgba(0, 0, 0, 0.7),
-    0 0 28px rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 0 24px rgba(var(--accent-rgb), 0.45);
   animation: none;
 }
 .fab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
-.fab-glow {
-  position: absolute;
-  inset: -6px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(var(--accent-rgb), 0.5), transparent 70%);
-  filter: blur(8px);
-  z-index: -1;
-  opacity: 0.7;
+
+.fab.has_hint {
+  border-color: var(--accent);
+  color: var(--text);
+  animation: hint-pulse 1.4s ease-in-out infinite;
 }
 
-.hint-dot {
+.hint-badge {
   position: absolute;
-  top: 0.3rem;
-  right: 0.3rem;
-  width: 0.6rem;
-  height: 0.6rem;
-  border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 8px var(--green-glow);
-  animation: blink 1.6s ease-in-out infinite;
+  top: -4px;
+  right: -4px;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  padding: 0 0.28rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--surface-0);
+  font-family: var(--font-display, inherit);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--surface-0);
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.85);
+}
+.hint-num {
+  position: relative;
+  z-index: 1;
+  line-height: 1;
+}
+.hint-pulse {
+  position: absolute;
+  inset: -2px;
+  border-radius: var(--radius-sm);
+  background: rgba(var(--accent-rgb), 0.55);
+  animation: hint-ring 1.6s ease-out infinite;
+  z-index: 0;
 }
 
-@keyframes idle-pulse {
-  0%, 100% { box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.05), 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 18px rgba(var(--accent-rgb), 0.35); }
-  50%      { box-shadow: 0 0 0 6px rgba(var(--accent-rgb), 0.10), 0 10px 26px rgba(0, 0, 0, 0.65), 0 0 26px rgba(var(--accent-rgb), 0.55); }
+@keyframes hint-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.18), 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 22px rgba(var(--accent-rgb), 0.55); }
+  50%      { box-shadow: 0 0 0 8px rgba(var(--accent-rgb), 0.05), 0 10px 28px rgba(0, 0, 0, 0.7),  0 0 34px rgba(var(--accent-rgb), 0.85); }
 }
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.45; }
+@keyframes hint-ring {
+  0%   { transform: scale(0.85); opacity: 0.9; }
+  100% { transform: scale(2);    opacity: 0;   }
 }
 
 .panel-wrap.docked {
@@ -274,8 +286,9 @@ function onBackdropClick() {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fab { animation: none; }
-  .hint-dot { animation: none; }
+  .fab,
+  .fab.has_hint { animation: none; }
+  .hint-pulse { animation: none; }
 }
 
 .login-gate {
@@ -284,7 +297,7 @@ function onBackdropClick() {
   height: 100%;
   background: linear-gradient(180deg, var(--surface-1) 0%, var(--surface-0) 100%);
   border: 1px solid var(--border-strong);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-sm);
   color: var(--text);
   font-family: inherit;
   box-shadow:
@@ -306,7 +319,7 @@ function onBackdropClick() {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--accent);
-  border-radius: 0.3rem;
+  border-radius: var(--radius-sm);
   padding: 0.2rem 0.3rem;
   cursor: pointer;
   display: inline-flex;
@@ -346,7 +359,7 @@ function onBackdropClick() {
   background: rgba(var(--accent-rgb), 0.22);
   border: 1px solid var(--accent);
   color: var(--accent);
-  border-radius: 0.35rem;
+  border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: 0.85rem;
   letter-spacing: 0.5px;
@@ -390,7 +403,7 @@ function onBackdropClick() {
     0 0 0 1px rgba(var(--accent-rgb), 0.3),
     0 24px 72px rgba(0, 0, 0, 0.75),
     0 0 80px rgba(var(--accent-rgb), 0.18);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 @media (max-width: 640px) {

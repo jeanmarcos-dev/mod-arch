@@ -183,7 +183,7 @@ function decodeHtmlEntities(s: string): string {
 .avatar {
   width: 1.75rem;
   height: 1.75rem;
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -205,7 +205,7 @@ function decodeHtmlEntities(s: string): string {
 .bubble {
   background: var(--surface-overlay);
   border: 1px solid rgba(var(--accent-rgb), 0.25);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
   padding: 0.5rem 0.75rem;
   /* Falls back to 32ch if the parent panel does not set a width — keeps the
      bubble usable if the component is mounted outside TutorPanel. */
@@ -289,7 +289,7 @@ function decodeHtmlEntities(s: string): string {
   color: var(--accent);
   font-size: 0.7rem;
   padding: 0.15rem 0.55rem;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-family: inherit;
   display: inline-flex;
@@ -345,7 +345,7 @@ function decodeHtmlEntities(s: string): string {
   background: var(--surface-overlay);
   border-left: 2px solid rgba(var(--accent-rgb), 0.5);
   padding: 0.4rem 0.6rem;
-  border-radius: 0 0.3rem 0.3rem 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   font-size: 0.72rem;
   color: #e2e8f0;
   max-width: 100%;
@@ -392,7 +392,7 @@ function decodeHtmlEntities(s: string): string {
   align-items: center;
   gap: 0.2rem;
   padding: 0.05rem 0.4rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-sm);
   border: 1px solid currentColor;
 }
 .badge.cache { color: #93c5fd; }
@@ -402,7 +402,7 @@ function decodeHtmlEntities(s: string): string {
   background: rgba(196, 181, 253, 0.12);
   color: #c4b5fd;
   padding: 0 0.3rem;
-  border-radius: 0.2rem;
+  border-radius: var(--radius-sm);
   font-size: 0.72rem;
   font-family: var(--font-code);
 }
@@ -451,7 +451,7 @@ function decodeHtmlEntities(s: string): string {
   color: var(--accent);
   border: 1px solid rgba(var(--accent-rgb), 0.18);
   padding: 0.05rem 0.3rem;
-  border-radius: 0.2rem;
+  border-radius: var(--radius-sm);
   font-family: var(--font-code);
   font-size: 0.78rem;
 }
@@ -459,7 +459,7 @@ function decodeHtmlEntities(s: string): string {
   position: relative;
   margin: 0.5rem 0;
   border: 1px solid rgba(var(--accent-rgb), 0.25);
-  border-radius: 0.4rem;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   background: var(--surface-overlay-strong);
 }
@@ -485,7 +485,7 @@ function decodeHtmlEntities(s: string): string {
   font-family: inherit;
   font-size: 0.65rem;
   padding: 1px 6px;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   letter-spacing: 0.5px;
   text-transform: uppercase;

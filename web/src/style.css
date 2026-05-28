@@ -727,3 +727,71 @@ select option:checked {
     height: 4px;
   }
 }
+
+/* ─── SimBar action button micro-animations ───────────────────────────────
+   Subtle, CRT-friendly gestures triggered by user actions. Each keyframe
+   targets the inner <svg> only so the button chrome stays still and the icon
+   does the "work". Honors prefers-reduced-motion. */
+
+@keyframes run-loop {
+  0%   { transform: translateX(0);    opacity: 1; }
+  44%  { transform: translateX(8px);  opacity: 0; }
+  45%  { transform: translateX(-8px); opacity: 0; }
+  100% { transform: translateX(0);    opacity: 1; }
+}
+.sim-btn--anim-run.is-running svg {
+  animation: run-loop 2.2s linear infinite;
+}
+
+@keyframes load-drop {
+  0%   { transform: translateY(-6px); opacity: 0.4; }
+  60%  { transform: translateY(2px);  opacity: 1; }
+  100% { transform: translateY(0);    opacity: 1; }
+}
+.sim-btn--anim-load:active:not(:disabled) svg {
+  animation: load-drop 360ms var(--ease-out-soft);
+}
+
+@keyframes step-tick {
+  0%   { transform: translateX(0); }
+  50%  { transform: translateX(4px); }
+  100% { transform: translateX(0); }
+}
+.sim-btn--anim-step:active:not(:disabled) svg {
+  animation: step-tick 220ms var(--ease-out-soft);
+}
+
+@keyframes reset-spin {
+  from { transform: rotate(0); }
+  to   { transform: rotate(-360deg); }
+}
+.sim-btn--anim-reset:active:not(:disabled) svg {
+  animation: reset-spin 420ms var(--ease-out-soft);
+}
+
+@keyframes clear-pulse {
+  0%   { transform: scale(1);    filter: brightness(1); }
+  40%  { transform: scale(1.18); filter: brightness(1.4); }
+  100% { transform: scale(1);    filter: brightness(1); }
+}
+.sim-btn--anim-clear:active:not(:disabled) svg {
+  animation: clear-pulse 280ms var(--ease-out-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sim-btn--anim-run.is-running svg,
+  .sim-btn--anim-load:active svg,
+  .sim-btn--anim-step:active svg,
+  .sim-btn--anim-reset:active svg,
+  .sim-btn--anim-clear:active svg {
+    animation: none;
+  }
+}
+
+/* Slow vertical bounce — shared idle signature for the tutor FAB and the
+   tutor empty-state avatar. */
+@keyframes tutor-bounce {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-5px); }
+}
+

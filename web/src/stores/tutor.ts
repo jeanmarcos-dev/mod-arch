@@ -4,22 +4,65 @@ import { computed, ref, watch } from 'vue';
 export type TutorDisplayMode = 'docked' | 'expanded';
 
 const STORAGE_KEY = 'modos-cpu:tutor:v1';
+// Cap how many messages we keep in localStorage. Each TutorMessage is small
+// (~a few hundred bytes), so 50 entries comfortably fit a long classroom
+// session without pushing the per-origin quota.
+const MESSAGES_CAP = 50;
 
 interface PersistedTutorState {
   displayMode: TutorDisplayMode;
+  messages: TutorMessage[];
 }
 
 function loadPersisted(): PersistedTutorState {
-  if (typeof window === 'undefined') return { displayMode: 'docked' };
+  if (typeof window === 'undefined') return { displayMode: 'docked', messages: [] };
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { displayMode: 'docked' };
+    if (!raw) return { displayMode: 'docked', messages: [] };
     const parsed = JSON.parse(raw) as Partial<PersistedTutorState>;
-    const m = parsed.displayMode === 'expanded' ? 'expanded' : 'docked';
-    return { displayMode: m };
+    const displayMode = parsed.displayMode === 'expanded' ? 'expanded' : 'docked';
+    const messages = Array.isArray(parsed.messages) ? hydrateMessages(parsed.messages) : [];
+    return { displayMode, messages };
   } catch {
-    return { displayMode: 'docked' };
+    return { displayMode: 'docked', messages: [] };
   }
+}
+
+// hydrateMessages restores the persisted list and finalizes any message that
+// was still mid-flight when the page closed. A spinner stuck forever after a
+// reload is worse than telling the student the request was interrupted.
+function hydrateMessages(raw: unknown[]): TutorMessage[] {
+  const out: TutorMessage[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const m = item as Partial<TutorMessage>;
+    if (!m.id || (m.role !== 'student' && m.role !== 'tutor')) continue;
+    const message: TutorMessage = {
+      id: m.id,
+      role: m.role,
+      text: typeof m.text === 'string' ? m.text : '',
+      citations: m.citations,
+      latencyMs: m.latencyMs,
+      cacheHit: m.cacheHit,
+      degraded: m.degraded,
+      error: m.error,
+      retryAfterSec: m.retryAfterSec,
+      toolsUsed: m.toolsUsed,
+      createdAt: typeof m.createdAt === 'number' ? m.createdAt : Date.now(),
+    };
+    if (m.pending || m.toolInFlight) {
+      message.pending = false;
+      message.toolInFlight = undefined;
+      message.queueWaitSeconds = undefined;
+      if (!message.error) {
+        message.error = 'conexión interrumpida';
+      }
+    }
+    out.push(message);
+  }
+  // Trim from the head if the persisted blob exceeded the cap (e.g. the cap
+  // was lowered between versions).
+  return out.length > MESSAGES_CAP ? out.slice(out.length - MESSAGES_CAP) : out;
 }
 
 // One entry in the conversation. role='student' is the user, role='tutor' is
@@ -86,29 +129,52 @@ export interface IncomingAnswer {
  * does not need to import this store.
  */
 export const useTutorStore = defineStore('tutor', () => {
-  const messages = ref<TutorMessage[]>([]);
+  const persisted = loadPersisted();
+  const messages = ref<TutorMessage[]>(persisted.messages);
   const open = ref(false);
   const sending = ref(false);
-  const displayMode = ref<TutorDisplayMode>(loadPersisted().displayMode);
+  const displayMode = ref<TutorDisplayMode>(persisted.displayMode);
+  const unreadCount = ref(0);
 
   // Tracks request_id → message index so out-of-order answers still land in
   // the right slot. Cleared when the answer arrives.
   const pendingByRequest = new Map<string, number>();
+  // Request ids already counted toward unreadCount, so streaming + final
+  // answer for the same turn do not double-count.
+  const countedAsUnread = new Set<string>();
 
-  watch(displayMode, (m) => {
+  function bumpUnreadIfClosed(requestId: string) {
+    if (open.value) return;
+    if (countedAsUnread.has(requestId)) return;
+    countedAsUnread.add(requestId);
+    unreadCount.value += 1;
+  }
+
+  function persist() {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ displayMode: m }));
+      const trimmed =
+        messages.value.length > MESSAGES_CAP
+          ? messages.value.slice(messages.value.length - MESSAGES_CAP)
+          : messages.value;
+      const payload: PersistedTutorState = { displayMode: displayMode.value, messages: trimmed };
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } catch {
       /* private mode / quota — keep state in memory only */
     }
-  });
+  }
+
+  // One deep watcher persists both displayMode and the message list. Volume
+  // is tiny (a few writes per turn) so no debounce is needed.
+  watch([displayMode, messages], persist, { deep: true });
 
   function toggleOpen() {
     open.value = !open.value;
+    if (open.value) unreadCount.value = 0;
   }
 
   function setOpen(v: boolean) {
     open.value = v;
+    if (v) unreadCount.value = 0;
   }
 
   function setDisplayMode(m: TutorDisplayMode) {
@@ -123,6 +189,7 @@ export const useTutorStore = defineStore('tutor', () => {
     messages.value = [];
     pendingByRequest.clear();
     sending.value = false;
+    unreadCount.value = 0;
   }
 
   /** Adds the student's question and a placeholder for the pending answer. */
@@ -176,6 +243,7 @@ export const useTutorStore = defineStore('tutor', () => {
     msg.degraded = ans.degraded;
     msg.error = ans.error;
     msg.retryAfterSec = ans.retry_after_sec;
+    if (!ans.error) bumpUnreadIfClosed(ans.request_id);
   }
 
   /** Updates the pending slot with the tool the agent just invoked, or
@@ -202,6 +270,7 @@ export const useTutorStore = defineStore('tutor', () => {
           // First token closes the "consultando…" state visually.
           msg.toolInFlight = undefined;
           msg.queueWaitSeconds = undefined;
+          bumpUnreadIfClosed(p.request_id);
         }
         break;
       case 'queued':
@@ -235,6 +304,7 @@ export const useTutorStore = defineStore('tutor', () => {
     sending,
     displayMode,
     lastMessage,
+    unreadCount,
     toggleOpen,
     setOpen,
     setDisplayMode,

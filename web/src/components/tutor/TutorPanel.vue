@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { BotMessageSquare, Send, Trash2, Minus, Maximize2, Minimize2 } from '@lucide/vue';
 
 import TutorMessage from './TutorMessage.vue';
+import TutorBotIcon from './TutorBotIcon.vue';
 import { useTutor } from '../../composables/useTutor';
 import { useTutorStore, type TutorCitation } from '../../stores/tutor';
 
@@ -49,7 +50,7 @@ onMounted(scrollToBottom);
     <header class="head">
       <div class="title">
         <div class="title-icon">
-          <BotMessageSquare :size="18" :stroke-width="1.8" />
+          <TutorBotIcon :size="18" :stroke-width="1.8" />
           <span class="status-led" aria-hidden="true" />
         </div>
         <div class="title-text">
@@ -84,7 +85,7 @@ onMounted(scrollToBottom);
 
     <div v-if="tutor.messages.length === 0" class="empty">
       <div class="empty-avatar">
-        <BotMessageSquare :size="28" :stroke-width="1.4" />
+        <TutorBotIcon :size="28" :stroke-width="1.4" />
       </div>
       <p class="empty-hello">¿En qué puedo ayudarle?</p>
       <p class="empty-sub">Pregunte sobre lo que ve en el simulador.</p>
@@ -110,7 +111,7 @@ onMounted(scrollToBottom);
         name="tutor_question"
         aria-label="Pregunta al tutor"
         placeholder="Escriba su pregunta…"
-        rows="2"
+        rows="1"
         :disabled="tutor.sending"
         @keydown.enter.exact.prevent="submit"
       />
@@ -141,7 +142,7 @@ onMounted(scrollToBottom);
      whatever is underneath. */
   background: var(--surface-1);
   border: 1px solid rgba(var(--accent-rgb), 0.5);
-  border-radius: 0.75rem;
+  border-radius: var(--radius-sm);
   color: var(--text);
   font-family: inherit;
   box-shadow:
@@ -172,7 +173,7 @@ onMounted(scrollToBottom);
   position: relative;
   width: 2rem;
   height: 2rem;
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -187,7 +188,7 @@ onMounted(scrollToBottom);
   bottom: -2px;
   width: 0.55rem;
   height: 0.55rem;
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
   background: var(--green);
   border: 1.5px solid var(--surface-0);
   box-shadow: 0 0 6px rgba(127, 255, 170, 0.8);
@@ -219,7 +220,7 @@ onMounted(scrollToBottom);
   border: 1px solid transparent;
   color: var(--text-muted);
   padding: 0.4rem;
-  border-radius: 0.3rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -244,9 +245,10 @@ onMounted(scrollToBottom);
   gap: 0.4rem;
 }
 .empty-avatar {
+  position: relative;
   width: 3.5rem;
   height: 3.5rem;
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -254,7 +256,19 @@ onMounted(scrollToBottom);
   background: radial-gradient(circle at 30% 30%, rgba(var(--accent-rgb), 0.35), rgba(var(--accent-rgb), 0.05) 70%);
   border: 1px solid rgba(var(--accent-rgb), 0.5);
   color: var(--accent);
-  box-shadow: 0 0 24px rgba(var(--accent-rgb), 0.25);
+  box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.30);
+  animation: avatar-enter 480ms cubic-bezier(0.2, 0.8, 0.2, 1) both,
+             tutor-bounce 4.8s ease-in-out 480ms infinite;
+}
+
+@keyframes avatar-enter {
+  0%   { transform: translateY(8px) scale(0.7); opacity: 0; }
+  60%  { transform: translateY(-2px) scale(1.06); opacity: 1; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .empty-avatar { animation: none; }
 }
 .empty-hello {
   margin: 0;
@@ -283,7 +297,7 @@ onMounted(scrollToBottom);
   border: 1px solid rgba(var(--accent-rgb), 0.25);
   color: var(--accent);
   padding: 0.5rem 0.7rem;
-  border-radius: 0.45rem;
+  border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: 0.78rem;
   cursor: pointer;
@@ -323,13 +337,21 @@ onMounted(scrollToBottom);
   background: var(--surface-overlay-strong);
   border: 1px solid rgba(var(--accent-rgb), 0.35);
   color: var(--text);
-  padding: 0.55rem 0.7rem;
-  border-radius: 0.4rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: 0.85rem;
-  line-height: 1.4;
+  line-height: 1.35;
+  /* field-sizing lets the textarea grow with its content (1 → 3 rows).
+     min-height stays at one line so the initial state has no scrollbar;
+     max-height caps growth at three lines (after which the textarea
+     scrolls internally). */
+  field-sizing: content;
+  min-height: calc(1em * 1.35 + 0.9rem);
+  max-height: calc(3em * 1.35 + 0.9rem);
   resize: none;
   outline: none;
+  overflow-y: auto;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 .composer textarea::placeholder {
@@ -348,7 +370,7 @@ onMounted(scrollToBottom);
   border: 1px solid var(--accent);
   color: var(--text);
   padding: 0 0.85rem;
-  border-radius: 0.4rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
