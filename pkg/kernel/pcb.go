@@ -63,10 +63,68 @@ type PCB struct {
 	// Core is the ID of the core that currently owns this PCB (RUN), or -1
 	// when the process is READY/BLOCKED/ZOMBIE and no core holds it.
 	Core int
+
+	// ParentPID is the PID of the process that spawned this one through
+	// sys_fork or sys_vfork. Zero means "no parent" (top-level processes
+	// loaded directly through AddProcess).
+	ParentPID int
+
+	// Children is the list of child PIDs spawned by this process and not yet
+	// reaped via sys_waitpid (live + zombies). Re-parenting on exit walks
+	// this list to hand orphans over to init.
+	Children []int
+
+	// ExitCode is the value passed to sys_exit. Filled on exit, read by
+	// sys_waitpid when the parent reaps this PCB.
+	ExitCode uint32
+
+	// Waiter is the child PID this process is waiting for in sys_waitpid:
+	//
+	//	-1  → any child
+	//	>0  → a specific PID
+	//	 0  → not currently waiting
+	//
+	// Used by sys_exit to decide whether to wake this PCB when a child of
+	// it becomes zombie.
+	Waiter int
+
+	// VforkParent records that this PCB was created via sys_vfork and shares
+	// memory with its parent. While the child is alive the parent is parked
+	// in BLOCKED with BlockedOn="vfork"; the child's sys_exit wakes it.
+	// Zero means "not a vfork child".
+	VforkParent int
+
+	// FDTable maps a file-descriptor index to the open object it refers
+	// to. Indices 0/1/2 are dispatched directly by number (stdin/stdout/
+	// stderr) for backward compat with the existing sys_read/sys_write
+	// fast paths; only indices >= 3 are populated, pointing at pipes
+	// allocated through sys_pipe.
+	FDTable []FD
+
+	// PendingReaps queues zombie child PIDs that this PCB must collect
+	// before it can resume user code. notifyParentOfExit appends to this
+	// list and wakes the parent to READY; the scheduler drains the list
+	// when the parent is next dispatched, modeling the gap between a
+	// child's death and the parent's wait() return. For init this queue
+	// can grow when several orphans die before init is scheduled.
+	PendingReaps []int
+}
+
+// FD describes one entry of the per-process file-descriptor table.
+//
+//   - Used  → false means "free slot, available for allocation".
+//   - Kind  → "pipe-read" or "pipe-write" for pipe fds; reserved strings
+//     for future kinds. stdin/stdout/stderr are not entered here.
+//   - PipeID → 1-indexed PipeID for pipe fds, zero otherwise.
+type FD struct {
+	Used   bool
+	Kind   string
+	PipeID int
 }
 
 // Snapshot returns a JSON-friendly representation of the PCB for the frontend.
 func (p *PCB) Snapshot() map[string]any {
+	children := append([]int(nil), p.Children...)
 	return map[string]any{
 		"pid":        p.PID,
 		"name":       p.Name,
@@ -81,5 +139,9 @@ func (p *PCB) Snapshot() map[string]any {
 		"code_base":      p.CodeBase,
 		"code_size":      p.CodeSize,
 		"stack_top":      p.StackTop,
+		"parent_pid":     p.ParentPID,
+		"children":       children,
+		"exit_code":      p.ExitCode,
+		"vfork_parent":   p.VforkParent,
 	}
 }

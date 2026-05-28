@@ -18,6 +18,12 @@ type Demo struct {
 	// preserving single-core behavior for legacy demos. Values are clamped to
 	// [1, kernel.MaxCores] by sim.SetNumCores.
 	Cores int
+
+	// WithInit makes the simulator spawn PID 1 (init) before loading the
+	// demo's own procs. The demo procs then appear under init in the
+	// process tree, which matches the Unix convention and gives orphan
+	// zombies a permanent home after their parent dies.
+	WithInit bool
 }
 
 // Proc is a single binary that the kernel loads as a process.
@@ -1451,7 +1457,232 @@ int main(void) {
 				},
 			},
 		},
+
+		{
+			Name:        "demo_fork",
+			Category:    "ipc",
+			WithInit:    true,
+			Description: "El padre crea un hijo con fork(): el hijo recibe EAX=0 y el padre el PID del hijo. El padre espera con waitpid() hasta que el hijo termine, y cosecha su exit_code. Se carga junto a init (PID 1), que ancla el árbol.",
+			Procs: []Proc{{
+				Name: "fork_basic",
+				Source: `// fork() básico con espera del padre.
+// El kernel devuelve 0 en EAX al hijo y el PID del hijo al padre.
+int main(void) {
+    int pid = fork();             // sys_fork
+    if (pid == 0) {
+        return 42;                // rama del hijo: exit(42)
+    }
+    int reaped = waitpid(-1, 0, 0);  // padre se duerme hasta cosechar
+    return reaped;                // exit code = PID que cosechó
+}
+`,
+				Bytes: []byte{
+					0xB8, 0x02, 0x00, 0x00, 0x00, // 0x00: mov eax, 2  (SysFork)
+					0xCD, 0x80, // 0x05: int 0x80
+					0x81, 0xF8, 0x00, 0x00, 0x00, 0x00, // 0x07: cmp eax, 0
+					0x74, 0x1F, // 0x0D: jz +31 -> child at 0x2E
+					0xB8, 0x07, 0x00, 0x00, 0x00, // 0x0F: mov eax, 7  (SysWaitpid)
+					0xBB, 0xFF, 0xFF, 0xFF, 0xFF, // 0x14: mov ebx, -1
+					0xB9, 0x00, 0x00, 0x00, 0x00, // 0x19: mov ecx, 0
+					0xBA, 0x00, 0x00, 0x00, 0x00, // 0x1E: mov edx, 0
+					0xCD, 0x80, // 0x23: int 0x80
+					0x89, 0xC3, // 0x25: mov ebx, eax (exit code = reaped pid)
+					0xB8, 0x01, 0x00, 0x00, 0x00, // 0x27: mov eax, 1  (SysExit)
+					0xCD, 0x80, // 0x2C: int 0x80
+					0xBB, 0x2A, 0x00, 0x00, 0x00, // 0x2E: mov ebx, 42 (child exit code)
+					0xB8, 0x01, 0x00, 0x00, 0x00, // 0x33: mov eax, 1  (SysExit)
+					0xCD, 0x80, // 0x38: int 0x80
+				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "MOV EAX, 2       ; SysFork", CLine: 4},
+					{Offset: 0x05, Mnemonic: "INT 0x80", CLine: 4},
+					{Offset: 0x07, Mnemonic: "CMP EAX, 0", CLine: 5},
+					{Offset: 0x0D, Mnemonic: "JZ child", CLine: 5},
+					{Offset: 0x0F, Mnemonic: "MOV EAX, 7       ; SysWaitpid", CLine: 8},
+					{Offset: 0x14, Mnemonic: "MOV EBX, -1", CLine: 8},
+					{Offset: 0x19, Mnemonic: "MOV ECX, 0", CLine: 8},
+					{Offset: 0x1E, Mnemonic: "MOV EDX, 0", CLine: 8},
+					{Offset: 0x23, Mnemonic: "INT 0x80", CLine: 8},
+					{Offset: 0x25, Mnemonic: "MOV EBX, EAX     ; exit = reaped", CLine: 9},
+					{Offset: 0x27, Mnemonic: "MOV EAX, 1       ; SysExit", CLine: 9},
+					{Offset: 0x2C, Mnemonic: "INT 0x80", CLine: 9},
+					{Offset: 0x2E, Mnemonic: "MOV EBX, 42      ; child exit", CLine: 6},
+					{Offset: 0x33, Mnemonic: "MOV EAX, 1       ; SysExit", CLine: 6},
+					{Offset: 0x38, Mnemonic: "INT 0x80", CLine: 6},
+				},
+			}},
+		},
+
+		{
+			Name:        "demo_pipe",
+			Category:    "ipc",
+			WithInit:    true,
+			Description: "El padre crea un pipe, escribe \"HOLA\", forkea un hijo, y espera. El hijo lee los 4 bytes del pipe y los manda a stdout. La consola muestra HOLA aunque ningún proceso lo haya tipeado en su .data — el dato cruzó un canal IPC.",
+			Procs: []Proc{{
+				Name: "pipe_basic",
+				Source: `// Pipe anónimo entre padre e hijo:
+//   1) sys_pipe → fdR/fdW.
+//   2) padre escribe "HOLA" en fdW (los bytes quedan en el buffer del pipe).
+//   3) fork. El hijo hereda los fds.
+//   4) hijo lee 4 bytes de fdR y los manda a stdout.
+//   5) padre llama waitpid y termina.
+int main(void) {
+    int fds[2];
+    pipe(fds);
+    write(fds[1], "HOLA", 4);     // antes del fork — sin race
+    int pid = fork();
+    if (pid == 0) {
+        char buf[4];
+        read(fds[0], buf, 4);
+        write(1, buf, 4);          // echo a stdout
+        return 0;
+    }
+    int reaped = waitpid(-1, 0, 0);
+    return reaped;
+}
+`,
+				Bytes: []byte{
+					0xB8, 0x2A, 0x00, 0x00, 0x00, // 0x00: mov eax, 42 (SysPipe)
+					0xBB, 0x00, 0x00, 0x31, 0x00, // 0x05: mov ebx, 0x310000
+					0xCD, 0x80, // 0x0A: int 0x80
+					0xB8, 0x48, 0x4F, 0x4C, 0x41, // 0x0C: mov eax, 0x414C4F48 ("HOLA")
+					0xA3, 0x10, 0x00, 0x31, 0x00, // 0x11: mov [0x310010], eax
+					0xA1, 0x04, 0x00, 0x31, 0x00, // 0x16: mov eax, [0x350004] (fdW)
+					0x89, 0xC3, // 0x1B: mov ebx, eax
+					0xB8, 0x04, 0x00, 0x00, 0x00, // 0x1D: mov eax, 4 (SysWrite)
+					0xB9, 0x10, 0x00, 0x31, 0x00, // 0x22: mov ecx, 0x310010
+					0xBA, 0x04, 0x00, 0x00, 0x00, // 0x27: mov edx, 4
+					0xCD, 0x80, // 0x2C: int 0x80
+					0xB8, 0x02, 0x00, 0x00, 0x00, // 0x2E: mov eax, 2 (SysFork)
+					0xCD, 0x80, // 0x33: int 0x80
+					0x81, 0xF8, 0x00, 0x00, 0x00, 0x00, // 0x35: cmp eax, 0
+					0x74, 0x1F, // 0x3B: jz +31 -> child at 0x5C
+					// PARENT path: waitpid + exit
+					0xB8, 0x07, 0x00, 0x00, 0x00, // 0x3D: mov eax, 7 (SysWaitpid)
+					0xBB, 0xFF, 0xFF, 0xFF, 0xFF, // 0x42: mov ebx, -1
+					0xB9, 0x00, 0x00, 0x00, 0x00, // 0x47: mov ecx, 0
+					0xBA, 0x00, 0x00, 0x00, 0x00, // 0x4C: mov edx, 0
+					0xCD, 0x80, // 0x51: int 0x80
+					0x89, 0xC3, // 0x53: mov ebx, eax (exit = reaped)
+					0xB8, 0x01, 0x00, 0x00, 0x00, // 0x55: mov eax, 1 (SysExit)
+					0xCD, 0x80, // 0x5A: int 0x80
+					// CHILD path at 0x5C
+					0xA1, 0x00, 0x00, 0x31, 0x00, // 0x5C: mov eax, [0x310000] (fdR)
+					0x89, 0xC3, // 0x61: mov ebx, eax
+					0xB8, 0x03, 0x00, 0x00, 0x00, // 0x63: mov eax, 3 (SysRead)
+					0xB9, 0x20, 0x00, 0x31, 0x00, // 0x68: mov ecx, 0x310020
+					0xBA, 0x04, 0x00, 0x00, 0x00, // 0x6D: mov edx, 4
+					0xCD, 0x80, // 0x72: int 0x80
+					// echo to stdout
+					0xBB, 0x01, 0x00, 0x00, 0x00, // 0x74: mov ebx, 1
+					0xB8, 0x04, 0x00, 0x00, 0x00, // 0x79: mov eax, 4 (SysWrite)
+					0xB9, 0x20, 0x00, 0x31, 0x00, // 0x7E: mov ecx, 0x310020
+					0xBA, 0x04, 0x00, 0x00, 0x00, // 0x83: mov edx, 4
+					0xCD, 0x80, // 0x88: int 0x80
+					0xBB, 0x00, 0x00, 0x00, 0x00, // 0x8A: mov ebx, 0
+					0xB8, 0x01, 0x00, 0x00, 0x00, // 0x8F: mov eax, 1 (SysExit)
+					0xCD, 0x80, // 0x94: int 0x80
+				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "MOV EAX, 42      ; SysPipe", CLine: 8},
+					{Offset: 0x05, Mnemonic: "MOV EBX, 0x310000", CLine: 8},
+					{Offset: 0x0A, Mnemonic: "INT 0x80", CLine: 8},
+					{Offset: 0x0C, Mnemonic: "MOV EAX, 0x414C4F48 ; \"HOLA\"", CLine: 9},
+					{Offset: 0x11, Mnemonic: "MOV [0x310010], EAX", CLine: 9},
+					{Offset: 0x16, Mnemonic: "MOV EAX, [0x350004] ; fdW", CLine: 9},
+					{Offset: 0x1B, Mnemonic: "MOV EBX, EAX", CLine: 9},
+					{Offset: 0x1D, Mnemonic: "MOV EAX, 4       ; SysWrite", CLine: 9},
+					{Offset: 0x22, Mnemonic: "MOV ECX, 0x310010", CLine: 9},
+					{Offset: 0x27, Mnemonic: "MOV EDX, 4", CLine: 9},
+					{Offset: 0x2C, Mnemonic: "INT 0x80", CLine: 9},
+					{Offset: 0x2E, Mnemonic: "MOV EAX, 2       ; SysFork", CLine: 10},
+					{Offset: 0x33, Mnemonic: "INT 0x80", CLine: 10},
+					{Offset: 0x35, Mnemonic: "CMP EAX, 0", CLine: 11},
+					{Offset: 0x3B, Mnemonic: "JZ child", CLine: 11},
+					{Offset: 0x3D, Mnemonic: "MOV EAX, 7       ; SysWaitpid", CLine: 17},
+					{Offset: 0x42, Mnemonic: "MOV EBX, -1", CLine: 17},
+					{Offset: 0x51, Mnemonic: "INT 0x80", CLine: 17},
+					{Offset: 0x53, Mnemonic: "MOV EBX, EAX     ; exit = reaped", CLine: 18},
+					{Offset: 0x55, Mnemonic: "MOV EAX, 1       ; SysExit", CLine: 18},
+					{Offset: 0x5A, Mnemonic: "INT 0x80", CLine: 18},
+					{Offset: 0x5C, Mnemonic: "MOV EAX, [0x310000] ; fdR", CLine: 13},
+					{Offset: 0x63, Mnemonic: "MOV EAX, 3       ; SysRead", CLine: 13},
+					{Offset: 0x72, Mnemonic: "INT 0x80", CLine: 13},
+					{Offset: 0x74, Mnemonic: "MOV EBX, 1       ; stdout", CLine: 14},
+					{Offset: 0x79, Mnemonic: "MOV EAX, 4       ; SysWrite", CLine: 14},
+					{Offset: 0x88, Mnemonic: "INT 0x80", CLine: 14},
+					{Offset: 0x8A, Mnemonic: "MOV EBX, 0", CLine: 15},
+					{Offset: 0x8F, Mnemonic: "MOV EAX, 1       ; SysExit", CLine: 15},
+					{Offset: 0x94, Mnemonic: "INT 0x80", CLine: 15},
+				},
+			}},
+		},
+
+		{
+			Name:        "demo_vfork",
+			Category:    "ipc",
+			WithInit:    true,
+			Description: "vfork() comparte la memoria del padre con el hijo y deja al padre BLOCKED hasta que el hijo termina. El hijo escribe 0xDEADBEEF en una dirección y muere; el padre, al despertar, lee esa misma dirección y ve el valor cambiado.",
+			Procs: []Proc{{
+				Name: "vfork_shared_mem",
+				Source: `// vfork(): el hijo comparte el espacio de direcciones del padre.
+// Lo que escribe el hijo es visible para el padre cuando despierta.
+// (Linux real combina vfork con exec; aquí mostramos solo el efecto
+// pedagógico de la memoria compartida.)
+int main(void) {
+    int pid = vfork();
+    if (pid == 0) {
+        *(int *)0x310000 = 0xDEADBEEF;
+        return 0;
+    }
+    int v = *(int *)0x310000;
+    return v;                     // exit code = lo que escribió el hijo
+}
+`,
+				Bytes: []byte{
+					0xB8, 0xBE, 0x00, 0x00, 0x00, // 0x00: mov eax, 190 (SysVfork)
+					0xCD, 0x80, // 0x05: int 0x80
+					0x81, 0xF8, 0x00, 0x00, 0x00, 0x00, // 0x07: cmp eax, 0
+					0x74, 0x0E, // 0x0D: jz +14 -> child at 0x1D
+					0xA1, 0x00, 0x00, 0x31, 0x00, // 0x0F: mov eax, [0x310000]
+					0x89, 0xC3, // 0x14: mov ebx, eax
+					0xB8, 0x01, 0x00, 0x00, 0x00, // 0x16: mov eax, 1 (SysExit)
+					0xCD, 0x80, // 0x1B: int 0x80
+					0xB8, 0xEF, 0xBE, 0xAD, 0xDE, // 0x1D: mov eax, 0xDEADBEEF
+					0xA3, 0x00, 0x00, 0x31, 0x00, // 0x22: mov [0x310000], eax
+					0xBB, 0x00, 0x00, 0x00, 0x00, // 0x27: mov ebx, 0 (child exit)
+					0xB8, 0x01, 0x00, 0x00, 0x00, // 0x2C: mov eax, 1
+					0xCD, 0x80, // 0x31: int 0x80
+				},
+				SourceMap: []SourceLine{
+					{Offset: 0x00, Mnemonic: "MOV EAX, 190     ; SysVfork", CLine: 6},
+					{Offset: 0x05, Mnemonic: "INT 0x80", CLine: 6},
+					{Offset: 0x07, Mnemonic: "CMP EAX, 0", CLine: 7},
+					{Offset: 0x0D, Mnemonic: "JZ child", CLine: 7},
+					{Offset: 0x0F, Mnemonic: "MOV EAX, [0x310000]", CLine: 11},
+					{Offset: 0x14, Mnemonic: "MOV EBX, EAX     ; exit = valor leído", CLine: 12},
+					{Offset: 0x16, Mnemonic: "MOV EAX, 1       ; SysExit", CLine: 12},
+					{Offset: 0x1B, Mnemonic: "INT 0x80", CLine: 12},
+					{Offset: 0x1D, Mnemonic: "MOV EAX, 0xDEADBEEF", CLine: 8},
+					{Offset: 0x22, Mnemonic: "MOV [0x310000], EAX  ; shared write", CLine: 8},
+					{Offset: 0x27, Mnemonic: "MOV EBX, 0       ; child exit", CLine: 9},
+					{Offset: 0x2C, Mnemonic: "MOV EAX, 1       ; SysExit", CLine: 9},
+					{Offset: 0x31, Mnemonic: "INT 0x80", CLine: 9},
+				},
+			}},
+		},
 	}
+}
+
+// DemoNames returns the stable identifier of every demo, in the same order
+// as Demos(). Useful for whitelisting input that references a demo by name.
+func DemoNames() []string {
+	all := Demos()
+	out := make([]string, len(all))
+	for i, d := range all {
+		out[i] = d.Name
+	}
+	return out
 }
 
 // philoBytes emits a hand-encoded philosopher loop. Each philo locks its first

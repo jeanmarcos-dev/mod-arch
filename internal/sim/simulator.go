@@ -27,6 +27,7 @@ type Demo struct {
 	Description string `json:"description"`
 	Category    string `json:"category,omitempty"`
 	Cores       int    `json:"cores,omitempty"`
+	WithInit    bool   `json:"with_init,omitempty"`
 	Procs       []Proc `json:"-"`
 }
 
@@ -164,6 +165,14 @@ func (s *Simulator) LoadProgram(name string) error {
 	}
 	s.mu.Lock()
 	s.kernel.Reset()
+	if demo.WithInit {
+		// Spawn PID 1 (init) before the demo's own procs so the tree has
+		// a permanent root and orphan zombies have somewhere to land.
+		if _, err := s.kernel.SpawnInit(); err != nil {
+			s.mu.Unlock()
+			return err
+		}
+	}
 	pids := make([]int, 0, len(demo.Procs))
 	sources := make(map[int]string)
 	sourceMaps := make(map[int][]SourceLine)
@@ -172,6 +181,9 @@ func (s *Simulator) LoadProgram(name string) error {
 		if err != nil {
 			s.mu.Unlock()
 			return err
+		}
+		if demo.WithInit {
+			s.kernel.AdoptUnderInit(pid)
 		}
 		pids = append(pids, pid)
 		sources[pid] = demo.Procs[i].Source

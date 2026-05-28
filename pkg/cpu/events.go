@@ -249,6 +249,77 @@ type EventMutexOp struct {
 // Tag returns the event tag.
 func (EventMutexOp) Tag() string { return "mutex_op" }
 
+// EventFork records the creation of a new process via sys_fork or sys_vfork.
+// IsVfork distinguishes the two flavours: vfork shares the parent's memory
+// and blocks the parent until the child exits, whereas fork gives the child
+// its own copy of the parent's address space.
+type EventFork struct {
+	ParentPID int  `json:"parent_pid"`
+	ChildPID  int  `json:"child_pid"`
+	IsVfork   bool `json:"is_vfork"`
+}
+
+// Tag returns the event tag.
+func (EventFork) Tag() string { return "fork" }
+
+// EventWaitOp narrates the sys_waitpid lifecycle.
+//
+//   - Op "call"  — parent invoked waitpid and blocked (no zombie ready).
+//   - Op "reap"  — a zombie child was harvested. ChildPID identifies it and
+//     ExitCode carries the value returned to sys_waitpid.
+type EventWaitOp struct {
+	PID      int    `json:"pid"`
+	ChildPID int    `json:"child_pid"`
+	Op       string `json:"op"`
+	ExitCode uint32 `json:"exit_code,omitempty"`
+}
+
+// Tag returns the event tag.
+func (EventWaitOp) Tag() string { return "wait_op" }
+
+// EventReparent is emitted when a process dies leaving children behind: the
+// orphans are transferred to init (PID 1) so they are not lost. The frontend
+// uses it to slide the affected nodes under the new parent in the process
+// tree without rebuilding the whole panel.
+type EventReparent struct {
+	PID       int `json:"pid"`
+	OldParent int `json:"old_parent"`
+	NewParent int `json:"new_parent"`
+}
+
+// Tag returns the event tag.
+func (EventReparent) Tag() string { return "reparent" }
+
+// EventPipeCreate marks the birth of a pipe or FIFO. IsFifo distinguishes
+// the two: anonymous pipes are paired with their creator alone, FIFOs are
+// registered by Name in a tiny VFS so unrelated processes can open them.
+type EventPipeCreate struct {
+	PipeID    int    `json:"pipe_id"`
+	OwnerPID  int    `json:"owner_pid"`
+	FdR       uint32 `json:"fd_r"`
+	FdW       uint32 `json:"fd_w"`
+	IsFifo    bool   `json:"is_fifo"`
+	Name      string `json:"name,omitempty"`
+}
+
+// Tag returns the event tag.
+func (EventPipeCreate) Tag() string { return "pipe_create" }
+
+// EventPipeOp narrates a read or write through a pipe. BufLevel and BufCap
+// describe the buffer fill state after the op, so the IPC panel can render
+// the buffer bar without re-querying the kernel.
+type EventPipeOp struct {
+	PipeID   int    `json:"pipe_id"`
+	PID      int    `json:"pid"`
+	Op       string `json:"op"` // "read" | "write"
+	Bytes    []byte `json:"bytes,omitempty"`
+	BufLevel int    `json:"buf_level"`
+	BufCap   int    `json:"buf_cap"`
+}
+
+// Tag returns the event tag.
+func (EventPipeOp) Tag() string { return "pipe_op" }
+
 // EventSemOp summarizes every action on a kernel semaphore. Op values:
 //
 //   - "create"          — sem_create returned a new ID.

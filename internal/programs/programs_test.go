@@ -11,12 +11,23 @@ import (
 const sharedCounterAddr = 0x3FFFE0
 
 // loadDemo wires a Demo's procs into a fresh single-core kernel and triggers
-// the boot dispatch the simulator would normally run on RUN/STEP.
+// the boot dispatch the simulator would normally run on RUN/STEP. If the
+// demo declares WithInit, PID 1 (init) is spawned first and every loaded
+// proc is parented to it — same wiring sim.LoadDemo applies in production.
 func loadDemo(t *testing.T, k *kernel.Kernel, d Demo) {
 	t.Helper()
+	if d.WithInit {
+		if _, err := k.SpawnInit(); err != nil {
+			t.Fatalf("SpawnInit: %v", err)
+		}
+	}
 	for _, p := range d.Procs {
-		if _, err := k.AddProcess(p.Name, p.Bytes); err != nil {
+		pid, err := k.AddProcess(p.Name, p.Bytes)
+		if err != nil {
 			t.Fatalf("AddProcess %s: %v", p.Name, err)
+		}
+		if d.WithInit {
+			k.AdoptUnderInit(pid)
 		}
 	}
 	k.DispatchIdleCores()
@@ -277,6 +288,125 @@ func TestShowcase_RunOnFourCoresHitsExpectedStories(t *testing.T) {
 		if !seenVec[v] {
 			t.Errorf("IRQ 0x%02X never fired", v)
 		}
+	}
+}
+
+// runUntilParentReaped drives the kernel and returns the exit_code init
+// captured when it auto-reaped the given pid. Returns (-1, false) if the
+// reap never happened within the budget.
+//
+// Uses HasWork rather than AllHalted as the loop's continuation predicate:
+// with deferred reap, between a child's exit and init's dispatch the boot
+// core is momentarily halted (AllHalted=true) while init is queued for the
+// next Step — exiting on AllHalted would miss the reap that fires the
+// step after.
+func runUntilParentReaped(t *testing.T, k *kernel.Kernel, pid int, budget int) (uint32, bool) {
+	t.Helper()
+	for step := 0; step < budget; step++ {
+		evs, err := k.Step()
+		if err != nil {
+			t.Fatalf("step %d: %v", step, err)
+		}
+		for _, e := range evs {
+			if w, ok := e.(cpu.EventWaitOp); ok && w.Op == "reap" && w.ChildPID == pid {
+				return w.ExitCode, true
+			}
+		}
+		if !k.HasWork() {
+			break
+		}
+	}
+	return 0, false
+}
+
+// TestDemoFork_ParentReapsChildExitCode verifies the embedded fork demo
+// produces the expected end state: with init at PID 1, the demo's main
+// proc is PID 2, its forked child is PID 3, the parent's waitpid reaps
+// the child returning PID 3, and init then auto-reaps PID 2.
+func TestDemoFork_ParentReapsChildExitCode(t *testing.T) {
+	demo := findDemo(t, "demo_fork")
+	k := kernel.New(cpu.DefaultMemSize)
+	k.TimerQuantum = 0
+	loadDemo(t, k, demo)
+
+	exit, ok := runUntilParentReaped(t, k, 2, 5000)
+	if !ok {
+		t.Fatal("init never reaped PID 2 within 5000 steps")
+	}
+	if exit != 3 {
+		t.Errorf("PID 2 exit_code (reaped by init) = %d, want 3", exit)
+	}
+	if init, ok := k.Processes[1]; !ok || init.Name != "init" {
+		t.Error("init (PID 1) missing or wrong name")
+	}
+}
+
+// TestDemoVfork_ParentReadsChildWrite verifies vfork's shared-memory
+// semantics: child writes 0xDEADBEEF into a user-stack address, exits,
+// parent wakes up and reads that exact value (which init then sees as
+// the reaped exit code).
+func TestDemoVfork_ParentReadsChildWrite(t *testing.T) {
+	demo := findDemo(t, "demo_vfork")
+	k := kernel.New(cpu.DefaultMemSize)
+	k.TimerQuantum = 0
+	loadDemo(t, k, demo)
+
+	exit, ok := runUntilParentReaped(t, k, 2, 5000)
+	if !ok {
+		t.Fatal("init never reaped PID 2 within 5000 steps")
+	}
+	if exit != 0xDEADBEEF {
+		t.Errorf("PID 2 exit_code = 0x%08X, want 0xDEADBEEF", exit)
+	}
+}
+
+// TestDemoPipe_ChildEchoesHOLA exercises the fork+pipe pipeline: parent
+// writes "HOLA" through the pipe, child reads it, child echoes to stdout
+// and exits, parent reaps. The console output must be HOLA.
+func TestDemoPipe_ChildEchoesHOLA(t *testing.T) {
+	demo := findDemo(t, "demo_pipe")
+	k := kernel.New(cpu.DefaultMemSize)
+	k.TimerQuantum = 0
+	loadDemo(t, k, demo)
+
+	var consoleBytes []byte
+	pipeOps := 0
+	forkSeen := false
+	for step := 0; step < 10000 && !k.AllHalted(); step++ {
+		evs, err := k.Step()
+		if err != nil {
+			t.Fatalf("step %d: %v", step, err)
+		}
+		for _, e := range evs {
+			switch ev := e.(type) {
+			case cpu.EventConsoleOut:
+				consoleBytes = append(consoleBytes, ev.Bytes...)
+			case cpu.EventPipeOp:
+				pipeOps++
+			case cpu.EventFork:
+				forkSeen = true
+			}
+		}
+	}
+	if !k.AllHalted() {
+		t.Fatal("kernel did not halt within 10000 steps")
+	}
+	if !forkSeen {
+		t.Error("EventFork never fired")
+	}
+	if pipeOps == 0 {
+		t.Error("no EventPipeOp emitted — pipe write/read never happened")
+	}
+	if got := string(consoleBytes); got != "HOLA" {
+		for pid, p := range k.Processes {
+			t.Logf("  PID %d: state=%s blocked_on=%s exit=%d EAX=0x%X EIP=0x%X",
+				pid, p.State, p.BlockedOn, p.ExitCode, p.Regs.EAX, p.Regs.EIP)
+		}
+		t.Logf("  pipeOps=%d forkSeen=%v pipes=%d", pipeOps, forkSeen, len(k.Pipes))
+		if len(k.Pipes) > 0 {
+			t.Logf("  pipe[0].Buf=%q readers=%d writers=%d", string(k.Pipes[0].Buf), k.Pipes[0].Readers, k.Pipes[0].Writers)
+		}
+		t.Errorf("console output = %q, want %q", got, "HOLA")
 	}
 }
 

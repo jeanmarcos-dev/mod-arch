@@ -85,8 +85,10 @@ func (k *Kernel) scheduleNext(core *Core) []cpu.Event {
 	// 2. Push current to the tail of the ready queue.
 	k.Ready.Push(curPID)
 
-	// 3. Pop the next from the head.
-	nextPID, ok := k.Ready.Pop()
+	// 3. Pop the next from the head. popNextRunnable skips init so the
+	// timer can never accidentally bind PID 1 to a core; init only runs
+	// through DispatchIdleCores's runInitReapCycle.
+	nextPID, ok := k.popNextRunnable()
 	if !ok {
 		return out
 	}
@@ -213,6 +215,20 @@ func pcbRegsSnapshot(p *PCB) map[string]uint32 {
 // + CoreAssign + ProcessState{RUN} so both the READY→RUN transition and the
 // shrinking ready queue are visible in the event log. Idempotent: if every
 // core already has a CurrentPID or the ready queue is empty, returns nil.
+//
+// Two extra responsibilities, both tied to the deferred-reap model:
+//
+//   - If the popped PCB has PendingReaps, the dispatcher drains them
+//     BEFORE settling the PCB onto a core. The reap events are emitted in
+//     this dispatch step so the alumno sees ZOMBIE on one tick and the
+//     reap on the next.
+//
+//   - If that PCB is init, the dispatcher does not actually load init onto
+//     the core. Init briefly transitions RUN → BLOCKED("wait()") inside the
+//     dispatch (emit the two state events so the wake is visible), then
+//     the loop tries to fill the same core slot with the next ready PID.
+//     This mirrors a real init that wakes on SIGCHLD, runs waitpid until
+//     ECHILD, and goes back to sleep without ever leaving its main loop.
 func (k *Kernel) DispatchIdleCores() []cpu.Event {
 	var out []cpu.Event
 	for {
@@ -228,18 +244,53 @@ func (k *Kernel) DispatchIdleCores() []cpu.Event {
 		if pcb == nil {
 			continue
 		}
+
+		if k.InitPID != 0 && pid == k.InitPID {
+			out = append(out, k.runInitReapCycle(idle, pcb)...)
+			// Try to fill this core with the next ready PID; init does
+			// not occupy a core after reaping.
+			continue
+		}
+
+		out = append(out,
+			cpu.EventSchedDecision{FromPID: 0, ToPID: pid, Reason: "dispatch", ReadyQueue: k.Ready.Snapshot()},
+		)
+		out = append(out, k.consumePendingReaps(pcb)...)
+
 		idle.CurrentPID = pid
 		pcb.State = StateRun
 		pcb.Core = idle.ID
 		k.loadCPUFromPCB(idle, pcb)
-		// SchedDecision broadcasts the post-pop ready queue so the frontend
-		// store stays in sync. Without it the queue would freeze at its
-		// pre-dispatch value and show RUN processes still queued.
 		out = append(out,
 			cpu.EventPCBRestore{CoreID: idle.ID, PID: pid, Regs: pcbRegsSnapshot(pcb)},
-			cpu.EventSchedDecision{FromPID: 0, ToPID: pid, Reason: "dispatch", ReadyQueue: k.Ready.Snapshot()},
 			cpu.EventCoreAssign{CoreID: idle.ID, PID: pid},
 			cpu.EventProcessState{PID: pid, State: string(StateRun)},
 		)
 	}
+}
+
+// runInitReapCycle is the dispatch-time choreography for init: a visible
+// READY → RUN, drain every PendingReap (one event per orphan), and back to
+// BLOCKED("wait()"). Init never actually executes its own code — the cycle
+// is implemented entirely in the kernel.
+//
+// The idle core passed in is NOT bound to init at the end; the caller
+// continues its dispatch loop and assigns the slot to the next eligible
+// READY PID.
+func (k *Kernel) runInitReapCycle(idle *Core, init *PCB) []cpu.Event {
+	out := []cpu.Event{
+		cpu.EventSchedDecision{FromPID: 0, ToPID: init.PID, Reason: "wake-init", ReadyQueue: k.Ready.Snapshot()},
+		cpu.EventProcessState{PID: init.PID, State: string(StateRun), Reason: "SIGCHLD"},
+	}
+	out = append(out, k.consumePendingReaps(init)...)
+	init.State = StateBlocked
+	init.BlockedOn = initBlockedReason
+	init.Core = -1
+	out = append(out, cpu.EventProcessState{
+		PID: init.PID, State: string(StateBlocked), Reason: initBlockedReason,
+	})
+	// Idle core stays idle — the outer loop in DispatchIdleCores will
+	// reuse it for the next ready PID, if any.
+	_ = idle
+	return out
 }

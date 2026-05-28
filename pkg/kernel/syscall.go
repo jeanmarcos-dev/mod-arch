@@ -16,11 +16,16 @@ import (
 // The result is returned in EAX. IRET does not touch EAX, so the handler logic
 // (in Go) writes the result there before the IRET runs.
 const (
-	SysExit  uint32 = 1
-	SysRead  uint32 = 3
-	SysWrite uint32 = 4
-	SysOpen  uint32 = 5
-	SysClose uint32 = 6
+	SysExit    uint32 = 1
+	SysFork    uint32 = 2
+	SysRead    uint32 = 3
+	SysWrite   uint32 = 4
+	SysOpen    uint32 = 5
+	SysClose   uint32 = 6
+	SysWaitpid uint32 = 7
+	SysMknod   uint32 = 14
+	SysPipe    uint32 = 42
+	SysVfork   uint32 = 190
 )
 
 // Standard file descriptors.
@@ -65,6 +70,55 @@ func (k *Kernel) handleSyscall(core *Core) []cpu.Event {
 	var name string
 
 	switch num {
+	case SysFork:
+		name = "fork"
+		var subEvs []cpu.Event
+		result, subEvs = k.sysFork(core)
+		out = append(out, subEvs...)
+	case SysVfork:
+		name = "vfork"
+		var subEvs []cpu.Event
+		var blocked bool
+		result, subEvs, blocked = k.sysVfork(core)
+		out = append(out, subEvs...)
+		if blocked {
+			syscallEv := cpu.EventSyscall{
+				PID: callerPID, Num: num, Name: name,
+				Args: []uint32{arg1, arg2, arg3}, Result: result,
+			}
+			return append([]cpu.Event{syscallEv}, out...)
+		}
+	case SysPipe:
+		name = "pipe"
+		var subEvs []cpu.Event
+		result, subEvs = k.sysPipe(core, arg1)
+		out = append(out, subEvs...)
+	case SysMknod:
+		name = "mknod"
+		var subEvs []cpu.Event
+		result, subEvs = k.sysMknod(core, arg1)
+		out = append(out, subEvs...)
+	case SysOpen:
+		name = "open"
+		var subEvs []cpu.Event
+		result, subEvs = k.sysOpen(core, arg1, arg2)
+		out = append(out, subEvs...)
+	case SysWaitpid:
+		name = "waitpid"
+		var subEvs []cpu.Event
+		var blocked bool
+		result, subEvs, blocked = k.sysWaitpid(core, arg1, arg2)
+		out = append(out, subEvs...)
+		if blocked {
+			// Emit the syscall summary for the WS log even though the
+			// caller did not receive a value yet — Result=0 is the
+			// pre-stage; the eventual reap will surface the real PID.
+			syscallEv := cpu.EventSyscall{
+				PID: callerPID, Num: num, Name: name,
+				Args: []uint32{arg1, arg2, arg3}, Result: 0,
+			}
+			return append([]cpu.Event{syscallEv}, out...)
+		}
 	case SysWrite:
 		name = "write"
 		var subEvs []cpu.Event
@@ -127,12 +181,18 @@ func userBufferFault(addr, count uint32) (uint32, bool) {
 //
 //   - fd=1 (stdout) or fd=2 (stderr): bytes flow to the console buffer and an
 //     EventConsoleOut is emitted.
+//   - fd>=3 resolved through FDTable: pipe-write fds route to pipeWrite.
 //   - Other fds: not supported, returns -1.
 //
 // Buffers that touch kernel memory (or wrap around uint32) are rejected with
 // a page fault event and -EFAULT, matching Linux's access_ok / copy_from_user.
 func (k *Kernel) sysWrite(core *Core, fd, bufAddr, count uint32) (uint32, []cpu.Event) {
 	if fd != FdStdout && fd != FdStderr {
+		if pcb := k.Processes[core.CurrentPID]; pcb != nil {
+			if pipe, isWrite, ok := k.resolvePipeFD(pcb, fd); ok && isWrite {
+				return k.pipeWrite(core, pipe, bufAddr, count)
+			}
+		}
 		return ^uint32(0), nil
 	}
 	if count == 0 {
@@ -170,10 +230,19 @@ func (k *Kernel) sysWrite(core *Core, fd, bufAddr, count uint32) (uint32, []cpu.
 }
 
 // sysExit stores the exit code in the PCB and delegates to killCurrent for
-// the cleanup (zombie + possible context switch or halt) on the calling core.
+// the cleanup (zombie + possible context switch or halt) on the calling
+// core. Once the PCB is parked in ZOMBIE we also check if the parent is
+// asleep in sys_waitpid waiting for us — if so, the zombie is reaped right
+// away and the parent moves back to READY with the reaped PID in EAX.
 func (k *Kernel) sysExit(core *Core, code uint32) []cpu.Event {
-	if pcb := k.Processes[core.CurrentPID]; pcb != nil {
+	pcb := k.Processes[core.CurrentPID]
+	if pcb != nil {
 		pcb.Regs.EAX = code
+		pcb.ExitCode = code
 	}
-	return k.killCurrent(core, "exit")
+	out := k.killCurrent(core, "exit")
+	if pcb != nil {
+		out = append(out, k.notifyParentOfExit(pcb)...)
+	}
+	return out
 }

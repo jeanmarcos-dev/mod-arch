@@ -74,6 +74,23 @@ type Kernel struct {
 	Mutexes    []*Mutex
 	Semaphores []*Semaphore
 
+	// Pipes is the 1-indexed registry of pipe objects created by sys_pipe
+	// and sys_mknod (FIFOs). Per-process FDs in PCB.FDTable point into
+	// this slice via FD.PipeID.
+	Pipes []*Pipe
+
+	// FifoByName maps a FIFO path (e.g. "/tmp/q") to its PipeID. Allows
+	// processes that never met (no fork ancestry) to talk through the
+	// same Pipe by opening the same name.
+	FifoByName map[string]int
+
+	// InitPID is the PID of the init process (PID 1 by convention) when one
+	// has been spawned via SpawnInit. Zero means no init exists yet — in
+	// that mode, sys_exit leaves orphaned children with ParentPID unchanged
+	// and re-parenting is skipped. The IPC demos call SpawnInit before
+	// loading their programs so the process tree always has a root.
+	InitPID int
+
 	nextPID int
 }
 
@@ -208,6 +225,14 @@ func (k *Kernel) Reset() {
 	k.blockedReads = nil
 	k.Mutexes = nil
 	k.Semaphores = nil
+	// IPC and init bookkeeping must also be wiped: without this, a second
+	// LoadDemo sees k.InitPID still pointing at a now-deleted PCB, so
+	// SpawnInit's idempotency check short-circuits and the demo's first
+	// AddProcess takes PID 1, leaving the tree rootless. Same hazard for
+	// stale Pipes/FifoByName pointing into a freed process table.
+	k.InitPID = 0
+	k.Pipes = nil
+	k.FifoByName = nil
 	// The IDT lives in kernel memory and CPU.Reset does not touch it, but
 	// reinstall defensively in case a test mutated entries.
 	k.InstallDefaultIDT()
@@ -285,12 +310,41 @@ func (k *Kernel) firstIdleCore() *Core {
 	return nil
 }
 
+// popNextRunnable pops the head of the ready queue, skipping init. Any
+// init PID encountered is re-queued at the tail so DispatchIdleCores can
+// pick it up later and route it through runInitReapCycle. Returns
+// (pid, true) when a non-init PID was found, (0, false) when only init
+// remained (or the queue was empty). Used by killCurrent and scheduleNext
+// — the regular dispatch paths that must never bind init to a core.
+func (k *Kernel) popNextRunnable() (int, bool) {
+	for i := 0; i < k.Ready.Len(); i++ {
+		pid, ok := k.Ready.Pop()
+		if !ok {
+			return 0, false
+		}
+		if k.InitPID != 0 && pid == k.InitPID {
+			k.Ready.Push(pid)
+			continue
+		}
+		return pid, true
+	}
+	return 0, false
+}
+
 // Step advances the simulation by one tick, iterating every core in order.
 // Each core runs at most one CPU.Step plus, if that step dispatched an IRQ,
 // the matching handler logic. Returning all events in a single slice keeps
 // the WS contract identical to the single-core model.
+//
+// Before iterating cores, Step pulls READY processes onto any idle core via
+// DispatchIdleCores. The simulator also calls DispatchIdleCores before
+// Step in StepOnce, and the call is idempotent when every core has work,
+// so running it here costs nothing in the steady state. It matters for the
+// deferred-reap flow: when a parent is woken to the ready queue at the end
+// of one Step (e.g. its child just exited), this dispatch picks the parent
+// up on the very next Step instead of leaving the boot core halted forever.
 func (k *Kernel) Step() ([]cpu.Event, error) {
-	var out []cpu.Event
+	out := k.DispatchIdleCores()
 	for _, core := range k.Cores {
 		evs, err := k.stepCore(core)
 		out = append(out, evs...)
@@ -447,10 +501,48 @@ func (k *Kernel) killCurrent(core *Core, reason string) []cpu.Event {
 		cpu.EventProcessState{PID: curPID, State: string(StateZombie), Reason: reason},
 	}
 
+	// Re-parent any surviving children to init so they remain reachable
+	// in the process tree and so orphan zombies do not stick to a PCB
+	// that is itself about to disappear. Live children land under init
+	// as normal; orphan zombies queue on init.PendingReaps and init is
+	// woken to the ready queue — the actual reap fires when the
+	// dispatcher picks init on the next Step. Without this deferral the
+	// zombie would vanish in the same tick it was orphaned, hiding the
+	// "init wakes, cleans up, sleeps again" cycle from the alumno.
+	if k.InitPID != 0 && curPID != k.InitPID && len(curPCB.Children) > 0 {
+		init := k.Processes[k.InitPID]
+		if init != nil {
+			initWokenForReap := false
+			for _, childPID := range curPCB.Children {
+				child := k.Processes[childPID]
+				if child == nil {
+					continue
+				}
+				child.ParentPID = k.InitPID
+				out = append(out, cpu.EventReparent{
+					PID: childPID, OldParent: curPID, NewParent: k.InitPID,
+				})
+				init.Children = append(init.Children, childPID)
+				if child.State == StateZombie {
+					init.PendingReaps = append(init.PendingReaps, childPID)
+					initWokenForReap = true
+				}
+			}
+			curPCB.Children = nil
+			if initWokenForReap && init.State == StateBlocked {
+				out = append(out, k.wakeToQueue(k.InitPID, initBlockedReason)...)
+			}
+		}
+	}
+
 	// If other READY processes exist, hand the core to the first one. This is
 	// the scheduleNext pattern WITHOUT re-enqueueing the current PID (zombie
-	// processes do not return).
-	if nextPID, ok := k.Ready.Pop(); ok {
+	// processes do not return). Skip init here — it must never be dispatched
+	// onto a core through the regular path because it has no user code worth
+	// running (its slot only holds two hlt bytes). Init runs only via
+	// runInitReapCycle, which DispatchIdleCores invokes on the next Step
+	// when it sees init at the head of the queue.
+	if nextPID, ok := k.popNextRunnable(); ok {
 		nextPCB := k.Processes[nextPID]
 		if nextPCB != nil {
 			out = append(out, cpu.EventSchedDecision{

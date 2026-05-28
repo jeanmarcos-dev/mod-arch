@@ -146,6 +146,11 @@ func (k *Kernel) handleKeyboard(core *Core) []cpu.Event {
 // placeholder; the real n is stored in PCB.Regs.EAX and restored on wake-up.
 func (k *Kernel) sysRead(core *Core, fd, bufAddr, count uint32) (uint32, []cpu.Event) {
 	if fd != FdStdin {
+		if pcb := k.Processes[core.CurrentPID]; pcb != nil {
+			if pipe, isWrite, ok := k.resolvePipeFD(pcb, fd); ok && !isWrite {
+				return k.pipeRead(core, pipe, bufAddr, count)
+			}
+		}
 		return ^uint32(0), nil
 	}
 	if count == 0 {
