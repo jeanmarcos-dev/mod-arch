@@ -1,5 +1,9 @@
 import { defineStore } from 'pinia';
 import { computed, ref, watch } from 'vue';
+import { setI18nLocale, applyLocale, readStoredLocale as i18nReadStoredLocale } from '../i18n';
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES, type Locale } from '../i18n/schema';
+
+export type { Locale } from '../i18n/schema';
 
 // PresentationMode tunes density, animation speed and narrator visibility in
 // one place. The three presets are exposed to the user as "preferences" so a
@@ -25,6 +29,7 @@ interface PrefsState {
   // narrow the readable band.
   narratorMinTickMs: number;
   theme: Theme;
+  locale: Locale;
 }
 
 const STORAGE_KEY = 'modos-cpu:prefs:v1';
@@ -42,7 +47,18 @@ const DEFAULTS: PrefsState = {
   narratorsEnabled: true,
   narratorMinTickMs: 200,
   theme: 'amber',
+  locale: DEFAULT_LOCALE,
 };
+
+function isLocale(v: unknown): v is Locale {
+  return typeof v === 'string' && (SUPPORTED_LOCALES as string[]).includes(v);
+}
+
+// readStoredLocale mirrors readStoredTheme: a saved pick wins, otherwise we
+// sniff navigator.language with a strict fallback to Spanish. The dedicated
+// helper in i18n/index.ts uses the same algorithm — duplicating it here would
+// risk drift, so we keep that as the source of truth and re-export.
+export { readStoredLocale } from '../i18n';
 
 // applyTheme writes the active theme to <html data-theme="..."> so the
 // :root[data-theme] rules in style.css take effect. Exposed at module scope
@@ -73,10 +89,15 @@ function loadFromStorage(): PrefsState {
   if (typeof window === 'undefined') return DEFAULTS;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULTS;
+    // No stored prefs yet: keep DEFAULTS but resolve the locale via the same
+    // detection the i18n module used at boot (navigator.language → 'en',
+    // else 'es'). Without this the i18n instance would start in 'en' while
+    // the store ref reads 'es', leaving the Preferences switch out of sync
+    // with the actual UI language on the user's first visit.
+    if (!raw) return { ...DEFAULTS, locale: i18nReadStoredLocale() };
     return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<PrefsState>) };
   } catch {
-    return DEFAULTS;
+    return { ...DEFAULTS, locale: i18nReadStoredLocale() };
   }
 }
 
@@ -88,6 +109,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
   const narratorsEnabled = ref(initial.narratorsEnabled);
   const narratorMinTickMs = ref(initial.narratorMinTickMs);
   const theme = ref<Theme>(initial.theme);
+  const locale = ref<Locale>(isLocale(initial.locale) ? initial.locale : DEFAULT_LOCALE);
 
   // Mobile drawer state is volatile by design: always starts closed so a
   // fresh reload doesn't reveal the sidebar over the content. Kept separate
@@ -101,8 +123,8 @@ export const usePreferencesStore = defineStore('preferences', () => {
   watch(theme, (t) => applyTheme(t), { immediate: false });
 
   watch(
-    [sidebarCollapsed, mode, density, narratorsEnabled, narratorMinTickMs, theme],
-    ([sc, m, d, n, nMin, t]) => {
+    [sidebarCollapsed, mode, density, narratorsEnabled, narratorMinTickMs, theme, locale],
+    ([sc, m, d, n, nMin, t, l]) => {
       try {
         window.localStorage.setItem(
           STORAGE_KEY,
@@ -113,6 +135,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
             narratorsEnabled: n,
             narratorMinTickMs: nMin,
             theme: t,
+            locale: l,
           }),
         );
       } catch {
@@ -158,6 +181,21 @@ export const usePreferencesStore = defineStore('preferences', () => {
     theme.value = t;
   }
 
+  // setLocale is the canonical mutation point for switching languages. It
+  // updates the persisted ref AND the live vue-i18n instance AND <html lang>
+  // in one explicit step — preferable to a watcher because the order is
+  // obvious and there's no risk of stale renders.
+  function setLocale(l: Locale) {
+    if (!isLocale(l)) return;
+    locale.value = l;
+    setI18nLocale(l);
+  }
+
+  // Keep <html lang> in sync on store creation. main.ts already called
+  // applyLocale(readStoredLocale()) before mount, but if the store boots from
+  // a different value (corrupt storage, defaults), this catches up.
+  applyLocale(locale.value);
+
   return {
     sidebarCollapsed,
     sidebarMobileOpen,
@@ -166,6 +204,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     narratorsEnabled,
     narratorMinTickMs,
     theme,
+    locale,
     rowDensity,
     animationsEnabled,
     animationSpeed,
@@ -175,5 +214,6 @@ export const usePreferencesStore = defineStore('preferences', () => {
     toggleSidebarMobile,
     setMode,
     setTheme,
+    setLocale,
   };
 });

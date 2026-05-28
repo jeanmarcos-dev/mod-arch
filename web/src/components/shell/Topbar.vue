@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { Share2, Square, UserRound, LogOut } from '@lucide/vue';
 import { useCpuStore } from '../../stores/cpu';
 import { useAuthStore } from '../../stores/auth';
@@ -10,6 +11,7 @@ const cpu = useCpuStore();
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
+const { t } = useI18n();
 
 const canShare = computed(() => (cpu.sessionInfo?.role ?? 'none') === 'owner');
 const isShared = computed(() => Boolean(cpu.sessionInfo?.view_token));
@@ -28,18 +30,20 @@ async function doLogout() { await auth.logout(); }
 
 <template>
   <header class="mini-bar" role="banner" data-pizarra-anchor="topbar">
-    <span class="mini-bar__brand">MODOS-CPU</span>
+    <span class="mini-bar__brand">{{ t('topbar.brand') }}</span>
 
     <div class="mini-bar__spacer"></div>
 
     <div
       v-if="loggedIn"
       class="mini-bar__user"
-      :title="cpu.sessionInfo.user_email ? `Conectado como ${cpu.sessionInfo.user_name} · ${cpu.sessionInfo.user_email}` : `Conectado como ${cpu.sessionInfo.user_name}`"
+      :title="cpu.sessionInfo.user_email
+        ? t('topbar.connectedAsWithEmail', { name: cpu.sessionInfo.user_name, email: cpu.sessionInfo.user_email })
+        : t('topbar.connectedAs', { name: cpu.sessionInfo.user_name })"
     >
       <UserRound :size="14" :stroke-width="2" class="mini-bar__user-icon" />
       <span class="mini-bar__user-name">{{ cpu.sessionInfo.user_name }}</span>
-      <button type="button" class="mini-bar__ghost-btn" title="Cerrar sesión" @click="doLogout">
+      <button type="button" class="mini-bar__ghost-btn" :title="t('topbar.logout')" @click="doLogout">
         <LogOut :size="14" :stroke-width="2" />
       </button>
     </div>
@@ -47,22 +51,22 @@ async function doLogout() { await auth.logout(); }
       v-else-if="!viewer && !onAdminRoute"
       type="button"
       class="mini-bar__login"
-      title="Identifíquese para que su nombre aparezca en sesiones compartidas"
+      :title="t('topbar.identifyHint')"
       @click="goLogin"
     >
       <UserRound :size="14" :stroke-width="2" />
-      <span>Identificarse</span>
+      <span>{{ t('topbar.identify') }}</span>
     </button>
 
     <button
       v-if="canShare"
       type="button"
       :class="['mini-bar__share', { 'mini-bar__share--on': isShared }]"
-      :title="isShared ? 'Sesión compartida — clic para gestionarla' : 'Generar un enlace para que otros vean la sesión en modo lectura'"
+      :title="isShared ? t('topbar.shareManageHint') : t('topbar.shareHint')"
       @click="openShare"
     >
       <component :is="isShared ? Square : Share2" :size="14" :stroke-width="2" />
-      <span>{{ isShared ? 'Compartiendo' : 'Compartir' }}</span>
+      <span>{{ isShared ? t('topbar.sharing') : t('topbar.share') }}</span>
     </button>
 
     <slot name="actions" />

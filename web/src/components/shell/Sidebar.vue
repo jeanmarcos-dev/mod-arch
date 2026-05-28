@@ -103,6 +103,10 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
         <UserRound :size="14" :stroke-width="2" class="sidebar__user-icon" />
         <span class="sidebar__user-name">{{ auth.user.name }}</span>
       </div>
+      <span class="sidebar__brand" :aria-hidden="collapsed ? 'true' : undefined">
+        <span class="sidebar__brand-full">MODOS-CPU</span>
+        <span class="sidebar__brand-mark">M·C</span>
+      </span>
     </footer>
 
     <button
@@ -345,6 +349,9 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
   font-size: 11px;
   min-height: 36px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
 .sidebar__user {
@@ -378,8 +385,33 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
 
 .sidebar--collapsed .sidebar__foot {
   padding: var(--space-2) 0;
-  display: flex;
-  justify-content: center;
+  padding-bottom: calc(var(--space-2) + 26px + var(--space-3));
+  align-items: center;
+}
+
+/* Subtle signature line at the very bottom of the sidebar. Full wordmark
+   when expanded; collapses to a short "M·C" monogram when the sidebar rail
+   is in collapsed mode so it still anchors the brand without overflowing
+   the narrow column. */
+.sidebar__brand {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--amber);
+  text-shadow: var(--shadow-glow-amber);
+  opacity: 0.55;
+  white-space: nowrap;
+  user-select: none;
+  text-align: center;
+  transition: opacity var(--transition-fast);
+}
+.sidebar__brand:hover { opacity: 0.85; }
+.sidebar__brand-mark { display: none; }
+.sidebar--collapsed .sidebar__brand-full { display: none; }
+.sidebar--collapsed .sidebar__brand-mark {
+  display: inline;
+  letter-spacing: 2px;
 }
 
 @media (max-width: 768px) {

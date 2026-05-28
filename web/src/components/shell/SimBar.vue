@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { nextTick, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import {
   Download,
   StepForward,
@@ -8,54 +8,28 @@ import {
   Pause,
   RotateCcw,
   Eraser,
-  Settings,
   Pin,
   PinOff,
-  Share2,
-  Square,
-  UserRound,
-  LogOut,
   GripHorizontal,
-  Crosshair,
 } from '@lucide/vue';
 import { useCpuStore } from '../../stores/cpu';
-import { useAuthStore } from '../../stores/auth';
 import { useSimBarStore } from '../../stores/simBar';
-import { useWhiteboardStore } from '../../stores/whiteboard';
 import { useDraggable } from '../../composables/useDraggable';
 import { useBreakpoint } from '../../composables/useBreakpoint';
+import { useSimSettings } from '../../composables/useSimSettings';
 import ProgramPicker from '../ProgramPicker.vue';
-import ShareModal from '../ShareModal.vue';
-import Term from '../glossary/Term.vue';
 import SimStatusRow from './SimStatusRow.vue';
-import SpeedSlider from './SpeedSlider.vue';
-import HandRaiseBadge from './HandRaiseBadge.vue';
+import SimToolsDrawer from './SimToolsDrawer.vue';
 
 const cpu = useCpuStore();
-const auth = useAuthStore();
 const bar = useSimBarStore();
-const whiteboard = useWhiteboardStore();
-const router = useRouter();
+const settings = useSimSettings();
 const { isMobile } = useBreakpoint();
+const { t } = useI18n();
 
 const panelRef = ref<HTMLElement | null>(null);
-const settingsOpen = ref(false);
-const settingsRoot = ref<HTMLElement | null>(null);
 
-const loggedIn = computed(() => Boolean(cpu.sessionInfo.user_name));
-const viewer = computed(() => cpu.isViewer());
-const canShare = computed(() => (cpu.sessionInfo?.role ?? 'none') === 'owner');
-const isShared = computed(() => Boolean(cpu.sessionInfo?.view_token));
-const whiteboardOn = computed(() => whiteboard.broadcasting);
-
-// Toggling the whiteboard is a no-op for non-owners (button is hidden in
-// that case anyway). When turning OFF we also send pointer_off so viewers
-// drop the cursor immediately instead of waiting for the staleness timer.
-function toggleWhiteboard() {
-  const next = !whiteboard.broadcasting;
-  whiteboard.setBroadcasting(next);
-  if (!next) cpu.sendPointerOff();
-}
+const viewer = settings.viewer;
 
 function onLoad() {
   if (!cpu.selectedProgram) return;
@@ -65,61 +39,6 @@ function onLoad() {
 function onClear() {
   cpu.clearLog();
 }
-
-// Both HZ and QUANTUM apply on every keystroke through a small debounce so the
-// backend gets one command per "settled" value instead of one per digit. The
-// 200ms window also feels instant during a class while protecting the WS from
-// a flurry of writes when the student scrubs the spinner.
-const SETTING_DEBOUNCE_MS = 200;
-let hzTimer: number | null = null;
-let qTimer: number | null = null;
-
-function onClockHz(e: Event) {
-  const v = Number((e.target as HTMLInputElement).value);
-  if (!Number.isFinite(v)) return;
-  const clamped = Math.max(1, Math.min(60, Math.round(v)));
-  if (hzTimer !== null) window.clearTimeout(hzTimer);
-  hzTimer = window.setTimeout(() => {
-    hzTimer = null;
-    cpu.setClockHz(clamped);
-  }, SETTING_DEBOUNCE_MS);
-}
-
-function onQuantum(e: Event) {
-  const v = Number((e.target as HTMLInputElement).value);
-  if (!Number.isFinite(v)) return;
-  const clamped = Math.max(0, Math.min(200, Math.round(v)));
-  if (qTimer !== null) window.clearTimeout(qTimer);
-  qTimer = window.setTimeout(() => {
-    qTimer = null;
-    cpu.setQuantum(clamped);
-  }, SETTING_DEBOUNCE_MS);
-}
-
-function toggleSettings() {
-  settingsOpen.value = !settingsOpen.value;
-}
-
-function onDocClick(e: MouseEvent) {
-  if (!settingsRoot.value) return;
-  if (!settingsRoot.value.contains(e.target as Node)) settingsOpen.value = false;
-}
-function onEsc(e: KeyboardEvent) {
-  if (e.key === 'Escape') settingsOpen.value = false;
-}
-onMounted(() => {
-  document.addEventListener('click', onDocClick);
-  document.addEventListener('keydown', onEsc);
-});
-onBeforeUnmount(() => {
-  document.removeEventListener('click', onDocClick);
-  document.removeEventListener('keydown', onEsc);
-});
-
-const shareOpen = ref(false);
-function openShare() { shareOpen.value = true; }
-async function goLogin() { await router.push('/login'); }
-async function doLogout() { await auth.logout(); }
 
 // Floating mode: the panel teleports to <body> with a fixed position. We
 // drive coords via useDraggable so the small "handle" row above the bar
@@ -158,7 +77,7 @@ function dockHeaderDblClick() {
       :class="['sim-bar', `sim-bar--${bar.mode}`, { 'sim-bar--viewer': viewer, 'sim-bar--dragging': drag.isDragging.value }]"
       :style="bar.mode === 'floating' ? { left: drag.position.value.x + 'px', top: drag.position.value.y + 'px' } : undefined"
       role="region"
-      aria-label="Controles de simulación"
+      :aria-label="t('simbar.controlsAria')"
       data-pizarra-anchor="sim-bar"
     >
       <header
@@ -168,192 +87,84 @@ function dockHeaderDblClick() {
         @dblclick="dockHeaderDblClick()"
       >
         <GripHorizontal :size="14" :stroke-width="2" class="sim-bar__handle-grip" />
-        <span class="sim-bar__title">SIMULACIÓN</span>
+        <span class="sim-bar__title">{{ t('simbar.title') }}</span>
         <button
           type="button"
           class="sim-bar__dock-btn"
-          title="Volver a anclar arriba (doble click sobre la cabecera)"
+          :title="t('simbar.dockHint')"
           @click="bar.dock()"
         >
           <Pin :size="13" :stroke-width="2" />
-          <span>Anclar</span>
+          <span>{{ t('simbar.dock') }}</span>
         </button>
       </header>
 
-      <div class="sim-bar__row sim-bar__row--controls">
-        <div class="sim-bar__left">
-          <span class="sim-bar__brand">MODOS-CPU</span>
-        </div>
-
+      <div class="sim-bar__row sim-bar__row--main">
         <div class="sim-bar__center">
           <ProgramPicker class="sim-bar__picker" />
 
-          <div class="sim-bar__btns" role="group" aria-label="Controles de ejecución">
+          <div class="sim-bar__btns" role="group" :aria-label="t('simbar.execGroupAria')">
             <button
               type="button"
-              class="sim-btn"
+              class="sim-btn sim-btn--anim-load"
               :disabled="!cpu.selectedProgram || viewer"
-              title="Cargar el demo seleccionado"
+              :title="t('simbar.tooltips.load')"
               @click="onLoad"
-            ><Download :size="14" :stroke-width="2" /><span>LOAD</span></button>
+            ><Download :size="14" :stroke-width="2" /><span>{{ t('simbar.buttons.load') }}</span></button>
             <button
               type="button"
-              class="sim-btn"
+              class="sim-btn sim-btn--anim-step"
               :disabled="(cpu.halted && cpu.readyQueue.length === 0) || cpu.running || viewer"
-              title="Ejecutar una instrucción"
+              :title="t('simbar.tooltips.step')"
               @click="cpu.step()"
-            ><StepForward :size="14" :stroke-width="2" /><span>STEP</span></button>
+            ><StepForward :size="14" :stroke-width="2" /><span>{{ t('simbar.buttons.step') }}</span></button>
             <button
               v-if="!cpu.running"
               type="button"
-              class="sim-btn"
+              class="sim-btn sim-btn--anim-run"
               :disabled="(cpu.halted && cpu.readyQueue.length === 0) || viewer"
-              title="Ejecutar continuamente"
+              :title="t('simbar.tooltips.run')"
               @click="cpu.run(0)"
-            ><Play :size="14" :stroke-width="2" /><span>RUN</span></button>
+            ><Play :size="14" :stroke-width="2" /><span>{{ t('simbar.buttons.run') }}</span></button>
             <button
               v-else
               type="button"
-              class="sim-btn"
+              class="sim-btn sim-btn--anim-run is-running"
               :disabled="viewer"
-              title="Pausar el modo continuo"
+              :title="t('simbar.tooltips.pause')"
               @click="cpu.pause()"
-            ><Pause :size="14" :stroke-width="2" /><span>PAUSE</span></button>
+            ><Pause :size="14" :stroke-width="2" /><span>{{ t('simbar.buttons.pause') }}</span></button>
             <button
               type="button"
-              class="sim-btn sim-btn--reset"
+              class="sim-btn sim-btn--reset sim-btn--anim-reset"
               :disabled="viewer"
-              title="Resetear kernel, procesos y log"
+              :title="t('simbar.tooltips.reset')"
               @click="cpu.reset()"
-            ><RotateCcw :size="14" :stroke-width="2" /><span>RESET</span></button>
+            ><RotateCcw :size="14" :stroke-width="2" /><span>{{ t('simbar.buttons.reset') }}</span></button>
             <button
               type="button"
-              class="sim-btn sim-btn--clear"
+              class="sim-btn sim-btn--clear sim-btn--anim-clear"
               :disabled="viewer"
-              title="Limpiar el log de eventos y la consola, sin tocar el programa cargado"
+              :title="t('simbar.tooltips.clear')"
               @click="onClear"
-            ><Eraser :size="14" :stroke-width="2" /><span>CLEAR</span></button>
-          </div>
-
-          <div ref="settingsRoot" class="sim-bar__settings">
-            <button
-              type="button"
-              class="icon-btn"
-              :class="{ 'icon-btn--on': settingsOpen }"
-              title="Velocidad y quantum"
-              aria-label="Velocidad y quantum"
-              @click="toggleSettings"
-            ><Settings :size="16" :stroke-width="2" /></button>
-            <div v-if="settingsOpen" class="sim-bar__popover" role="dialog" aria-label="Velocidad y quantum">
-              <SpeedSlider class="sim-bar__speed" :viewer="viewer" />
-              <label class="sim-bar__field">
-                <span class="sim-bar__field-label">CLOCK Hz</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="60"
-                  :value="cpu.clockHz"
-                  :disabled="viewer"
-                  aria-label="Frecuencia del clock simulado en Hz"
-                  @input="onClockHz"
-                />
-                <span class="sim-bar__field-help">Frecuencia del clock del CPU simulado. El multiplicador SPEED del TopBar la escala.</span>
-              </label>
-              <label class="sim-bar__field">
-                <Term term="Quantum" mode="label" class="sim-bar__field-label">QUANTUM</Term>
-                <input
-                  type="number"
-                  min="0"
-                  max="200"
-                  :value="cpu.timerQuantum"
-                  :disabled="viewer"
-                  aria-label="Quantum del timer (ticks por proceso)"
-                  @input="onQuantum"
-                />
-                <span class="sim-bar__field-help">Ticks antes de IRQ 0x20 (0 = apagado)</span>
-              </label>
-              <div class="sim-bar__field">
-                <span class="sim-bar__field-label">CORES</span>
-                <div class="sim-bar__core-picker" role="radiogroup" aria-label="Cantidad de núcleos">
-                  <button
-                    v-for="n in 4"
-                    :key="n"
-                    type="button"
-                    role="radio"
-                    :aria-checked="cpu.numCores === n"
-                    :class="['sim-bar__core-pick', { 'sim-bar__core-pick--active': cpu.numCores === n }]"
-                    :disabled="viewer"
-                    :title="`Cambiar a ${n} núcleo${n === 1 ? '' : 's'} (reinicia el simulador)`"
-                    @click="cpu.setNumCores(n)"
-                  >{{ n }}</button>
-                </div>
-                <span class="sim-bar__field-help">Cambiarlo reinicia el simulador</span>
-              </div>
-            </div>
+            ><Eraser :size="14" :stroke-width="2" /><span>{{ t('simbar.buttons.clear') }}</span></button>
           </div>
         </div>
 
+        <SimStatusRow inline class="sim-bar__status-inline" />
+
         <div class="sim-bar__right">
-          <div
-            v-if="loggedIn"
-            class="sim-bar__user"
-            :title="cpu.sessionInfo.user_email ? `Conectado como ${cpu.sessionInfo.user_name} · ${cpu.sessionInfo.user_email}` : `Conectado como ${cpu.sessionInfo.user_name}`"
-          >
-            <UserRound :size="14" :stroke-width="2" class="sim-bar__user-icon" />
-            <span class="sim-bar__user-name">{{ cpu.sessionInfo.user_name }}</span>
-            <button type="button" class="icon-btn icon-btn--ghost" title="Cerrar sesión" @click="doLogout">
-              <LogOut :size="14" :stroke-width="2" />
-            </button>
-          </div>
-          <button
-            v-else-if="!viewer"
-            type="button"
-            class="sim-bar__login"
-            title="Identifíquese para que su nombre aparezca en sesiones compartidas"
-            @click="goLogin"
-          >
-            <UserRound :size="14" :stroke-width="2" />
-            <span>Identificarse</span>
-          </button>
-
-          <HandRaiseBadge v-if="canShare && isShared" />
-
-          <button
-            v-if="canShare"
-            type="button"
-            :class="['sim-bar__share sim-bar__whiteboard', { 'sim-bar__whiteboard--on': whiteboardOn }]"
-            :title="whiteboardOn ? 'Pizarra activa — su puntero se muestra a los espectadores en la misma vista' : 'Comparta su puntero como pizarra para señalar en vivo'"
-            @click="toggleWhiteboard"
-          >
-            <Crosshair :size="14" :stroke-width="2" />
-            <span>{{ whiteboardOn ? 'Pizarra' : 'Pizarra' }}</span>
-          </button>
-
-          <button
-            v-if="canShare"
-            type="button"
-            :class="['sim-bar__share', { 'sim-bar__share--on': isShared }]"
-            :title="isShared ? 'Sesión compartida — clic para gestionarla' : 'Generar un enlace para que otros vean la sesión en modo lectura'"
-            @click="openShare"
-          >
-            <component :is="isShared ? Square : Share2" :size="14" :stroke-width="2" />
-            <span>{{ isShared ? 'Compartiendo' : 'Compartir' }}</span>
-          </button>
-
           <button
             v-if="bar.mode === 'docked' && !isMobile"
             type="button"
             class="icon-btn sim-bar__float-btn"
-            title="Desacoplar a ventana flotante"
+            :title="t('simbar.undockHint')"
             @click="bar.float()"
-          ><PinOff :size="16" :stroke-width="2" /></button>
-
-          <ShareModal :open="shareOpen" @close="shareOpen = false" />
+          ><PinOff :size="14" :stroke-width="2" /></button>
         </div>
       </div>
-
-      <SimStatusRow class="sim-bar__row sim-bar__row--status" />
     </section>
+    <SimToolsDrawer />
   </Teleport>
 </template>
 
@@ -431,29 +242,24 @@ function dockHeaderDblClick() {
 }
 .sim-bar__dock-btn > svg { flex-shrink: 0; }
 
+/* ─── Main row (controls + status + accordion) ─────────────────────── */
 .sim-bar__row {
   padding: var(--space-1) var(--space-3);
 }
 
-.sim-bar__row--controls {
-  /* Flex with wrap instead of a 3-col grid: when the combined width of left
-     + center + right exceeds the row, the right cluster (alias / pizarra /
-     compartir) wraps to a second line instead of overlapping the center
-     control buttons. The center still earns the middle visually because the
-     left and right are pushed apart via flex auto margins. */
+/* Single row that hosts both clusters: action controls on the left half
+   (visually centered) and the CPU status chips on the right half. When the
+   viewport can't keep them on the same line, flex-wrap pushes the status
+   cluster onto a second line. The PinOff button stays absolute so it
+   doesn't fight either cluster's positioning. */
+.sim-bar__row--main {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-2) var(--space-3);
   min-height: 48px;
-}
-
-.sim-bar__left {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-  flex: 0 0 auto;
+  position: relative;
+  padding-right: 48px; /* reserve room for the absolute PinOff */
 }
 
 .sim-bar__center {
@@ -461,22 +267,28 @@ function dockHeaderDblClick() {
   align-items: center;
   gap: var(--space-2);
   flex: 1 1 auto;
-  justify-content: center;
+  justify-content: flex-start;
   min-width: 0;
   flex-wrap: wrap;
 }
 
-.sim-bar__row--status {
-  border-top: 1px dashed var(--border);
+/* SimStatusRow inline mode renders header + cores as direct flex children
+   of the parent row. The header is a regular flex item; the cores wrapper
+   force-claims a fresh line via flex-basis: 100% (set inside the component
+   itself, in inline mode). */
+.sim-bar__status-inline {
+  /* Marker class. The display:contents trick on the inner component handles
+     the rest. */
 }
 
-.sim-bar__brand {
-  font-family: var(--font-display);
-  letter-spacing: 3px;
-  color: var(--amber);
-  text-shadow: var(--shadow-glow-amber);
-  font-size: 12px;
-  white-space: nowrap;
+.sim-bar__right {
+  position: absolute;
+  right: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .sim-bar__picker {
@@ -491,24 +303,20 @@ function dockHeaderDblClick() {
 }
 
 @media (max-width: 768px) {
-  .sim-bar__row--controls {
+  .sim-bar__row--main {
     gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
+    padding-right: 48px;
     min-height: 0;
   }
-  .sim-bar__left,
-  .sim-bar__center,
-  .sim-bar__right {
+  .sim-bar__center {
     flex: 1 1 100%;
-    justify-content: center;
-    margin-left: 0;
+    justify-content: flex-start;
   }
   .sim-bar__btns {
     flex-wrap: wrap;
-    justify-content: center;
+    justify-content: flex-start;
   }
-  /* Floating mode would conflict with the mobile drawer and tight viewport
-     — pin the bar back into the layout flow at any phone/tablet width. */
   .sim-bar--floating {
     position: static;
     max-width: none;
@@ -524,14 +332,10 @@ function dockHeaderDblClick() {
     flex: 1 1 100%;
     max-width: none;
   }
-  .sim-bar__brand { display: none; }
 }
 
 @media (max-width: 480px) {
-  /* Reserve room for the fixed hamburger button (32px + 12 left + 8 gap = 52)
-     and line LOAD/STEP/RUN/RESET up flush against it instead of centering them
-     in the residual space — that gap read as "two disconnected clusters". */
-  .sim-bar__row--controls {
+  .sim-bar__row--main {
     padding-left: 52px;
     justify-content: flex-start;
   }
@@ -587,229 +391,26 @@ function dockHeaderDblClick() {
   color: var(--text);
 }
 
-.sim-bar__settings { position: relative; }
-
-/* Unified icon-only buttons: every plain icon button across the bar uses
-   this class so they all sit at the same 32x32 footprint and feel. */
 .icon-btn {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-dim);
   font-family: inherit;
-  width: 32px;
-  height: 32px;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  padding: 0;
-  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
-}
-.icon-btn:hover, .icon-btn--on {
-  background: rgba(var(--accent-rgb), 0.12);
-  color: var(--amber);
-  border-color: var(--border-strong);
-}
-.icon-btn--ghost {
-  width: 22px;
-  height: 22px;
-  border: none;
-}
-.icon-btn--ghost:hover { background: rgba(var(--accent-rgb), 0.10); color: var(--amber); }
-.icon-btn > svg { display: block; }
-
-.sim-bar__popover {
-  position: absolute;
-  right: 0;
-  top: calc(100% + var(--space-1));
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  padding: var(--space-3);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  min-width: 220px;
-  /* Sits above narrators (--z-overlay = 500) so byte-flight lines and
-     mode-flip banners don't paint over an open settings popover. Stays
-     below modals/toasts. */
-  z-index: calc(var(--z-overlay, 500) + 10);
-  box-shadow: var(--shadow-elevation-2);
-}
-
-.sim-bar__field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 11px;
-}
-.sim-bar__field-label {
-  font-size: 9px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-.sim-bar__field input {
-  font-family: 'JetBrains Mono', monospace;
-  background: var(--surface-0);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  width: 100%;
-  box-sizing: border-box;
-}
-.sim-bar__field-help { color: var(--text-muted); font-size: 10px; }
-
-.sim-bar__core-picker {
-  display: inline-flex;
-  gap: 4px;
-}
-.sim-bar__core-pick {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  background: var(--surface-0);
-  border: 1px solid var(--border);
-  color: var(--text);
   width: 28px;
   height: 28px;
-  padding: 0;
-  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
   box-sizing: border-box;
+  padding: 0;
   transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
-.sim-bar__core-pick:hover:not(:disabled) {
-  color: var(--amber);
+.icon-btn:hover {
   background: rgba(var(--accent-rgb), 0.10);
-  border-color: var(--border-strong);
-}
-.sim-bar__core-pick--active {
-  background: rgba(var(--accent-rgb), 0.18);
-  color: var(--amber);
-  border-color: var(--amber);
-  box-shadow: var(--shadow-glow-amber);
-}
-.sim-bar__core-pick:disabled { opacity: 0.4; cursor: not-allowed; }
-
-.sim-bar__right {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex: 0 0 auto;
-  margin-left: auto;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.sim-bar__user {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(var(--accent-rgb), 0.06);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0 4px 0 8px;
-  height: 32px;
-  box-sizing: border-box;
-  color: var(--text);
-}
-.sim-bar__user-icon { color: var(--amber); }
-.sim-bar__user-name { font-size: 11px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* "Identificarse" entry point — matches the share/whiteboard buttons so the
-   bar reads as a single row of equally-weighted actions. */
-.sim-bar__login {
-  font-family: inherit;
-  background: rgba(var(--accent-rgb), 0.05);
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  font-size: 10px;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  height: 32px;
-  padding: 0 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  box-sizing: border-box;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
-  white-space: nowrap;
-}
-.sim-bar__login:hover {
-  background: rgba(var(--accent-rgb), 0.12);
   color: var(--amber);
   border-color: var(--border-strong);
 }
-
-.sim-bar__share {
-  font-family: inherit;
-  background: rgba(var(--accent-rgb), 0.05);
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  font-size: 10px;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  height: 32px;
-  padding: 0 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  box-sizing: border-box;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  transition: background var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
-  white-space: nowrap;
-}
-.sim-bar__share:hover { background: rgba(var(--accent-rgb), 0.12); color: var(--amber); border-color: var(--border-strong); }
-
-/* Whiteboard reuses the share-button geometry but flips to a green "active"
-   palette when the owner is broadcasting their pointer, mirroring the
-   "compartiendo" affordance for sharing. */
-.sim-bar__whiteboard--on {
-  background: rgba(127, 255, 170, 0.10);
-  color: var(--green);
-  border-color: var(--green);
-  box-shadow: var(--shadow-glow-green);
-}
-
-.sim-bar__share--on {
-  background: rgba(127, 255, 170, 0.10);
-  color: var(--green);
-  border-color: var(--green);
-  box-shadow: var(--shadow-glow-green);
-}
-
-@media (max-width: 1100px) {
-  .sim-bar__brand { display: none; }
-}
-@media (max-width: 900px) {
-  .sim-bar__picker { display: none; }
-  .sim-bar__user-name,
-  .sim-bar__login span { display: none; }
-  .sim-bar__login { padding: 0 8px; }
-}
-
-/* Mobile compaction. Kept at the very end of the stylesheet on purpose: the
-   non-mediated rules above (.sim-bar__right { display: flex }, etc.) would
-   otherwise override these hides — same specificity, last one in source
-   order wins. The right cluster (identity / pizarra / share), the settings
-   popover trigger and CLEAR all have first-class entry points elsewhere
-   (Perfil, sidebar) so hiding them on a phone is safe. */
-@media (max-width: 768px) {
-  .sim-bar__right,
-  .sim-bar__settings,
-  .sim-btn--clear {
-    display: none;
-  }
-}
+.icon-btn > svg { display: block; }
 </style>

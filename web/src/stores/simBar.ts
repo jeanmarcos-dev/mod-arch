@@ -7,6 +7,7 @@ interface SimBarState {
   mode: SimBarMode;
   x: number;
   y: number;
+  coresExpanded: boolean;
 }
 
 const STORAGE_KEY = 'modos-cpu:simbar:v1';
@@ -15,6 +16,7 @@ const DEFAULTS: SimBarState = {
   mode: 'docked',
   x: 24,
   y: 72,
+  coresExpanded: true,
 };
 
 function inViewport(s: SimBarState): boolean {
@@ -30,7 +32,8 @@ function loadFromStorage(): SimBarState {
     if (!raw) return DEFAULTS;
     const parsed = { ...DEFAULTS, ...(JSON.parse(raw) as Partial<SimBarState>) };
     if (parsed.mode !== 'docked' && parsed.mode !== 'floating') return DEFAULTS;
-    if (!inViewport(parsed)) return { ...DEFAULTS, mode: 'docked' };
+    if (typeof parsed.coresExpanded !== 'boolean') parsed.coresExpanded = DEFAULTS.coresExpanded;
+    if (!inViewport(parsed)) return { ...DEFAULTS, coresExpanded: parsed.coresExpanded, mode: 'docked' };
     return parsed;
   } catch {
     return DEFAULTS;
@@ -42,10 +45,19 @@ export const useSimBarStore = defineStore('simBar', () => {
   const mode = ref<SimBarMode>(initial.mode);
   const x = ref(initial.x);
   const y = ref(initial.y);
+  const coresExpanded = ref<boolean>(initial.coresExpanded);
 
-  watch([mode, x, y], ([m, px, py]) => {
+  // toolsDrawerOpen lives in runtime only — the drawer should always start
+  // closed on page load so the visual hierarchy of the simulation is the
+  // first thing the user sees.
+  const toolsDrawerOpen = ref(false);
+
+  watch([mode, x, y, coresExpanded], ([m, px, py, ce]) => {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode: m, x: px, y: py }));
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ mode: m, x: px, y: py, coresExpanded: ce }),
+      );
     } catch {
       // Quota or private mode — silently fall back to in-memory state.
     }
@@ -68,5 +80,35 @@ export const useSimBarStore = defineStore('simBar', () => {
     mode.value = mode.value === 'docked' ? 'floating' : 'docked';
   }
 
-  return { mode, x, y, setPosition, dock, float, toggle };
+  function toggleCores() {
+    coresExpanded.value = !coresExpanded.value;
+  }
+
+  function openTools() {
+    toolsDrawerOpen.value = true;
+  }
+
+  function closeTools() {
+    toolsDrawerOpen.value = false;
+  }
+
+  function toggleTools() {
+    toolsDrawerOpen.value = !toolsDrawerOpen.value;
+  }
+
+  return {
+    mode,
+    x,
+    y,
+    coresExpanded,
+    toolsDrawerOpen,
+    setPosition,
+    dock,
+    float,
+    toggle,
+    toggleCores,
+    openTools,
+    closeTools,
+    toggleTools,
+  };
 });
