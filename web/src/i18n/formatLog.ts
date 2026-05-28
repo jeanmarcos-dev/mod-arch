@@ -132,6 +132,13 @@ export const formatLog = {
     const key = byInit ? 'logEvents.initReap' : 'logEvents.waitReap';
     return `☠ ${t(key, { parent: parentPid, child: childPid, exit })}`;
   },
+  threadCreate(tid: number, tgid: number, creatorPid: number): string {
+    return `⤳ ${t('logEvents.threadCreate', { tid, tgid, creator: creatorPid })}`;
+  },
+  threadExit(tid: number, tgid: number, retval: number): string {
+    const ret = (retval >>> 0).toString(16).padStart(8, '0').toUpperCase();
+    return `⏏ ${t('logEvents.threadExit', { tid, tgid, retval: ret })}`;
+  },
   wsDisconnected(): string {
     return `⚠ ${t('logEvents.wsDisconnected')}`;
   },

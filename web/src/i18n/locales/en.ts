@@ -650,6 +650,7 @@ const en: MessageSchema = {
       nameTooltip: '{name} · EIP {eip}',
       depthChipTitle: 'Depth {depth}; indentation is capped at {cap} so the panel layout stays intact.',
       parentChipTitle: 'Parent: P{pid}',
+      threadChipTitle: 'Thread of group TGID {tgid}; shares memory and file descriptors with its leader.',
       exitCodeTitle: 'Process exit code. Waiting for the parent to call waitpid().',
     },
     console: {
@@ -829,6 +830,8 @@ const en: MessageSchema = {
     waitCall: 'P{pid} called waitpid({target})',
     waitReap: 'P{parent} reaped zombie P{child} (exit=0x{exit})',
     initReap: 'init reaped orphan P{child} (exit=0x{exit})',
+    threadCreate: 'clone: T{tid} spawned in TGID {tgid} (creator P{creator})',
+    threadExit: 'T{tid} exited (TGID {tgid}, retval=0x{retval})',
     wsDisconnected: 'disconnected',
     wsError: 'WS connection error',
     wsJsonErr: 'json: {err}',

@@ -647,6 +647,7 @@ const es = {
       nameTooltip: '{name} · EIP {eip}',
       depthChipTitle: 'Profundidad {depth}; el indent se limita a {cap} para no romper el panel.',
       parentChipTitle: 'Padre: P{pid}',
+      threadChipTitle: 'Hilo del grupo TGID {tgid}; comparte memoria y file descriptors con el líder.',
       exitCodeTitle: 'Exit code del proceso. Espera waitpid() del padre.',
     },
     console: {
@@ -826,6 +827,8 @@ const es = {
     waitCall: 'P{pid} llamó waitpid({target})',
     waitReap: 'P{parent} cosechó zombie P{child} (exit=0x{exit})',
     initReap: 'init cosechó huérfano P{child} (exit=0x{exit})',
+    threadCreate: 'clone: T{tid} nace en TGID {tgid} (creador P{creator})',
+    threadExit: 'T{tid} terminó (TGID {tgid}, retval=0x{retval})',
     wsDisconnected: 'desconectado',
     wsError: 'error de conexión WS',
     wsJsonErr: 'json: {err}',

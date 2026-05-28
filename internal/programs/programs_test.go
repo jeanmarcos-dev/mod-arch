@@ -14,24 +14,20 @@ const (
 )
 
 // loadDemo wires a Demo's procs into a fresh single-core kernel and triggers
-// the boot dispatch the simulator would normally run on RUN/STEP. If the
-// demo declares WithInit, PID 1 (init) is spawned first and every loaded
-// proc is parented to it — same wiring sim.LoadDemo applies in production.
+// the boot dispatch the simulator would normally run on RUN/STEP. init (PID 1)
+// is spawned first and every loaded proc is parented to it — same wiring
+// sim.LoadDemo applies in production now that init is unconditional.
 func loadDemo(t *testing.T, k *kernel.Kernel, d Demo) {
 	t.Helper()
-	if d.WithInit {
-		if _, err := k.SpawnInit(); err != nil {
-			t.Fatalf("SpawnInit: %v", err)
-		}
+	if _, err := k.SpawnInit(); err != nil {
+		t.Fatalf("SpawnInit: %v", err)
 	}
 	for _, p := range d.Procs {
 		pid, err := k.AddProcess(p.Name, p.Bytes)
 		if err != nil {
 			t.Fatalf("AddProcess %s: %v", p.Name, err)
 		}
-		if d.WithInit {
-			k.AdoptUnderInit(pid)
-		}
+		k.AdoptUnderInit(pid)
 	}
 	k.DispatchIdleCores()
 }
@@ -172,18 +168,20 @@ func TestStackOverflow_PageFaultsQuickly(t *testing.T) {
 	demo := findDemo(t, "stack_overflow")
 	k := kernel.New(cpu.DefaultMemSize)
 	loadDemo(t, k, demo)
-	runToHalt(t, k, 100)
-
-	p := k.Processes[1]
-	if p == nil {
-		t.Fatal("PID 1 not registered")
+	// loadDemo halts on AllHalted; with init unconditional, the demo body
+	// lives at PID 2 (PID 1 is init, which never runs user code).
+	for step := 0; step < 200; step++ {
+		if _, err := k.Step(); err != nil {
+			t.Fatalf("step %d: %v", step, err)
+		}
+		if p := k.Processes[2]; p != nil && p.State == kernel.StateZombie {
+			if p.BlockedOn != "page_fault" {
+				t.Fatalf("BlockedOn = %q, want page_fault", p.BlockedOn)
+			}
+			return
+		}
 	}
-	if p.State != kernel.StateZombie {
-		t.Fatalf("state = %s, want ZOMBIE", p.State)
-	}
-	if p.BlockedOn != "page_fault" {
-		t.Fatalf("BlockedOn = %q, want page_fault", p.BlockedOn)
-	}
+	t.Fatal("stack_overflow demo did not zombify with page_fault reason")
 }
 
 func TestSemaphoreLeak_LeavesThreeKernelObjects(t *testing.T) {
@@ -253,7 +251,7 @@ func TestShowcase_RunOnFourCoresHitsExpectedStories(t *testing.T) {
 
 	seenVec := make(map[uint8]bool)
 	const budget = 8000
-	for step := 0; step < budget && !k.AllHalted(); step++ {
+	for step := 0; step < budget && k.HasWork(); step++ {
 		evs, err := k.Step()
 		if err != nil {
 			t.Fatalf("step %d: %v", step, err)
@@ -264,25 +262,23 @@ func TestShowcase_RunOnFourCoresHitsExpectedStories(t *testing.T) {
 			}
 		}
 	}
-	if !k.AllHalted() {
-		t.Fatalf("kernel did not halt within %d steps (reader stuck non-BLOCKED?)", budget)
-	}
 
 	if len(k.Semaphores) != 1 {
 		t.Errorf("Semaphores = %d, want 1 (producer should have created sem id 1)", len(k.Semaphores))
 	}
-	if walker, ok := k.Processes[1]; !ok {
-		t.Error("PID 1 (memwalk) not registered")
+	// PIDs shift by one now that init occupies PID 1 unconditionally.
+	if walker, ok := k.Processes[2]; !ok {
+		t.Error("PID 2 (memwalk) not registered")
 	} else if walker.State != kernel.StateZombie {
 		t.Errorf("memwalk state = %s, want ZOMBIE (sys_exit)", walker.State)
 	}
-	if reader, ok := k.Processes[2]; !ok {
-		t.Error("PID 2 (reader) not registered")
+	if reader, ok := k.Processes[3]; !ok {
+		t.Error("PID 3 (reader) not registered")
 	} else if reader.State != kernel.StateBlocked {
 		t.Errorf("reader state = %s, want BLOCKED (no key pushed)", reader.State)
 	}
-	if consumer, ok := k.Processes[4]; !ok {
-		t.Error("PID 4 (consumer_fault) not registered")
+	if consumer, ok := k.Processes[5]; !ok {
+		t.Error("PID 5 (consumer_fault) not registered")
 	} else if consumer.State != kernel.StateZombie {
 		t.Errorf("consumer state = %s, want ZOMBIE (page fault)", consumer.State)
 	}
@@ -447,35 +443,58 @@ func runUntilDrained(t *testing.T, k *kernel.Kernel, budget int) {
 }
 
 // TestThreadsJoin_LeaderReapsThreadAndExits drives the threads_join demo to
-// completion: the leader (PID 1) spawns one sibling thread (PID 2) via
-// sys_clone with CLONE_VM|CLONE_FILES|CLONE_THREAD, the thread writes
-// "T2 done\n" to stdout and exits with retval 123, the leader's
-// sys_waitpid reaps it and the leader exits with the reaped TID as its
-// own exit code.
+// completion and checks the full lifecycle through events: the leader (PID 2,
+// since init holds PID 1) spawns one sibling thread (PID 3) via sys_clone
+// with CLONE_VM|CLONE_FILES|CLONE_THREAD, the thread writes "T2 done\n" to
+// stdout and exits with retval 123, the leader's sys_waitpid reaps it with
+// the TID as exit code, then the leader itself exits and init eventually
+// reaps the leader. Reading PCBs at the end is unreliable because init has
+// already removed them; we assert on events instead.
 func TestThreadsJoin_LeaderReapsThreadAndExits(t *testing.T) {
 	demo := findDemo(t, "threads_join")
 	k := kernel.New(cpu.DefaultMemSize)
 	k.TimerQuantum = 8
 	loadDemo(t, k, demo)
-	runUntilDrained(t, k, 5000)
 
 	const (
-		leaderPID = 1
-		threadTID = 2
+		leaderPID = 2
+		threadTID = 3
 	)
-	leader := k.Processes[leaderPID]
-	if leader == nil {
-		t.Fatal("leader (pid 1) missing from process table")
+	var (
+		sawThreadCreate bool
+		sawThreadExit   bool
+		leaderReaped    bool
+	)
+	for step := 0; step < 5000 && k.HasWork(); step++ {
+		evs, err := k.Step()
+		if err != nil {
+			t.Fatalf("step %d: %v", step, err)
+		}
+		for _, e := range evs {
+			switch ev := e.(type) {
+			case cpu.EventThreadCreate:
+				if ev.TID == threadTID && ev.TGID == leaderPID && ev.CreatorID == leaderPID {
+					sawThreadCreate = true
+				}
+			case cpu.EventThreadExit:
+				if ev.TID == threadTID && ev.TGID == leaderPID && ev.Retval == 123 {
+					sawThreadExit = true
+				}
+			case cpu.EventWaitOp:
+				if ev.Op == "reap" && ev.ChildPID == leaderPID && ev.ExitCode == threadTID {
+					leaderReaped = true
+				}
+			}
+		}
 	}
-	if leader.ExitCode != threadTID {
-		t.Errorf("leader exit code = %d, want %d (the reaped thread TID)", leader.ExitCode, threadTID)
+	if !sawThreadCreate {
+		t.Error("never saw EventThreadCreate{TID:3, TGID:2, CreatorID:2}")
 	}
-	if leader.TGID != leaderPID {
-		t.Errorf("leader TGID = %d, want %d (leader of its own group)", leader.TGID, leaderPID)
+	if !sawThreadExit {
+		t.Error("never saw EventThreadExit{TID:3, TGID:2, Retval:123}")
 	}
-
-	if _, alive := k.Processes[threadTID]; alive {
-		t.Errorf("thread pid %d still in process table — should have been reaped", threadTID)
+	if !leaderReaped {
+		t.Error("never saw init reap the leader with ExitCode = 3 (the reaped TID)")
 	}
 }
 

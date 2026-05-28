@@ -18,12 +18,6 @@ type Demo struct {
 	// preserving single-core behavior for legacy demos. Values are clamped to
 	// [1, kernel.MaxCores] by sim.SetNumCores.
 	Cores int
-
-	// WithInit makes the simulator spawn PID 1 (init) before loading the
-	// demo's own procs. The demo procs then appear under init in the
-	// process tree, which matches the Unix convention and gives orphan
-	// zombies a permanent home after their parent dies.
-	WithInit bool
 }
 
 // Proc is a single binary that the kernel loads as a process.
@@ -1461,7 +1455,6 @@ int main(void) {
 		{
 			Name:        "demo_fork",
 			Category:    "ipc",
-			WithInit:    true,
 			Description: "El padre crea un hijo con fork(): el hijo recibe EAX=0 y el padre el PID del hijo. El padre espera con waitpid() hasta que el hijo termine, y cosecha su exit_code. Se carga junto a init (PID 1), que ancla el árbol.",
 			Procs: []Proc{{
 				Name: "fork_basic",
@@ -1516,7 +1509,6 @@ int main(void) {
 		{
 			Name:        "demo_pipe",
 			Category:    "ipc",
-			WithInit:    true,
 			Description: "El padre crea un pipe, escribe \"HOLA\", forkea un hijo, y espera. El hijo lee los 4 bytes del pipe y los manda a stdout. La consola muestra HOLA aunque ningún proceso lo haya tipeado en su .data — el dato cruzó un canal IPC.",
 			Procs: []Proc{{
 				Name: "pipe_basic",
@@ -1621,7 +1613,6 @@ int main(void) {
 		{
 			Name:        "demo_vfork",
 			Category:    "ipc",
-			WithInit:    true,
 			Description: "vfork() comparte la memoria del padre con el hijo y deja al padre BLOCKED hasta que el hijo termina. El hijo escribe 0xDEADBEEF en una dirección y muere; el padre, al despertar, lee esa misma dirección y ve el valor cambiado.",
 			Procs: []Proc{{
 				Name: "vfork_shared_mem",
@@ -1675,7 +1666,6 @@ int main(void) {
 		{
 			Name:        "threads_join",
 			Category:    "concurrencia",
-			WithInit:    false,
 			Description: "clone(CLONE_VM|CLONE_FILES|CLONE_THREAD) crea un hilo hermano con memoria, file descriptors y TGID compartidos con el creador. El padre llama waitpid() para esperar que el hilo termine, lee su retval y sale. El hilo escribe en stdout antes de morir para que el flujo sea visible en la BITACORA.",
 			Procs: []Proc{{
 				Name: "thread_join",
@@ -1698,7 +1688,7 @@ void thread_fn(void) {
 					0xB8, 0x78, 0x00, 0x00, 0x00, // 0x00: mov eax, 120 (SysClone)
 					0xBB, 0x00, 0x05, 0x01, 0x00, // 0x05: mov ebx, 0x10500 (CLONE_VM|CLONE_FILES|CLONE_THREAD)
 					0xB9, 0x00, 0x00, 0x00, 0x00, // 0x0A: mov ecx, 0 (kernel allocates stack slot)
-					0xBA, 0x80, 0x00, 0x20, 0x00, // 0x0F: mov edx, 0x200080 (thread_fn EIP)
+					0xBA, 0x80, 0x00, 0x24, 0x00, // 0x0F: mov edx, 0x240080 (thread_fn EIP — PID 2 code)
 					0xCD, 0x80, // 0x14: int 0x80
 					0x89, 0xC3, // 0x16: mov ebx, eax (save thread tid in EBX for waitpid)
 					0xB8, 0x07, 0x00, 0x00, 0x00, // 0x18: mov eax, 7 (SysWaitpid)
@@ -1722,7 +1712,7 @@ void thread_fn(void) {
 					// thread_fn at 0x80
 					0xB8, 0x04, 0x00, 0x00, 0x00, // 0x80: mov eax, 4 (SysWrite)
 					0xBB, 0x01, 0x00, 0x00, 0x00, // 0x85: mov ebx, 1 (stdout)
-					0xB9, 0xC0, 0x00, 0x20, 0x00, // 0x8A: mov ecx, 0x2000C0 (msg)
+					0xB9, 0xC0, 0x00, 0x24, 0x00, // 0x8A: mov ecx, 0x2400C0 (msg in PID 2 code)
 					0xBA, 0x08, 0x00, 0x00, 0x00, // 0x8F: mov edx, 8
 					0xCD, 0x80, // 0x94: int 0x80
 					0xBB, 0x7B, 0x00, 0x00, 0x00, // 0x96: mov ebx, 123 (thread retval)
@@ -1765,7 +1755,6 @@ void thread_fn(void) {
 		{
 			Name:        "threads_race",
 			Category:    "concurrencia",
-			WithInit:    false,
 			Description: "Dos hilos hermanos comparten un contador en 0x3F0000 e incrementan 200 veces cada uno. Sin sincronizacion, el entrelazado de los context switches deja race conditions visibles: el contador final queda muy por debajo de 400. El exit code del proceso reporta el valor final.",
 			Procs: []Proc{{
 				Name: "thread_race",
@@ -1799,12 +1788,12 @@ void thread_fn(void) {
 					0xB8, 0x78, 0x00, 0x00, 0x00, // 0x0A: mov eax, 120 (SysClone)
 					0xBB, 0x00, 0x05, 0x01, 0x00, // 0x0F: mov ebx, 0x10500
 					0xB9, 0x00, 0x00, 0x00, 0x00, // 0x14: mov ecx, 0
-					0xBA, 0x80, 0x00, 0x20, 0x00, // 0x19: mov edx, 0x200080
+					0xBA, 0x80, 0x00, 0x24, 0x00, // 0x19: mov edx, 0x240080
 					0xCD, 0x80, // 0x1E: int 0x80
 					0xB8, 0x78, 0x00, 0x00, 0x00, // 0x20: mov eax, 120 (second clone)
 					0xBB, 0x00, 0x05, 0x01, 0x00, // 0x25: mov ebx, 0x10500
 					0xB9, 0x00, 0x00, 0x00, 0x00, // 0x2A: mov ecx, 0
-					0xBA, 0x80, 0x00, 0x20, 0x00, // 0x2F: mov edx, 0x200080
+					0xBA, 0x80, 0x00, 0x24, 0x00, // 0x2F: mov edx, 0x240080
 					0xCD, 0x80, // 0x34: int 0x80
 					0xB8, 0x07, 0x00, 0x00, 0x00, // 0x36: mov eax, 7 (wait #1)
 					0xBB, 0xFF, 0xFF, 0xFF, 0xFF, // 0x3B: mov ebx, -1
@@ -1880,7 +1869,6 @@ void thread_fn(void) {
 		{
 			Name:        "threads_safe",
 			Category:    "concurrencia",
-			WithInit:    false,
 			Description: "Misma carrera de threads_race pero protegida por un mutex (INT 0x81). El leader crea el mutex y guarda el ID en 0x3F0010; cada hilo lock-ea antes del load-inc-store y unlock-ea despues. Resultado siempre = 400, sin importar el entrelazado.",
 			Procs: []Proc{{
 				Name: "thread_safe",
@@ -1921,12 +1909,12 @@ void thread_fn(void) {
 					0xB8, 0x78, 0x00, 0x00, 0x00, // 0x16: mov eax, 120 (clone 1)
 					0xBB, 0x00, 0x05, 0x01, 0x00, // 0x1B: mov ebx, 0x10500
 					0xB9, 0x00, 0x00, 0x00, 0x00, // 0x20: mov ecx, 0
-					0xBA, 0x80, 0x00, 0x20, 0x00, // 0x25: mov edx, 0x200080
+					0xBA, 0x80, 0x00, 0x24, 0x00, // 0x25: mov edx, 0x240080
 					0xCD, 0x80, // 0x2A: int 0x80
 					0xB8, 0x78, 0x00, 0x00, 0x00, // 0x2C: mov eax, 120 (clone 2)
 					0xBB, 0x00, 0x05, 0x01, 0x00, // 0x31: mov ebx, 0x10500
 					0xB9, 0x00, 0x00, 0x00, 0x00, // 0x36: mov ecx, 0
-					0xBA, 0x80, 0x00, 0x20, 0x00, // 0x3B: mov edx, 0x200080
+					0xBA, 0x80, 0x00, 0x24, 0x00, // 0x3B: mov edx, 0x240080
 					0xCD, 0x80, // 0x40: int 0x80
 					0xB8, 0x07, 0x00, 0x00, 0x00, // 0x42: mov eax, 7 (wait #1)
 					0xBB, 0xFF, 0xFF, 0xFF, 0xFF, // 0x47: mov ebx, -1

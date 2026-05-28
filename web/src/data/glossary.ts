@@ -296,6 +296,41 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     short: 'Cola de procesos BLOCKED esperando un recurso.',
     detail: 'En este simulador la presentamos como una sola lista por simplicidad. En kernels reales hay UNA waiting queue POR recurso: una por cada dispositivo de I/O (teclado, disco, cada socket de red), una por cada mutex, una por cada semáforo, una por cada cola de mensajes. Eso permite que cuando ocurre un evento — por ejemplo la IRQ del teclado — el kernel sepa exactamente a qué proceso despertar consultando SOLO la cola del recurso correspondiente, sin tener que escanear la lista completa de procesos del sistema. La separación por recurso también permite políticas distintas por dispositivo: una cola de disco puede atender por orden de llegada, una de socket por prioridad, etc.',
   },
+  {
+    term: 'TID — Thread ID',
+    category: 'Procesos',
+    short: 'Identificador único de una tarea, sea proceso o hilo.',
+    detail: 'En Linux todo es una task: lo que llamamos "proceso" tiene un TID propio, y los hilos del mismo proceso comparten TGID pero cada uno conserva su TID. En este simulador TID coincide con el PID que el kernel asigna a cada task; el alias semántico ayuda a distinguir "soy un hilo" de "soy un proceso" cuando ambos comparten address space.',
+    aliases: ['TID', 'thread id'],
+  },
+  {
+    term: 'TGID — Thread Group ID',
+    category: 'Procesos',
+    short: 'PID del líder del grupo de hilos. Todos los hilos del mismo "proceso" comparten TGID.',
+    detail: 'fork() crea un nuevo TGID (= PID del hijo). clone(CLONE_THREAD) hereda el TGID del padre, así getpid() devuelve el mismo valor para todos los hilos del proceso, mientras gettid() devuelve el TID real. En la UI agrupamos las tarjetas por TGID para que cada "proceso" aparezca como un nodo con sus hilos colgando debajo.',
+    aliases: ['TGID', 'thread group id'],
+  },
+  {
+    term: 'clone()',
+    category: 'Procesos',
+    short: 'Syscall primitivo de Linux para crear tasks con sharing flags.',
+    detail: 'fork(), vfork() y pthread_create() son casos particulares de clone(). Los flags relevantes acá: CLONE_VM (compartir address space), CLONE_FILES (compartir tabla de fds), CLONE_THREAD (heredar TGID, ser un hilo hermano), CLONE_VFORK (bloquear al padre hasta que el hijo salga). Combinándolos se obtiene el comportamiento clásico de pthread_create: CLONE_VM | CLONE_FILES | CLONE_THREAD.',
+    aliases: ['sys_clone'],
+  },
+  {
+    term: 'pthread_create',
+    category: 'Procesos',
+    short: 'API POSIX para crear un hilo. En glibc se traduce a clone().',
+    detail: 'pthread_create(thread, attr, fn, arg) le pide al kernel una task que comparte memoria y fds con el caller, y arranca en fn(arg). En este simulador es un wrapper sobre sys_clone(120) con los flags CLONE_VM|CLONE_FILES|CLONE_THREAD; pthread_join se modela con waitpid sobre el TID.',
+    aliases: ['pthread', 'pthread_join', 'pthread_exit'],
+  },
+  {
+    term: 'Race condition',
+    category: 'Procesos',
+    short: 'Bug donde dos tasks compiten por un dato sin sincronización y el resultado depende del entrelazado.',
+    detail: 'El demo threads_race lo muestra: dos hilos hacen counter++ que en realidad es load-inc-store. Si el timer interrumpe entre el load y el store, el otro hilo puede leer el mismo valor viejo y los dos terminan escribiendo el mismo número — un increment se pierde. Con quantum chico y 200 iteraciones el contador final queda muy por debajo de 400. La fix didáctica es threads_safe: rodear el critical section con mutex_lock/unlock.',
+    aliases: ['race', 'condición de carrera'],
+  },
 
   // ─── Scheduler ──────────────────────────────────────────────────────────
   {

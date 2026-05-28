@@ -173,6 +173,26 @@ export const GLOSSARY_EN: Record<string, { short: string; detail: string }> = {
     short: 'Queue of BLOCKED processes waiting on a resource.',
     detail: 'We render it as a single list for simplicity. In real kernels there is ONE waiting queue PER resource: one per I/O device (keyboard, disk, every network socket), one per mutex, one per semaphore, one per message queue. That way, when an event arrives — say the keyboard IRQ — the kernel knows exactly which process to wake by inspecting ONLY that resource\'s queue, without scanning the system-wide process list. The split also enables per-device policies: a disk queue can be FCFS, a socket queue can be priority-based, etc.',
   },
+  'TID — Thread ID': {
+    short: 'Unique identifier of a task, whether it is a process or a thread.',
+    detail: 'In Linux everything is a task: what we call a "process" has its own TID, and the threads of the same process share a TGID but each one keeps its own TID. In this simulator TID matches the PID the kernel assigns to each task; the semantic alias helps distinguish "I am a thread" from "I am a process" when both share an address space.',
+  },
+  'TGID — Thread Group ID': {
+    short: 'PID of the thread group leader. All threads of the same "process" share a TGID.',
+    detail: 'fork() creates a new TGID (= child PID). clone(CLONE_THREAD) inherits the parent\'s TGID, so getpid() returns the same value for every thread of the process, while gettid() returns the real TID. In the UI we group cards by TGID so each "process" appears as a node with its threads nested underneath.',
+  },
+  'clone()': {
+    short: 'Linux primitive syscall for creating tasks with sharing flags.',
+    detail: 'fork(), vfork() and pthread_create() are particular cases of clone(). The relevant flags here: CLONE_VM (share address space), CLONE_FILES (share fd table), CLONE_THREAD (inherit TGID, become a sibling thread), CLONE_VFORK (block the parent until the child exits). Combining them yields the classic pthread_create behavior: CLONE_VM | CLONE_FILES | CLONE_THREAD.',
+  },
+  pthread_create: {
+    short: 'POSIX API to create a thread. In glibc it translates into clone().',
+    detail: 'pthread_create(thread, attr, fn, arg) asks the kernel for a task that shares memory and fds with the caller, and starts in fn(arg). In this simulator it is a wrapper over sys_clone(120) with the flags CLONE_VM|CLONE_FILES|CLONE_THREAD; pthread_join is modeled with waitpid on the TID.',
+  },
+  'Race condition': {
+    short: 'Bug where two tasks compete for a datum without synchronization and the result depends on the interleaving.',
+    detail: 'The threads_race demo shows it: two threads do counter++ which is really load-inc-store. If the timer interrupts between load and store, the other thread can read the same stale value and both end up writing the same number — one increment is lost. With a small quantum and 200 iterations the final counter sits well below 400. The didactic fix is threads_safe: bracketing the critical section with mutex_lock/unlock.',
+  },
 
   // ─── Scheduler ──────────────────────────────────────────────────────────
   Quantum: {

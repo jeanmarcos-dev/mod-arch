@@ -28,6 +28,8 @@ export type CpuEvent =
   | { type: 'fork'; parent_pid: number; child_pid: number; is_vfork: boolean }
   | { type: 'reparent'; pid: number; old_parent: number; new_parent: number }
   | { type: 'wait_op'; pid: number; child_pid: number; op: string; exit_code?: number }
+  | { type: 'thread_create'; tid: number; tgid: number; leader_pid: number; creator_pid: number; fn_eip: number; stack_top: number }
+  | { type: 'thread_exit'; tid: number; tgid: number; retval: number }
   | { type: 'pcb_save'; core_id: number; pid: number; regs: Record<string, number> }
   | { type: 'pcb_restore'; core_id: number; pid: number; regs: Record<string, number> }
   | { type: 'sched_decision'; from_pid: number; to_pid: number; reason?: string; ready_queue: number[] }
@@ -137,6 +139,14 @@ export interface PCBInfo {
   children?: number[];
   exit_code?: number;
   vfork_parent?: number;
+  // Thread group identity. tgid groups tasks that share an address space
+  // through clone(CLONE_THREAD); is_leader marks the original task that
+  // owns the memory and renders as the "process" head. For fork-only
+  // demos these fields are still populated (tgid == pid, is_leader true)
+  // so panels can switch to TGID-based grouping unconditionally.
+  tgid?: number;
+  tid?: number;
+  is_leader?: boolean;
 }
 
 // One IPC channel (pipe or FIFO) tracked in the store. Buffer is held
@@ -1148,6 +1158,21 @@ export const useCpuStore = defineStore('cpu', () => {
         const moved = procs.value.find(x => x.pid === ev.pid);
         if (moved) moved.parent_pid = ev.new_parent;
         pushLog(formatLog.reparent(ev.pid, ev.old_parent, ev.new_parent), 'cyan');
+        break;
+      }
+      case 'thread_create': {
+        // A sibling thread was spawned via clone(CLONE_THREAD). Flash both
+        // creator and new task so the user sees them tied to the same
+        // address space; the next 'procs' snapshot fills in tgid/tid for
+        // the panel to fold the new TID under its leader.
+        flashPID(ev.creator_pid);
+        flashPID(ev.tid);
+        pushLog(formatLog.threadCreate(ev.tid, ev.tgid, ev.creator_pid), 'cyan');
+        break;
+      }
+      case 'thread_exit': {
+        flashPID(ev.tid);
+        pushLog(formatLog.threadExit(ev.tid, ev.tgid, ev.retval), 'yellow');
         break;
       }
       case 'wait_op': {

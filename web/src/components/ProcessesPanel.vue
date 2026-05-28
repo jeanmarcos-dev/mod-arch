@@ -42,12 +42,26 @@ interface ProcTreeNode {
   proc: PCBInfo;
   depth: number;
   realDepth: number;
+  isThread: boolean;
 }
 const TREE_DEPTH_CAP = 4;
+// Anchor each task in the tree: threads (tgid != pid) collapse under their
+// leader's subtree via tgid; processes (or anything without tgid metadata)
+// fall back to parent_pid. This keeps the panel hierarchical in both
+// fork-only demos and the new threads demos.
+function treeParentOf(p: PCBInfo): number {
+  const tgid = p.tgid ?? p.pid;
+  if (tgid !== p.pid) return tgid;
+  return p.parent_pid ?? 0;
+}
+function isThreadOf(p: PCBInfo): boolean {
+  const tgid = p.tgid ?? p.pid;
+  return tgid !== p.pid;
+}
 const treeNodes = computed<ProcTreeNode[]>(() => {
   const byParent = new Map<number, PCBInfo[]>();
   for (const p of cpu.procs) {
-    const pp = p.parent_pid ?? 0;
+    const pp = treeParentOf(p);
     if (!byParent.has(pp)) byParent.set(pp, []);
     byParent.get(pp)!.push(p);
   }
@@ -57,7 +71,12 @@ const treeNodes = computed<ProcTreeNode[]>(() => {
     const kids = byParent.get(parent);
     if (!kids) return;
     for (const k of kids) {
-      out.push({ proc: k, depth: Math.min(depth, TREE_DEPTH_CAP), realDepth: depth });
+      out.push({
+        proc: k,
+        depth: Math.min(depth, TREE_DEPTH_CAP),
+        realDepth: depth,
+        isThread: isThreadOf(k),
+      });
       visit(k.pid, depth + 1);
     }
   };
@@ -68,7 +87,9 @@ const treeNodes = computed<ProcTreeNode[]>(() => {
   if (out.length < cpu.procs.length) {
     const seen = new Set(out.map(n => n.proc.pid));
     for (const p of sortedProcs.value) {
-      if (!seen.has(p.pid)) out.push({ proc: p, depth: 0, realDepth: 0 });
+      if (!seen.has(p.pid)) {
+        out.push({ proc: p, depth: 0, realDepth: 0, isThread: isThreadOf(p) });
+      }
     }
   }
   return out;
@@ -287,7 +308,7 @@ function regsSrcTitle(p: PCBInfo): string {
             :style="{ color: `var(--core-${(coreOfPid(node.proc.pid) as number) % 4})` }"
             :title="t('panels.processes.coreRunning', { core: coreOfPid(node.proc.pid) ?? 0 })"
           >C{{ coreOfPid(node.proc.pid) }}</span>
-          <span class="proc-card__pid">P{{ node.proc.pid }}</span>
+          <span class="proc-card__pid">{{ node.isThread ? 'T' : 'P' }}{{ node.proc.pid }}</span>
           <span class="proc-card__name" :title="t('panels.processes.nameTooltip', { name: node.proc.name, eip: hex(pcbEIP(node.proc), 8) })">{{ node.proc.name }}</span>
           <span
             v-if="node.realDepth > TREE_DEPTH_CAP"
@@ -295,7 +316,12 @@ function regsSrcTitle(p: PCBInfo): string {
             :title="t('panels.processes.depthChipTitle', { depth: node.realDepth, cap: TREE_DEPTH_CAP })"
           >↳ d{{ node.realDepth }}</span>
           <span
-            v-if="(node.proc.parent_pid ?? 0) > 0"
+            v-if="node.isThread"
+            class="proc-card__thread-chip"
+            :title="t('panels.processes.threadChipTitle', { tgid: node.proc.tgid })"
+          >TGID {{ node.proc.tgid }}</span>
+          <span
+            v-else-if="(node.proc.parent_pid ?? 0) > 0"
             class="proc-card__parent-chip"
             :title="t('panels.processes.parentChipTitle', { pid: node.proc.parent_pid })"
           >↑P{{ node.proc.parent_pid }}</span>
@@ -353,11 +379,6 @@ function regsSrcTitle(p: PCBInfo): string {
 </template>
 
 <style scoped>
-.procs {
-  height: 100%;
-  min-height: 0;
-}
-
 .empty {
   color: var(--text-muted);
   font-style: italic;
@@ -518,7 +539,8 @@ function regsSrcTitle(p: PCBInfo): string {
    the card header. Tight typography so two of them still fit in the
    narrow col-right column on desktop. */
 .proc-card__parent-chip,
-.proc-card__depth-chip {
+.proc-card__depth-chip,
+.proc-card__thread-chip {
   font-size: 9px;
   letter-spacing: 1px;
   color: var(--text-dim);
@@ -531,6 +553,11 @@ function regsSrcTitle(p: PCBInfo): string {
 .proc-card__depth-chip {
   color: var(--amber);
   border-color: var(--amber);
+}
+
+.proc-card__thread-chip {
+  color: var(--cyan);
+  border-color: var(--cyan);
 }
 
 .proc-card__exit {
