@@ -3,7 +3,6 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { MemoryOwner } from '../../lib/memoryOwners';
 import { fmtAddr, coreColorVar, coreGlowVar } from '../../lib/memoryLayout';
-import Term from '../glossary/Term.vue';
 
 const { t } = useI18n();
 
@@ -19,7 +18,6 @@ const emit = defineEmits<{
 }>();
 
 const isKernel = computed(() => props.owner.kind === 'kernel');
-const codeEnd = computed(() => props.owner.codeBase + Math.max(0, props.owner.codeSize - 1));
 // Stack hint: jumping right at stack_top usually shows empty bytes since the
 // stack grows down. Land a window above so the user sees recently pushed
 // data instead of zeros.
@@ -39,105 +37,100 @@ function onJumpStack() { emit('jump-stack', stackJumpAddr.value); }
 </script>
 
 <template>
-  <div
-    :class="['owner-chip', {
-      'owner-chip--kernel': isKernel,
-      'owner-chip--process': !isKernel,
-      'owner-chip--running': owner.runningOnCore !== undefined,
-      'owner-chip--thread': owner.isThread,
-      'owner-chip--selected': selected,
+  <article
+    :class="['owner-card', {
+      'owner-card--kernel': isKernel,
+      'owner-card--running': owner.runningOnCore !== undefined,
+      'owner-card--thread': owner.isThread,
+      'owner-card--selected': selected,
     }]"
     :style="styleVars"
     :data-owner-id="owner.id"
     @click="emit('select', owner.id)"
   >
-    <header class="owner-chip__head">
-      <span class="owner-chip__id">
-        <template v-if="isKernel">
-          <span class="owner-chip__id-k">{{ t('shell.memoryOwnerChip.kernelLabel') }}</span>
-        </template>
-        <template v-else>
-          <Term term="PID" mode="label" class="owner-chip__id-k">PID</Term>
-          <span class="owner-chip__id-v">{{ owner.pid }}</span>
-        </template>
+    <header class="owner-card__head">
+      <span v-if="isKernel" class="owner-card__title owner-card__title--kernel">{{ t('shell.memoryOwnerChip.kernelLabel') }}</span>
+      <span v-else class="owner-card__title">
+        <span class="owner-card__pid">P{{ owner.pid }}</span>
+        <span class="owner-card__name">{{ owner.name }}</span>
       </span>
-      <span class="owner-chip__name">{{ owner.name }}</span>
       <span
-        v-if="owner.isThread && owner.tgid"
-        class="owner-chip__thread"
-        :title="t('shell.memoryOwnerChip.threadHint', { tgid: owner.tgid })"
-      >TID</span>
+        v-if="owner.state"
+        :class="['owner-card__state', `owner-card__state--${owner.state.toLowerCase()}`]"
+      >{{ owner.state }}</span>
+      <span
+        v-else-if="isKernel && owner.runningOnCore !== undefined"
+        class="owner-card__state owner-card__state--running"
+      >C{{ owner.runningOnCore }}</span>
     </header>
 
-    <dl class="owner-chip__ranges">
-      <div
-        class="owner-chip__range owner-chip__range--clickable"
+    <div class="owner-card__body">
+      <button
+        type="button"
+        class="owner-card__row owner-card__row--clickable"
         :title="t('shell.memoryOwnerChip.jumpCodeHint')"
         @click.stop="onJumpCode"
       >
-        <dt>{{ t('shell.memoryOwnerChip.codeLabel') }}</dt>
-        <dd>{{ fmtAddr(owner.codeBase) }} <span class="owner-chip__range-end">→ {{ fmtAddr(codeEnd) }}</span></dd>
-      </div>
-      <div
+        <span class="owner-card__row-k">{{ t('shell.memoryOwnerChip.codeLabel') }}</span>
+        <span class="owner-card__row-v">{{ fmtAddr(owner.codeBase) }}</span>
+      </button>
+      <button
         v-if="!owner.isThread"
-        class="owner-chip__range owner-chip__range--clickable"
+        type="button"
+        class="owner-card__row owner-card__row--clickable"
         :title="t('shell.memoryOwnerChip.jumpStackHint')"
         @click.stop="onJumpStack"
       >
-        <dt>{{ t('shell.memoryOwnerChip.stackLabel') }}</dt>
-        <dd>{{ fmtAddr(owner.stackTop) }}</dd>
-      </div>
-    </dl>
+        <span class="owner-card__row-k">{{ t('shell.memoryOwnerChip.stackLabel') }}</span>
+        <span class="owner-card__row-v">{{ fmtAddr(owner.stackTop) }}</span>
+      </button>
+    </div>
 
-    <footer v-if="owner.runningOnCore !== undefined || owner.state" class="owner-chip__foot">
-      <span
-        v-if="owner.runningOnCore !== undefined"
-        class="owner-chip__running"
-      >{{ t('shell.memoryOwnerChip.runningOn', { id: owner.runningOnCore }) }}</span>
-      <span
-        v-if="owner.state"
-        :class="['owner-chip__state', `owner-chip__state--${owner.state.toLowerCase()}`]"
-      >{{ owner.state }}</span>
-    </footer>
-  </div>
+    <footer
+      v-if="!isKernel && owner.runningOnCore !== undefined"
+      class="owner-card__foot"
+    >{{ t('shell.memoryOwnerChip.runningOn', { id: owner.runningOnCore }) }}</footer>
+  </article>
 </template>
 
 <style scoped>
-.owner-chip {
+/* Compact PCB-style card. Mirrors the look of ProcessesPanel cards but
+   strips everything not relevant to memory (registers, EFLAGS, tree). The
+   container is `min-width: 0` and every text node clips with ellipsis so
+   the card never widens past the narrow memory sidebar. */
+.owner-card {
   position: relative;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   gap: var(--space-2);
-  padding: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-left: 3px solid var(--core-color, var(--border-strong));
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
   cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.owner-chip:hover {
+.owner-card:hover {
   border-color: var(--border-strong);
+  border-left-color: var(--core-color, var(--amber));
 }
 
-.owner-chip--kernel {
-  border-color: color-mix(in oklab, var(--red-soft) 45%, transparent);
-  background: color-mix(in oklab, var(--red-soft) 7%, var(--surface-2));
+.owner-card--kernel {
+  border-color: color-mix(in oklab, var(--red-soft) 35%, var(--border));
+  border-left-color: var(--red-soft);
+  background: color-mix(in oklab, var(--red-soft) 6%, var(--surface-2));
 }
 
-.owner-chip--kernel:hover {
-  border-color: var(--red-soft);
-}
-
-.owner-chip--running {
-  border-left: 3px solid var(--core-color, var(--amber));
-}
-
-.owner-chip--running::after {
+.owner-card--running::after {
   content: '';
   position: absolute;
-  right: 8px;
-  top: 10px;
+  right: 6px;
+  top: 8px;
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -145,142 +138,136 @@ function onJumpStack() { emit('jump-stack', stackJumpAddr.value); }
   box-shadow: var(--core-glow, 0 0 6px var(--amber));
 }
 
-.owner-chip--thread {
+.owner-card--thread {
   border-style: dashed;
 }
 
-.owner-chip--selected {
-  box-shadow: var(--core-glow, 0 0 0 1px var(--amber));
-  border-color: var(--core-color, var(--amber));
+.owner-card--selected {
+  box-shadow: 0 0 0 1px var(--core-color, var(--amber)), var(--core-glow, none);
 }
 
-.owner-chip__head {
+.owner-card__head {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
-.owner-chip__id {
+.owner-card__title {
   display: inline-flex;
   align-items: baseline;
   gap: 4px;
-  font-family: var(--font-display);
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
-.owner-chip__id-k {
-  color: var(--text-muted);
-  font-size: 10px;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-}
-
-.owner-chip__id-v {
+.owner-card__pid {
   color: var(--amber);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
-.owner-chip--kernel .owner-chip__id-k {
-  color: var(--red-soft);
-  font-size: 13px;
-  letter-spacing: 3px;
-  text-shadow: var(--shadow-glow-red, none);
-}
-
-.owner-chip__name {
+.owner-card__name {
   color: var(--text);
-  font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-  word-break: break-word;
-}
-
-.owner-chip__thread {
-  font-size: 8.5px;
-  letter-spacing: 1px;
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0 4px;
-}
-
-.owner-chip__ranges {
-  display: grid;
-  gap: 2px;
-  font-family: 'JetBrains Mono', monospace;
   font-size: 10.5px;
-  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
-.owner-chip__range {
-  display: grid;
-  grid-template-columns: 44px 1fr;
-  gap: var(--space-2);
-  align-items: baseline;
-  padding: 2px 4px;
-  border-radius: var(--radius-sm);
-}
-
-.owner-chip__range dt {
-  color: var(--text-muted);
-  letter-spacing: 1px;
-  font-size: 9px;
+.owner-card__title--kernel {
+  color: var(--red-soft);
+  font-family: var(--font-display);
+  letter-spacing: 3px;
+  font-size: 12px;
   text-transform: uppercase;
-}
-
-.owner-chip__range dd {
-  margin: 0;
-  color: var(--text);
-  text-align: right;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.owner-chip__range-end {
-  color: var(--text-muted);
-  font-size: 9.5px;
+.owner-card__state {
+  font-size: 9px;
+  letter-spacing: 1px;
+  padding: 0 5px;
+  border: 1px solid;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  flex-shrink: 0;
 }
 
-.owner-chip__range--clickable {
+.owner-card__state--running   { color: var(--green);    border-color: var(--green);    }
+.owner-card__state--ready     { color: var(--cyan);     border-color: var(--cyan);     }
+.owner-card__state--blocked   { color: var(--yellow);   border-color: var(--yellow);   }
+.owner-card__state--zombie    { color: var(--red-soft); border-color: var(--red-soft); }
+.owner-card__state--terminated{ color: var(--text-dim); border-color: var(--text-dim); }
+.owner-card__state--new       { color: var(--text-dim); border-color: var(--text-dim); }
+
+.owner-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.owner-card__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 1px 2px;
+  background: transparent;
+  border: none;
+  border-radius: 2px;
+  color: inherit;
+  font-family: inherit;
+  font-size: 10.5px;
+  min-width: 0;
+  min-height: unset;
+  text-align: left;
+}
+
+.owner-card__row-k {
+  color: var(--text-muted);
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.owner-card__row-v {
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.owner-card__row--clickable {
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
 
-.owner-chip__range--clickable:hover {
-  background: color-mix(in oklab, var(--amber) 12%, transparent);
+.owner-card__row--clickable:hover {
+  background: color-mix(in oklab, var(--amber) 14%, transparent);
 }
 
-.owner-chip__range--clickable:hover dd {
+.owner-card__row--clickable:hover .owner-card__row-v {
   color: var(--amber);
 }
 
-.owner-chip__foot {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 9.5px;
+.owner-card__foot {
+  font-size: 9px;
   letter-spacing: 1px;
-  color: var(--text-muted);
   text-transform: uppercase;
-  border-top: 1px dashed var(--border);
-  padding-top: 4px;
-}
-
-.owner-chip__running {
   color: var(--core-color, var(--amber));
   text-shadow: var(--core-glow, none);
-  font-family: 'JetBrains Mono', monospace;
+  border-top: 1px dashed var(--border);
+  padding-top: 3px;
 }
-
-.owner-chip__state {
-  margin-left: auto;
-  padding: 0 4px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-}
-
-.owner-chip__state--running   { color: var(--green); border-color: var(--green); }
-.owner-chip__state--ready     { color: var(--cyan);  border-color: var(--cyan);  }
-.owner-chip__state--blocked   { color: var(--yellow); border-color: var(--yellow); }
-.owner-chip__state--zombie    { color: var(--red-soft); border-color: var(--red-soft); }
-.owner-chip__state--terminated{ color: var(--text-dim); border-color: var(--text-dim); }
 </style>
