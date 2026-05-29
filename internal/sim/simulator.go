@@ -23,11 +23,14 @@ import (
 // leaves the current configuration untouched, so legacy single-core demos
 // behave as before.
 type Demo struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Category    string `json:"category,omitempty"`
-	Cores       int    `json:"cores,omitempty"`
-	Procs       []Proc `json:"-"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Category     string   `json:"category,omitempty"`
+	Cores        int      `json:"cores,omitempty"`
+	Difficulty   string   `json:"difficulty,omitempty"`
+	Topics       []string `json:"topics,omitempty"`
+	SyscallsUsed []string `json:"syscalls_used,omitempty"`
+	Procs        []Proc   `json:"-"`
 }
 
 // Proc is a single binary inside a Demo.
@@ -767,12 +770,27 @@ func demoSummary(d Demo) map[string]any {
 		totalSize += len(p.Bytes)
 		procNames[i] = p.Name
 	}
+	difficulty := d.Difficulty
+	if difficulty == "" {
+		difficulty = "basic"
+	}
+	topics := d.Topics
+	if topics == nil {
+		topics = []string{}
+	}
+	syscalls := d.SyscallsUsed
+	if syscalls == nil {
+		syscalls = []string{}
+	}
 	return map[string]any{
-		"name":        d.Name,
-		"description": d.Description,
-		"category":    d.Category,
-		"size":        totalSize,
-		"procs":       procNames,
+		"name":          d.Name,
+		"description":   d.Description,
+		"category":      d.Category,
+		"size":          totalSize,
+		"procs":         procNames,
+		"difficulty":    difficulty,
+		"topics":        topics,
+		"syscalls_used": syscalls,
 	}
 }
 

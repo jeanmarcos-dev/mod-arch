@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/jeanmarcos/modos-cpu/internal/crypto"
-
+	"github.com/jeanmarcos/modos-cpu/internal/programs"
 	"github.com/jeanmarcos/modos-cpu/internal/server/i18n"
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
 	"github.com/jeanmarcos/modos-cpu/internal/tutor"
@@ -106,6 +106,7 @@ func New(cfg Config) *Server {
 func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/programs", s.handlePrograms)
+	mux.HandleFunc("GET /api/categories", s.handleCategories)
 	mux.HandleFunc("GET /api/memory", s.handleMemory)
 	mux.HandleFunc("GET /ws", s.handleWS)
 	mux.HandleFunc("GET /full", s.handleFull)
@@ -327,6 +328,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handlePrograms(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.manager.Programs())
+}
+
+// handleCategories returns the catalogue's category metadata so the frontend
+// can render section headers (label + description + canonical order) without
+// hardcoding them.
+func (s *Server) handleCategories(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, programs.Categories())
 }
 
 func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {

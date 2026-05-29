@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { useCpuStore } from '../stores/cpu';
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { ChevronDown, Lock } from '@lucide/vue';
+import { ChevronDown, ChevronRight, Lock, Search } from '@lucide/vue';
+import { useCpuStore, type ProgramInfo } from '../stores/cpu';
 import { useAppConfigStore } from '../stores/appConfig';
 import { useIsStudent } from '../composables/useIsStudent';
 
@@ -11,39 +11,156 @@ const cpu = useCpuStore();
 const route = useRoute();
 const appCfg = useAppConfigStore();
 const isStudent = useIsStudent();
-const { t } = useI18n();
+const { t, te } = useI18n();
+
 const open = ref(false);
 const root = ref<HTMLElement | null>(null);
+const searchInput = ref<HTMLInputElement | null>(null);
+const query = ref('');
+const expanded = reactive<Record<string, boolean>>({});
 
 const selectedProgram = computed(() =>
-  cpu.programs.find(p => p.name === cpu.selectedProgram)
+  cpu.programs.find(p => p.name === cpu.selectedProgram),
 );
 
 // Routes can constrain the picker to a single demo category by setting
-// `meta.category` (e.g. /concurrencia → 'concurrencia'). Without it, every
-// loaded demo is offered.
-const visiblePrograms = computed(() => {
-  const cat = typeof route.meta.category === 'string' ? route.meta.category : '';
+// `meta.category`. Without it, every loaded demo is offered.
+const routeCategory = computed(() =>
+  typeof route.meta.category === 'string' ? (route.meta.category as string) : '',
+);
+
+const constrainedPrograms = computed(() => {
+  const cat = routeCategory.value;
   if (!cat) return cpu.programs;
   return cpu.programs.filter(p => (p.category ?? '') === cat);
 });
+
+// normalize strips diacritics + lowercases for case-insensitive search.
+function normalize(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+const normalizedQuery = computed(() => normalize(query.value.trim()));
+
+function matchesQuery(p: ProgramInfo): boolean {
+  const q = normalizedQuery.value;
+  if (!q) return true;
+  const haystack = [p.name, p.description, ...(p.topics ?? [])]
+    .map(normalize)
+    .join(' ');
+  return haystack.includes(q);
+}
+
+const filteredPrograms = computed(() => constrainedPrograms.value.filter(matchesQuery));
+
+// Section is a category header + its demos. Built from cpu.categories so the
+// canonical order travels from the backend; demos without a registered slug
+// fall under a single fallback section.
+interface Section {
+  slug: string;
+  label: string;
+  description: string;
+  demos: ProgramInfo[];
+}
+
+const sections = computed<Section[]>(() => {
+  const byCat = new Map<string, ProgramInfo[]>();
+  for (const p of filteredPrograms.value) {
+    const cat = p.category ?? '';
+    if (!byCat.has(cat)) byCat.set(cat, []);
+    byCat.get(cat)!.push(p);
+  }
+  const out: Section[] = [];
+  for (const cm of cpu.categories) {
+    const demos = byCat.get(cm.slug);
+    if (demos && demos.length > 0) {
+      out.push({ slug: cm.slug, label: cm.label, description: cm.description, demos });
+      byCat.delete(cm.slug);
+    }
+  }
+  // Anything not registered in cpu.categories lands here. Empty slug means
+  // "Otros / sin categoría" — appears last so the curated order is preserved.
+  for (const [cat, demos] of byCat) {
+    if (demos.length === 0) continue;
+    out.push({
+      slug: cat,
+      label: cat === '' ? t('catalog.sections.uncategorized') : cat,
+      description: '',
+      demos,
+    });
+  }
+  return out;
+});
+
+const hasQuery = computed(() => normalizedQuery.value.length > 0);
+
+// Section labels respect i18n when a key exists, otherwise fall back to the
+// backend-provided label.
+function sectionLabel(s: Section): string {
+  const key = `catalog.categories.${s.slug}.label`;
+  if (te(key)) return t(key);
+  return s.label;
+}
+
+function sectionDescription(s: Section): string {
+  const key = `catalog.categories.${s.slug}.description`;
+  if (te(key)) return t(key);
+  return s.description;
+}
+
+function difficultyLabel(d?: string): string {
+  if (!d) return '';
+  const key = `catalog.difficulty.${d}`;
+  if (te(key)) return t(key);
+  return d;
+}
 
 function isDemoLocked(name: string): boolean {
   if (!isStudent.value) return false;
   return appCfg.disabledDemos.has(name);
 }
 
-function toggle() {
+function isExpanded(slug: string): boolean {
+  if (hasQuery.value) return true;
+  if (slug in expanded) return expanded[slug];
+  // Default: open only the section containing the currently selected demo.
+  return selectedProgram.value?.category === slug;
+}
+
+function toggleSection(slug: string) {
+  if (hasQuery.value) return; // sections are forced-open while searching
+  expanded[slug] = !isExpanded(slug);
+}
+
+function tooltipFor(p: ProgramInfo): string {
+  if (isDemoLocked(p.name)) return t('programs.locked.tooltip');
+  const parts: string[] = [];
+  if (p.topics && p.topics.length > 0) {
+    parts.push(t('catalog.tooltip.topics', { list: p.topics.join(', ') }));
+  }
+  if (p.syscalls_used && p.syscalls_used.length > 0) {
+    parts.push(t('catalog.tooltip.syscalls', { list: p.syscalls_used.join(', ') }));
+  }
+  return parts.join('\n');
+}
+
+function toggleOpen() {
   open.value = !open.value;
+  if (open.value) {
+    void nextTick(() => searchInput.value?.focus());
+  } else {
+    query.value = '';
+  }
 }
 
 function pick(name: string) {
   if (isDemoLocked(name)) return;
   cpu.selectedProgram = name;
   open.value = false;
+  query.value = '';
 }
 
-// Cerramos el dropdown si se clickea afuera.
+// Cierra al click fuera.
 function onDocClick(e: MouseEvent) {
   if (!root.value) return;
   if (!root.value.contains(e.target as Node)) {
@@ -51,50 +168,149 @@ function onDocClick(e: MouseEvent) {
   }
 }
 
-function onEsc(e: KeyboardEvent) {
-  if (e.key === 'Escape') open.value = false;
+// Atajo global: "/" enfoca búsqueda y abre dropdown. Solo si no estamos en un
+// input ya, para no robar el slash a quien esté tipeando.
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && open.value) {
+    open.value = false;
+    return;
+  }
+  if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+      return;
+    }
+    e.preventDefault();
+    open.value = true;
+    void nextTick(() => searchInput.value?.focus());
+  }
 }
+
+// Navegación con flechas dentro del dropdown abierto.
+const visibleDemos = computed<ProgramInfo[]>(() => {
+  const flat: ProgramInfo[] = [];
+  for (const s of sections.value) {
+    if (isExpanded(s.slug)) flat.push(...s.demos);
+  }
+  return flat;
+});
+
+function onItemKey(e: KeyboardEvent, name: string) {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    pick(name);
+    return;
+  }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const list = visibleDemos.value;
+    const idx = list.findIndex(p => p.name === name);
+    if (idx < 0) return;
+    const nextIdx = e.key === 'ArrowDown' ? Math.min(idx + 1, list.length - 1) : Math.max(idx - 1, 0);
+    const target = list[nextIdx];
+    if (!target) return;
+    const el = root.value?.querySelector(
+      `[data-demo-row="${CSS.escape(target.name)}"]`,
+    ) as HTMLElement | null;
+    el?.focus();
+  }
+}
+
+watch(open, async (val) => {
+  if (val) {
+    await nextTick();
+    searchInput.value?.focus();
+  }
+});
 
 onMounted(() => {
   document.addEventListener('click', onDocClick);
-  document.addEventListener('keydown', onEsc);
+  document.addEventListener('keydown', onKeydown);
+  // Lazy-load categories when the picker mounts; cpu.connect() also kicks it
+  // off but the picker may render before the WS is up (e.g. on /overview).
+  void cpu.loadCategories();
 });
+
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClick);
-  document.removeEventListener('keydown', onEsc);
+  document.removeEventListener('keydown', onKeydown);
 });
 </script>
 
 <template>
   <div class="picker" ref="root">
-    <button class="trigger" :class="{ open }" @click="toggle">
-      <span class="sel-name">{{ selectedProgram?.name ?? '— seleccione un demo —' }}</span>
+    <button class="trigger" :class="{ open }" type="button" @click="toggleOpen">
+      <span class="sel-name">{{ selectedProgram?.name ?? t('catalog.empty') }}</span>
       <span v-if="selectedProgram?.procs && selectedProgram.procs.length > 1" class="sel-procs">
         {{ selectedProgram.procs.length }} proc
       </span>
       <ChevronDown :size="14" :stroke-width="2" class="arrow" />
     </button>
 
-    <div v-if="open" class="dropdown">
-      <div
-        v-for="p in visiblePrograms"
-        :key="p.name"
-        class="opt"
-        :class="{ selected: p.name === cpu.selectedProgram, locked: isDemoLocked(p.name) }"
-        role="button"
-        tabindex="0"
-        :aria-disabled="isDemoLocked(p.name) ? 'true' : undefined"
-        :title="isDemoLocked(p.name) ? t('programs.locked.tooltip') : undefined"
-        @click="pick(p.name)"
-        @keydown.enter="pick(p.name)"
-        @keydown.space.prevent="pick(p.name)"
-      >
-        <div class="opt-head">
-          <span class="opt-name">{{ p.name }}</span>
-          <span v-if="p.procs && p.procs.length > 1" class="opt-procs">{{ p.procs.length }} proc</span>
-          <Lock v-if="isDemoLocked(p.name)" class="opt-lock" :size="12" :stroke-width="2" />
+    <div v-if="open" class="dropdown" role="listbox">
+      <div class="search-bar">
+        <Search :size="14" :stroke-width="2" class="search-icon" />
+        <input
+          ref="searchInput"
+          v-model="query"
+          type="text"
+          class="search-input"
+          :placeholder="t('catalog.search.placeholder')"
+          :aria-label="t('catalog.search.placeholder')"
+        />
+        <span v-if="!query" class="search-hint">{{ t('catalog.search.hint') }}</span>
+      </div>
+
+      <div v-if="sections.length === 0" class="empty">
+        {{ t('catalog.search.noResults', { q: query }) }}
+      </div>
+
+      <div v-for="s in sections" :key="s.slug" class="section">
+        <button
+          type="button"
+          class="section-header"
+          :aria-expanded="isExpanded(s.slug)"
+          @click="toggleSection(s.slug)"
+        >
+          <ChevronDown v-if="isExpanded(s.slug)" :size="12" :stroke-width="2" class="section-caret" />
+          <ChevronRight v-else :size="12" :stroke-width="2" class="section-caret" />
+          <span class="section-label">{{ sectionLabel(s) }}</span>
+          <span class="section-count">({{ s.demos.length }})</span>
+        </button>
+
+        <div v-if="isExpanded(s.slug)" class="section-body">
+          <div
+            v-for="p in s.demos"
+            :key="p.name"
+            :data-demo-row="p.name"
+            class="opt"
+            :class="{
+              selected: p.name === cpu.selectedProgram,
+              locked: isDemoLocked(p.name),
+            }"
+            role="option"
+            tabindex="0"
+            :aria-disabled="isDemoLocked(p.name) ? 'true' : undefined"
+            :aria-selected="p.name === cpu.selectedProgram"
+            :title="tooltipFor(p)"
+            @click="pick(p.name)"
+            @keydown="onItemKey($event, p.name)"
+          >
+            <div class="opt-head">
+              <span class="opt-name">{{ p.name }}</span>
+              <span
+                v-if="p.difficulty"
+                class="badge"
+                :class="`badge-${p.difficulty}`"
+              >{{ difficultyLabel(p.difficulty) }}</span>
+              <span v-if="p.procs && p.procs.length > 1" class="opt-procs">
+                {{ p.procs.length }} proc
+              </span>
+              <Lock v-if="isDemoLocked(p.name)" class="opt-lock" :size="12" :stroke-width="2" />
+            </div>
+            <div class="opt-desc">{{ p.description }}</div>
+          </div>
         </div>
-        <div class="opt-desc">{{ p.description }}</div>
       </div>
     </div>
   </div>
@@ -163,10 +379,7 @@ onBeforeUnmount(() => {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  /* Anchor to trigger's left edge but grow past its width so descriptions
-     don't squish into 5-6 lines. Clamp to viewport so we never bleed off
-     the right edge on narrow screens. */
-  min-width: 360px;
+  min-width: 380px;
   max-width: calc(100vw - var(--space-4));
   max-height: 60vh;
   overflow-y: auto;
@@ -179,16 +392,113 @@ onBeforeUnmount(() => {
   flex-direction: column;
 }
 
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.search-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.search-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.6;
+  font-family: 'JetBrains Mono', monospace;
+  flex-shrink: 0;
+}
+
+.empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.section + .section {
+  border-top: 1px solid var(--border);
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: rgba(var(--accent-rgb), 0.03);
+  border: none;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--amber-dim);
+  text-align: left;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.section-header:hover {
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--amber);
+}
+
+.section-caret {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.section-label {
+  flex: 1;
+}
+
+.section-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.section-body {
+  display: flex;
+  flex-direction: column;
+}
+
 .opt {
-  /* It's a <div role="button"> rather than <button>: native <button> ignores
-     content-driven height when the inner text wraps, causing items to
-     overlap. A div with role/tabindex/handlers keeps the same a11y. */
+  /* role="option" on a <div> rather than <button>: native <button> ignores
+     content-driven height when inner text wraps, causing items to overlap. */
   display: block;
   width: 100%;
   text-align: left;
   background: transparent;
   border-bottom: 1px solid var(--border);
-  padding: 10px 14px;
+  padding: 10px 14px 10px 28px;
   cursor: pointer;
   font-family: 'JetBrains Mono', monospace;
   transition: background var(--transition-fast);
@@ -206,13 +516,8 @@ onBeforeUnmount(() => {
   outline-offset: -1px;
 }
 
-.opt:last-child {
-  border-bottom: none;
-}
-
 .opt:hover {
   background: rgba(var(--accent-rgb), 0.08);
-  box-shadow: none;
 }
 
 .opt.selected {
@@ -243,6 +548,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   margin-bottom: 4px;
+  flex-wrap: wrap;
 }
 
 .opt-name {
@@ -251,6 +557,31 @@ onBeforeUnmount(() => {
   font-size: 12px;
   letter-spacing: 1px;
   text-transform: uppercase;
+}
+
+.badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 2px;
+  border: 1px solid currentColor;
+}
+
+.badge-basic {
+  color: var(--green);
+  background: rgba(106, 255, 158, 0.08);
+}
+
+.badge-intermediate {
+  color: var(--amber);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.badge-advanced {
+  color: var(--red);
+  background: rgba(255, 106, 106, 0.08);
 }
 
 .opt-procs {
@@ -266,8 +597,6 @@ onBeforeUnmount(() => {
   font-size: 11px;
   line-height: 1.45;
   font-style: italic;
-  /* No truncation: each item grows to fit its full description. The dropdown
-     has max-height + overflow-y:auto, so the scroll handles long lists. */
   white-space: normal;
   word-wrap: break-word;
 }
@@ -284,10 +613,13 @@ onBeforeUnmount(() => {
     padding: 10px 14px;
   }
 
+  .dropdown {
+    min-width: 100%;
+    max-width: 100vw;
+  }
+
   .opt {
-    padding: 12px 14px;
-    /* min-height: 0 ya viene del scope desktop; en mobile dejamos que
-       el content decida — touch target queda asegurado por el padding. */
+    padding: 12px 14px 12px 28px;
   }
 
   .opt-desc {

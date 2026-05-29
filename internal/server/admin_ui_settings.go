@@ -12,13 +12,22 @@ import (
 )
 
 // demoCatalogEntry is the slim shape the admin SPA needs to render the
-// "disable demos" toggle table — name, description and optional category.
-// The runtime payload (bytes, source maps) is intentionally omitted so the
-// transfer stays under a couple of KB.
+// "disable demos" toggle table. The runtime payload (bytes, source maps) is
+// intentionally omitted so the transfer stays under a couple of KB.
 type demoCatalogEntry struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Category    string `json:"category,omitempty"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Category     string   `json:"category,omitempty"`
+	Difficulty   string   `json:"difficulty,omitempty"`
+	Topics       []string `json:"topics,omitempty"`
+	SyscallsUsed []string `json:"syscalls_used,omitempty"`
+}
+
+// adminCatalog wraps the demo list with category metadata so the admin SPA
+// can render section headers without a second roundtrip.
+type adminCatalog struct {
+	Categories []programs.CategoryMeta `json:"categories"`
+	Demos      []demoCatalogEntry      `json:"demos"`
 }
 
 // handleAdminListDemos returns the static catalog of demos so the admin can
@@ -28,9 +37,19 @@ func (s *Server) handleAdminListDemos(w http.ResponseWriter, r *http.Request) {
 	all := programs.Demos()
 	out := make([]demoCatalogEntry, len(all))
 	for i, d := range all {
-		out[i] = demoCatalogEntry{Name: d.Name, Description: d.Description, Category: d.Category}
+		out[i] = demoCatalogEntry{
+			Name:         d.Name,
+			Description:  d.Description,
+			Category:     d.Category,
+			Difficulty:   string(d.Difficulty),
+			Topics:       d.Topics,
+			SyscallsUsed: d.SyscallsUsed,
+		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, adminCatalog{
+		Categories: programs.Categories(),
+		Demos:      out,
+	})
 }
 
 // Setting keys for the admin-curated UI surface.

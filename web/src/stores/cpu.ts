@@ -116,12 +116,24 @@ export interface Presence {
   focus?: Focus;
 }
 
+export type Difficulty = 'basic' | 'intermediate' | 'advanced';
+
 export interface ProgramInfo {
   name: string;
   description: string;
   category?: string;
   size: number;
   procs?: string[];
+  difficulty?: Difficulty;
+  topics?: string[];
+  syscalls_used?: string[];
+}
+
+export interface CategoryMeta {
+  slug: string;
+  label: string;
+  description: string;
+  order: number;
 }
 
 export interface PCBInfo {
@@ -292,6 +304,9 @@ export const useCpuStore = defineStore('cpu', () => {
 
   // ─── Programas y log ────────────────────────────────────────────────────
   const programs = ref<ProgramInfo[]>([]);
+  // Catalogue category metadata fetched from /api/categories. Populated once
+  // per session; the picker reads order + labels + descriptions from here.
+  const categories = ref<CategoryMeta[]>([]);
   const selectedProgram = ref<string | null>(null);
   const log = ref<LogEntry[]>([]);
   const connected = ref(false);
@@ -667,10 +682,27 @@ export const useCpuStore = defineStore('cpu', () => {
   // example navigating away from the Simulator and back through the shell —
   // would otherwise leak a WebSocket per visit, each with its own onmessage
   // handler pushing events to the log a second, third, fourth time.
+  // loadCategories fetches the catalogue's section metadata once per tab.
+  // The picker uses it to render section headers in canonical order; a
+  // network blip falls back to deriving sections from programs[].category.
+  async function loadCategories(): Promise<void> {
+    if (categories.value.length > 0) return;
+    try {
+      const r = await fetch('/api/categories');
+      if (r.ok) {
+        const data = (await r.json()) as CategoryMeta[];
+        if (Array.isArray(data)) categories.value = data;
+      }
+    } catch {
+      /* keep empty; ProgramPicker falls back to ad-hoc grouping */
+    }
+  }
+
   function connect() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
+    void loadCategories();
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const url = `${proto}://${location.host}/ws`;
     ws = new WebSocket(url);
@@ -1410,7 +1442,7 @@ export const useCpuStore = defineStore('cpu', () => {
     regs, segments, mode, halted, running, paused, tick,
     stepHz, clockHz, speedMul, tickIntervalMs, timerQuantum,
     changedRegs, changedRegsByCore,
-    programs, selectedProgram, log, connected, hasEverConnected, lastError,
+    programs, categories, loadCategories, selectedProgram, log, connected, hasEverConnected, lastError,
     reconnectAttempts, nextRetryAt, reconnectNow,
     procs, currentPID, readyQueue, waitQueue, flashingPIDs, procSources, procSourceMaps,
     pendingMemoryJump, requestMemoryJump, clearMemoryJump, lastMnemonic,

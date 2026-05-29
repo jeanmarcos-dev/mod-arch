@@ -52,7 +52,7 @@ export const router = createRouter({
         { path: 'procesos', name: 'processes', component: Processes, meta: { titleKey: 'router.titles.processes', section: true } },
         { path: 'memoria', name: 'memory', component: Memory, meta: { titleKey: 'router.titles.memory', section: true } },
         { path: 'interrupciones', name: 'interrupts', component: Interrupts, meta: { titleKey: 'router.titles.interrupts', section: true } },
-        { path: 'concurrencia', name: 'concurrency', component: Concurrency, meta: { titleKey: 'router.titles.concurrency', section: true, category: 'concurrencia' } },
+        { path: 'concurrencia', name: 'concurrency', component: Concurrency, meta: { titleKey: 'router.titles.concurrency', section: true, category: 'sincronizacion' } },
         { path: 'x86', name: 'x86-real', component: X86Real, meta: { titleKey: 'router.titles.x86', section: true } },
         // Legacy URL: /sesiones used to host a list of sessions, but with
         // the "one session per user" policy the list collapses to a single

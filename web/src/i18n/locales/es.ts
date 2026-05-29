@@ -192,6 +192,13 @@ const es = {
       jumpStackHint: 'Saltar a la cima de la pila de este proceso',
       runningOn: 'ejecutándose en C{id}',
       threadHint: 'Hilo del grupo TGID {tgid}; comparte memoria con el líder.',
+      threadsTitle: 'Hilos ({n})',
+      threadsExpand: 'Mostrar los hilos del grupo',
+      threadsCollapse: 'Ocultar los hilos del grupo',
+      threadShares: 'Comparte la memoria de P{leader}',
+      threadOn: 'en C{id}',
+      parentChip: 'Padre: P{pid}',
+      depthChip: 'Profundidad {depth} en el árbol de fork',
     },
     memoryRegionChip: {
       jumpHint: 'Saltar al inicio de {name}',
@@ -982,6 +989,60 @@ const es = {
   programs: {
     locked: {
       tooltip: 'Esta demo está deshabilitada por el administrador.',
+    },
+  },
+  catalog: {
+    empty: '— seleccione un demo —',
+    search: {
+      placeholder: 'Buscar por nombre, descripción o tema…',
+      hint: '/',
+      noResults: 'Sin resultados para "{q}"',
+    },
+    sections: {
+      uncategorized: 'Sin categoría',
+    },
+    difficulty: {
+      basic: 'Básico',
+      intermediate: 'Intermedio',
+      advanced: 'Avanzado',
+    },
+    tooltip: {
+      topics: 'Temas: {list}',
+      syscalls: 'Syscalls: {list}',
+    },
+    categories: {
+      'fundamentos-cpu': {
+        label: 'Fundamentos CPU',
+        description: 'Registros, stack y control de flujo: el ABC del procesador antes de tocar el sistema operativo.',
+      },
+      'modo-dual': {
+        label: 'Modo dual y syscalls',
+        description: 'Cruce user/kernel: int 0x80, mode switch, sys_read/write y la primera transición a PL0.',
+      },
+      scheduling: {
+        label: 'Scheduling',
+        description: 'Round-robin, timer preemption, quantum y la pelea de varios procesos por la CPU.',
+      },
+      'procesos-ipc': {
+        label: 'Procesos e IPC',
+        description: 'fork, vfork, pipes y waitpid: cómo un proceso engendra otro y se comunican.',
+      },
+      hilos: {
+        label: 'Hilos',
+        description: 'clone(CLONE_VM|CLONE_THREAD): el modelo de threads sobre el mismo espacio de direcciones.',
+      },
+      sincronizacion: {
+        label: 'Sincronización',
+        description: 'Mutex, semáforos, race conditions y deadlock. Antes/después del lock, lado a lado.',
+      },
+      'fallos-excepciones': {
+        label: 'Fallos y excepciones',
+        description: 'Page fault, stack overflow, syscalls inválidas y operaciones de sync inconsistentes.',
+      },
+      showcase: {
+        label: 'Showcase',
+        description: 'Recorrido integral del simulador en un solo demo multi-core.',
+      },
     },
   },
   sections: {

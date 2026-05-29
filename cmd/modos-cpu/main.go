@@ -89,11 +89,14 @@ func runServer(args []string) {
 			})
 		}
 		demos = append(demos, sim.Demo{
-			Name:        d.Name,
-			Description: d.Description,
-			Category:    d.Category,
-			Cores:       d.Cores,
-			Procs:       procs,
+			Name:         d.Name,
+			Description:  d.Description,
+			Category:     d.Category,
+			Cores:        d.Cores,
+			Difficulty:   string(d.Difficulty),
+			Topics:       d.Topics,
+			SyscallsUsed: d.SyscallsUsed,
+			Procs:        procs,
 		})
 	}
 

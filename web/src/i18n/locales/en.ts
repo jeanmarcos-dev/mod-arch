@@ -195,6 +195,13 @@ const en: MessageSchema = {
       jumpStackHint: "Jump to the top of this process's stack",
       runningOn: 'running on C{id}',
       threadHint: 'Thread of group TGID {tgid}; shares memory with the leader.',
+      threadsTitle: 'Threads ({n})',
+      threadsExpand: 'Show the threads in this group',
+      threadsCollapse: 'Hide the threads in this group',
+      threadShares: 'Shares memory with P{leader}',
+      threadOn: 'on C{id}',
+      parentChip: 'Parent: P{pid}',
+      depthChip: 'Depth {depth} in the fork tree',
     },
     memoryRegionChip: {
       jumpHint: 'Jump to the start of {name}',
@@ -985,6 +992,60 @@ const en: MessageSchema = {
   programs: {
     locked: {
       tooltip: 'This demo has been disabled by the administrator.',
+    },
+  },
+  catalog: {
+    empty: '— select a demo —',
+    search: {
+      placeholder: 'Search by name, description or topic…',
+      hint: '/',
+      noResults: 'No results for "{q}"',
+    },
+    sections: {
+      uncategorized: 'Uncategorized',
+    },
+    difficulty: {
+      basic: 'Basic',
+      intermediate: 'Intermediate',
+      advanced: 'Advanced',
+    },
+    tooltip: {
+      topics: 'Topics: {list}',
+      syscalls: 'Syscalls: {list}',
+    },
+    categories: {
+      'fundamentos-cpu': {
+        label: 'CPU fundamentals',
+        description: 'Registers, stack and control flow: the processor ABCs before touching the OS.',
+      },
+      'modo-dual': {
+        label: 'Dual mode & syscalls',
+        description: 'User/kernel boundary: int 0x80, mode switch, sys_read/write and the first PL0 transition.',
+      },
+      scheduling: {
+        label: 'Scheduling',
+        description: 'Round-robin, timer preemption, quantum and the fight of multiple processes for the CPU.',
+      },
+      'procesos-ipc': {
+        label: 'Processes & IPC',
+        description: 'fork, vfork, pipes and waitpid: how a process spawns another and they communicate.',
+      },
+      hilos: {
+        label: 'Threads',
+        description: 'clone(CLONE_VM|CLONE_THREAD): the threading model on top of a shared address space.',
+      },
+      sincronizacion: {
+        label: 'Synchronization',
+        description: 'Mutex, semaphores, race conditions and deadlock. Before/after the lock, side by side.',
+      },
+      'fallos-excepciones': {
+        label: 'Faults & exceptions',
+        description: 'Page faults, stack overflow, invalid syscalls and inconsistent sync ops.',
+      },
+      showcase: {
+        label: 'Showcase',
+        description: 'A full simulator tour in a single multi-core demo.',
+      },
     },
   },
   sections: {
