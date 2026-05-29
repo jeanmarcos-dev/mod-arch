@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { useCpuStore, type PCBInfo } from '../stores/cpu';
 import { usePreferencesStore } from '../stores/preferences';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Maximize2, Minimize2, Eye, EyeOff, ChevronDown, ChevronRight } from '@lucide/vue';
 import CollapsiblePanel from './ui/CollapsiblePanel.vue';
+import { useProcessTree } from '../composables/useProcessTree';
 
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
@@ -34,98 +35,33 @@ const EFLAGS_BITS: Array<{ name: FlagName; mask: number }> = [
 // al crear cada proceso, así que esto equivale al orden de carga del kernel.
 const sortedProcs = computed(() => [...cpu.procs].sort((a, b) => a.pid - b.pid));
 
-// Tree-view nodes: depth-first walk of the process tree, with each proc
-// tagged with its nesting depth so the template can render the indent
-// guideline. Depth is capped at 4 (deeper subtrees show a ↳ dN chip but
-// stop accumulating horizontal indent — the col-right column is narrow).
-interface ProcTreeNode {
-  proc: PCBInfo;
-  depth: number;
-  realDepth: number;
-  isThread: boolean;
-}
+// Depth cap keeps the indent inside the narrow col-right column; deeper
+// subtrees still render but stop accumulating horizontal offset and surface
+// a ↳ dN chip via realDepth.
 const TREE_DEPTH_CAP = 4;
-// Anchor each task in the tree: threads (tgid != pid) collapse under their
-// leader's subtree via tgid; processes (or anything without tgid metadata)
-// fall back to parent_pid. This keeps the panel hierarchical in both
-// fork-only demos and the new threads demos.
-function treeParentOf(p: PCBInfo): number {
-  const tgid = p.tgid ?? p.pid;
-  if (tgid !== p.pid) return tgid;
-  return p.parent_pid ?? 0;
-}
-function isThreadOf(p: PCBInfo): boolean {
-  const tgid = p.tgid ?? p.pid;
-  return tgid !== p.pid;
-}
-// initPID identifies the always-present init process so we can hide it from
-// the tree when prefs.showInit is off. We trust the "init" name (matches the
-// kernel.SpawnInit constant) since multi-init scenarios are out of scope.
-const initPID = computed(() => {
-  const p = cpu.procs.find(x => x.name === 'init');
-  return p?.pid ?? 0;
-});
-
-const treeNodes = computed<ProcTreeNode[]>(() => {
-  const hideInit = !prefs.showInit && initPID.value > 0;
-  const visibleProcs = hideInit
-    ? cpu.procs.filter(p => p.pid !== initPID.value)
-    : cpu.procs;
-  const byParent = new Map<number, PCBInfo[]>();
-  for (const p of visibleProcs) {
-    let pp = treeParentOf(p);
-    // When init is hidden, promote its direct children to the top level so
-    // they appear as roots instead of orphaned at depth 1 under a missing
-    // node. This is a purely cosmetic remapping — kernel-side parent_pid
-    // is still init for these procs.
-    if (hideInit && pp === initPID.value) pp = 0;
-    if (!byParent.has(pp)) byParent.set(pp, []);
-    byParent.get(pp)!.push(p);
-  }
-  for (const list of byParent.values()) list.sort((a, b) => a.pid - b.pid);
-  const out: ProcTreeNode[] = [];
-  const visit = (parent: number, depth: number) => {
-    const kids = byParent.get(parent);
-    if (!kids) return;
-    for (const k of kids) {
-      out.push({
-        proc: k,
-        depth: Math.min(depth, TREE_DEPTH_CAP),
-        realDepth: depth,
-        isThread: isThreadOf(k),
-      });
-      visit(k.pid, depth + 1);
-    }
-  };
-  visit(0, 0);
-  // Fallback for demos that haven't seeded parent_pid on every proc yet
-  // (e.g. older snapshots arriving during a reload): append any procs the
-  // walk missed so they remain visible instead of vanishing.
-  if (out.length < visibleProcs.length) {
-    const seen = new Set(out.map(n => n.proc.pid));
-    for (const p of visibleProcs) {
-      if (!seen.has(p.pid)) {
-        out.push({ proc: p, depth: 0, realDepth: 0, isThread: isThreadOf(p) });
-      }
-    }
-  }
-  return out;
-});
+const { treeNodes, initPID } = useProcessTree({ depthCap: TREE_DEPTH_CAP });
 
 const EXPANDED_KEY = 'modos.procs.expandedPids';
 
-function loadExpanded(): Set<number> {
-  if (typeof window === 'undefined') return new Set();
+interface LoadResult {
+  set: Set<number>;
+  hadEntry: boolean;
+}
+
+function loadExpanded(): LoadResult {
+  if (typeof window === 'undefined') return { set: new Set(), hadEntry: false };
+  const raw = window.localStorage.getItem(EXPANDED_KEY);
+  if (raw === null) return { set: new Set(), hadEntry: false };
   try {
-    const raw = window.localStorage.getItem(EXPANDED_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return new Set(parsed.filter((x: unknown): x is number => typeof x === 'number'));
-      }
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return {
+        set: new Set(parsed.filter((x: unknown): x is number => typeof x === 'number')),
+        hadEntry: true,
+      };
     }
-  } catch { /* corrupt entry, fall back to empty */ }
-  return new Set();
+  } catch { /* corrupt entry */ }
+  return { set: new Set(), hadEntry: true };
 }
 
 function persistExpanded() {
@@ -135,7 +71,22 @@ function persistExpanded() {
   } catch { /* quota / private mode → keep in memory only */ }
 }
 
-const expandedPids = ref<Set<number>>(loadExpanded());
+const _loaded = loadExpanded();
+const expandedPids = ref<Set<number>>(_loaded.set);
+// On first visit (no localStorage entry yet), auto-expand all PCBs once they
+// appear. Subsequent visits respect whatever the user has toggled.
+let firstSessionAutoExpand = !_loaded.hadEntry;
+watch(
+  () => sortedProcs.value.map(p => p.pid),
+  (pids) => {
+    if (firstSessionAutoExpand && pids.length > 0) {
+      expandedPids.value = new Set(pids);
+      persistExpanded();
+      firstSessionAutoExpand = false;
+    }
+  },
+  { immediate: true },
+);
 
 function isExpanded(pid: number): boolean {
   return expandedPids.value.has(pid);
@@ -147,21 +98,12 @@ function toggleExpanded(p: PCBInfo) {
     next.delete(p.pid);
   } else {
     next.add(p.pid);
-    // Expanding a PCB centers the memory panel on this process so the user
-    // sees the bytes of the code segment update as the proc runs. ZOMBIEs are
-    // skipped because their memory slot is gone.
-    if (canJumpToMemory(p)) {
-      cpu.requestMemoryJump(p.code_base);
-    }
   }
   expandedPids.value = next;
   persistExpanded();
 }
 
 function expandAll() {
-  // Bulk expand does not fire a memory jump: with N procs there is no good
-  // "last one wins" answer, and the user expects this control to just open
-  // the cards. They can still click an individual head to jump.
   expandedPids.value = new Set(sortedProcs.value.map(p => p.pid));
   persistExpanded();
 }
@@ -175,10 +117,6 @@ const allExpanded = computed(() =>
   sortedProcs.value.length > 0 && sortedProcs.value.every(p => expandedPids.value.has(p.pid)),
 );
 
-function canJumpToMemory(p: PCBInfo): boolean {
-  if (p.state === 'ZOMBIE') return false;
-  return p.code_base > 0;
-}
 
 // PID → core that is currently executing it (if any). Used to surface the
 // C<id> chip on RUN cards and to pick the live register source.
@@ -571,9 +509,9 @@ function regsSrcTitle(p: PCBInfo): string {
   text-align: center;
 }
 
-/* All in-header tags are plain coloured text — no boxes, no backgrounds. The
-   visual hierarchy comes from colour and weight, not from chip frames that
-   compete with the panel border. */
+/* In-header tags are plain coloured text — no boxes, no backgrounds. The
+   exception is RUN: the only state that demands "CPU is on this PCB right
+   now" priority, so it gets a solid green chip that the eye lands on first. */
 .proc-card__state {
   font-size: 10px;
   letter-spacing: 1px;
@@ -581,7 +519,12 @@ function regsSrcTitle(p: PCBInfo): string {
   flex-shrink: 0;
 }
 
-.proc-card__state.state-run     { color: var(--green); }
+.proc-card__state.state-run {
+  background: var(--green);
+  color: var(--bg-0);
+  padding: 1px 5px;
+  border-radius: 2px;
+}
 .proc-card__state.state-ready   { color: var(--yellow); }
 .proc-card__state.state-blocked { color: var(--red-soft); }
 .proc-card__state.state-new     { color: var(--cyan); }

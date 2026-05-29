@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Hourglass } from '@lucide/vue';
+import { Hourglass, Eye, EyeOff } from '@lucide/vue';
 import { useCpuStore, type CpuEvent, type PCBInfo } from '../../stores/cpu';
 import { usePreferencesStore } from '../../stores/preferences';
+import { useProcessTree } from '../../composables/useProcessTree';
 
 const { t } = useI18n();
 import PCBCopyNarrator from '../../components/narrators/PCBCopyNarrator.vue';
@@ -22,44 +23,81 @@ const prefs = usePreferencesStore();
 
 const sched = useSchedulerMetrics();
 
-// Sorted PCBs so the layout never jumps when state changes.
-const sortedProcs = computed<PCBInfo[]>(() => [...cpu.procs].sort((a, b) => a.pid - b.pid));
-
 function hex(n: number, w = 6): string {
   return '0x' + (n >>> 0).toString(16).padStart(w, '0').toUpperCase();
 }
 
-// Registers we show in each PCB card. EIP / ESP / EAX / EBX is the canonical
-// "execution context" the kernel actually saves and restores.
-const SHOWN_REGS = ['EIP', 'ESP', 'EAX', 'EBX'] as const;
+// Same register set the Overview surfaces, ordered for at-a-glance reading.
+const SHOWN_REGS = ['EAX', 'EBX', 'ECX', 'EDX', 'ESP', 'EBP', 'EIP'] as const;
 
-// coreRunning returns the CoreInfo currently executing pid, or undefined if
-// the process is READY/BLOCKED/ZOMBIE. With multicore several processes are
-// RUN simultaneously (one per core), so checking cpu.currentPID alone would
-// miss every PID running outside the core the user happens to be viewing.
-function coreRunning(pid: number) {
-  return cpu.cores.find(c => c.current_pid === pid);
-}
+// EFLAGS bit layout — mirror of pkg/cpu/cpu.go. Kept in sync with
+// ProcessesPanel.vue so both views read the same flags.
+type FlagName = 'CF' | 'ZF' | 'SF' | 'IF' | 'OF';
+const EFLAGS_BITS: Array<{ name: FlagName; mask: number }> = [
+  { name: 'CF', mask: 1 << 0  },
+  { name: 'ZF', mask: 1 << 6  },
+  { name: 'SF', mask: 1 << 7  },
+  { name: 'IF', mask: 1 << 9  },
+  { name: 'OF', mask: 1 << 11 },
+];
 
 // visibleCores honors the SimBar filter. Used both for the per-core CPU
 // strips at the top and for the "current" highlight on the PCB cards —
 // processes running on a hidden core no longer steal the highlight.
 const visibleCores = computed(() => cpu.cores.filter(c => cpu.isCoreVisible(c.id)));
-const visibleRunPIDs = computed(() => new Set(visibleCores.value.map(c => c.current_pid).filter(p => p > 0)));
 
-function pcbValue(p: PCBInfo, reg: string): number {
-  // For RUN processes the PCB snapshot is stale until the next pcb_save —
-  // the live truth lives in the core executing it. We pull the live value
-  // from that core's register file and flag it as "live" in the UI.
-  const core = coreRunning(p.pid);
-  if (core && p.state === 'RUN') {
-    return core.regs[reg] ?? 0;
+// PID → visible core id currently executing it (or null). PCB cards surface
+// the C<id> chip without ever reading register values from the core: the
+// register file shown on the card is always the kernel-saved snapshot in
+// `p.regs`, which only updates on `pcb_save` / `pcb_restore`.
+function coreOfPid(pid: number): number | null {
+  for (const c of visibleCores.value) {
+    if (c.current_pid === pid) return c.id;
   }
-  return p.regs[reg] ?? 0;
+  return null;
 }
 
-function isLive(p: PCBInfo): boolean {
-  return p.state === 'RUN' && coreRunning(p.pid) !== undefined;
+// Tree walk with no depth cap — this view has the horizontal room the
+// Overview's narrow column lacks, so deeper fork chains render naturally.
+const { treeNodes, initPID } = useProcessTree();
+
+function flagOn(eflags: number, mask: number): boolean {
+  return (eflags & mask) !== 0;
+}
+
+function flagHelp(name: FlagName): string {
+  return t(`panels.processes.flagHelp.${name}`);
+}
+
+function flagChipTitle(name: FlagName, on: boolean): string {
+  return on
+    ? t('panels.processes.flagChipOn', { name, help: flagHelp(name) })
+    : t('panels.processes.flagChipOff', { name, help: flagHelp(name) });
+}
+
+function regCellTitle(reg: string, p: PCBInfo): string {
+  return t('panels.processes.regCellTitle', {
+    cell: t('panels.processes.regCellSaved', { reg }),
+    pid: p.pid,
+  });
+}
+
+function stateTitle(p: PCBInfo): string {
+  switch (p.state) {
+    case 'RUN': {
+      const core = coreOfPid(p.pid);
+      return core === null
+        ? t('panels.processes.states.runUnknownCore')
+        : t('panels.processes.states.run', { core });
+    }
+    case 'READY':   return t('panels.processes.states.ready');
+    case 'BLOCKED': return p.blocked_on
+      ? t('panels.processes.states.blockedOn', { reason: p.blocked_on })
+      : t('panels.processes.states.blocked');
+    case 'NEW':     return t('panels.processes.states.new');
+    case 'ZOMBIE':  return t('panels.processes.states.zombie');
+    default:        return p.state;
+  }
 }
 
 // Context switch feed: tap sched_decision via the store subscribe channel.
@@ -160,40 +198,107 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
         </article>
       </section>
 
-      <section class="pcb-grid" v-if="sortedProcs.length > 0">
-        <article
-          v-for="p in sortedProcs"
-          :key="p.pid"
-          :data-narrator-anchor="`pcb-${p.pid}`"
-          :class="[
-            'pcb-card',
-            stateClass(p.state),
-            { 'pcb-card--current': visibleRunPIDs.has(p.pid), 'pcb-card--flash': cpu.flashingPIDs.has(p.pid) },
-          ]"
-        >
-          <header class="pcb-card__head">
-            <Term term="PID" mode="label" class="pcb-card__pid">P{{ p.pid }}</Term>
-            <Term :term="p.state" mode="label" class="pcb-card__state">{{ p.state }}</Term>
-          </header>
-          <div class="pcb-card__name">{{ p.name }}</div>
-          <ul class="pcb-card__regs">
-            <li v-for="r in SHOWN_REGS" :key="r">
-              <Term :term="r" mode="label" class="pcb-card__reg-name">{{ r }}</Term>
+      <section class="pcb-tree-wrap" v-if="treeNodes.length > 0">
+        <header class="pcb-tree-wrap__head">
+          <span class="pcb-tree-wrap__label">
+            <Term term="PCB" mode="label">PCBs</Term>
+            <span class="pcb-tree-wrap__hint">{{ t('sections.processes.pcbTreeHint') }}</span>
+          </span>
+          <button
+            v-if="initPID > 0"
+            type="button"
+            class="pcb-tree-wrap__btn"
+            :title="prefs.showInit ? t('panels.processes.hideInit') : t('panels.processes.showInit')"
+            :aria-pressed="prefs.showInit"
+            @click="prefs.setShowInit(!prefs.showInit)"
+          >
+            <Eye v-if="prefs.showInit" :size="13" :stroke-width="2" />
+            <EyeOff v-else :size="13" :stroke-width="2" />
+            <span>{{ prefs.showInit ? t('panels.processes.hideInit') : t('panels.processes.showInit') }}</span>
+          </button>
+        </header>
+        <div class="pcb-tree">
+          <article
+            v-for="node in treeNodes"
+            :key="node.proc.pid"
+            :data-narrator-anchor="`pcb-${node.proc.pid}`"
+            :class="[
+              'pcb-card',
+              stateClass(node.proc.state),
+              {
+                'pcb-card--current': coreOfPid(node.proc.pid) !== null,
+                'pcb-card--flash': cpu.flashingPIDs.has(node.proc.pid),
+                'pcb-card--child': node.depth > 0,
+                'pcb-card--thread': node.isThread,
+              },
+            ]"
+            :style="node.depth > 0 ? { marginLeft: (node.depth * 20) + 'px' } : undefined"
+          >
+            <header class="pcb-card__head" :title="stateTitle(node.proc)">
+              <Term term="PID" mode="label" class="pcb-card__pid">{{ node.isThread ? 'T' : 'P' }}{{ node.proc.pid }}</Term>
+              <span class="pcb-card__name">{{ node.proc.name }}</span>
+              <span class="pcb-card__head-spacer" />
               <span
-                :class="['pcb-card__reg-val', { 'pcb-card__reg-val--live': isLive(p) }]"
-                :title="isLive(p) ? t('sections.processes.valLive') : t('sections.processes.valSaved')"
-              >
-                {{ hex(pcbValue(p, r), 8) }}
+                v-if="coreOfPid(node.proc.pid) !== null"
+                class="pcb-card__core"
+                :style="{ color: `var(--core-${(coreOfPid(node.proc.pid) as number) % 4})` }"
+                :title="t('panels.processes.coreRunning', { core: coreOfPid(node.proc.pid) ?? 0 })"
+              >C{{ coreOfPid(node.proc.pid) }}</span>
+              <Term :term="node.proc.state" mode="label" class="pcb-card__state">{{ node.proc.state }}</Term>
+              <span
+                v-if="node.isThread"
+                class="pcb-card__chip pcb-card__chip--thread"
+                :title="t('panels.processes.threadChipTitle', { tgid: node.proc.tgid })"
+              >TGID {{ node.proc.tgid }}</span>
+              <span
+                v-else-if="(node.proc.parent_pid ?? 0) > 0"
+                class="pcb-card__chip pcb-card__chip--parent"
+                :title="t('panels.processes.parentChipTitle', { pid: node.proc.parent_pid })"
+              >↑P{{ node.proc.parent_pid }}</span>
+            </header>
+
+            <div class="pcb-card__meta">
+              <span class="pcb-card__addr" :title="t('sections.processes.codeBaseHint')">@ {{ hex(node.proc.code_base, 8) }}</span>
+              <span class="pcb-card__regs-src" :title="t('panels.processes.regsValuesAre', { desc: t('panels.processes.regsHintSaved') })">
+                {{ t('panels.processes.regsSrcSaved') }}
               </span>
-            </li>
-          </ul>
-          <footer class="pcb-card__foot">
-            <span :title="t('sections.processes.codeBaseHint')">{{ hex(p.code_base) }}</span>
-            <span v-if="p.blocked_on" class="pcb-card__blocked"><Hourglass :size="11" :stroke-width="2" /> {{ p.blocked_on }}</span>
-          </footer>
-        </article>
+              <span
+                v-if="node.proc.state === 'ZOMBIE' && node.proc.exit_code !== undefined"
+                class="pcb-card__exit"
+                :title="t('panels.processes.exitCodeTitle')"
+              >exit={{ node.proc.exit_code }}</span>
+            </div>
+
+            <div v-if="node.proc.state === 'BLOCKED' && node.proc.blocked_on" class="pcb-card__blocked-banner">
+              <Hourglass :size="12" :stroke-width="2" />
+              <span>{{ t('panels.processes.blockedWaiting', { reason: node.proc.blocked_on }) }}</span>
+            </div>
+
+            <ul class="pcb-card__regs">
+              <li v-for="r in SHOWN_REGS" :key="r" :title="regCellTitle(r, node.proc)">
+                <Term :term="r" mode="label" class="pcb-card__reg-name">{{ r }}</Term>
+                <span class="pcb-card__reg-val">{{ hex(node.proc.regs[r] ?? 0, 8) }}</span>
+              </li>
+            </ul>
+
+            <div class="pcb-card__flags">
+              <span
+                class="pcb-card__flags-label"
+                :title="t('panels.processes.eflagsHint')"
+                @click="cpu.openGlossary('EFLAGS')"
+              >{{ t('panels.processes.eflagsTitle') }}</span>
+              <span
+                v-for="f in EFLAGS_BITS"
+                :key="f.name"
+                class="pcb-flag"
+                :class="{ 'pcb-flag--on': flagOn(node.proc.regs.EFLAGS ?? 0, f.mask) }"
+                :title="flagChipTitle(f.name, flagOn(node.proc.regs.EFLAGS ?? 0, f.mask))"
+              >{{ f.name }}</span>
+            </div>
+          </article>
+        </div>
       </section>
-      <div v-else class="pcb-grid__empty">
+      <div v-else class="pcb-tree__empty">
         {{ t('sections.processes.pcbEmpty') }}
       </div>
 
@@ -430,13 +535,68 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
 .cpu-strip__reg-name { color: var(--cyan); }
 .cpu-strip__reg-val  { color: var(--amber); }
 
-.pcb-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+.pcb-tree-wrap {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-3);
 }
 
-.pcb-grid__empty {
+.pcb-tree-wrap__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.pcb-tree-wrap__label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: var(--amber);
+  text-transform: uppercase;
+}
+
+.pcb-tree-wrap__hint {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: none;
+  color: var(--text-dim);
+}
+
+.pcb-tree-wrap__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  padding: 4px 10px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.pcb-tree-wrap__btn:hover {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.pcb-tree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.pcb-tree__empty {
   color: var(--text-dim);
   font-style: italic;
   padding: var(--space-5);
@@ -448,18 +608,29 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
 .pcb-card {
   background: var(--surface-1);
   border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
   border-radius: var(--radius-md);
-  padding: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   transition: border-color var(--transition-base), box-shadow var(--transition-base), background var(--transition-base);
 }
 
+.pcb-card.state-run     { border-left-color: var(--green); }
+.pcb-card.state-ready   { border-left-color: #ffd24f; }
+.pcb-card.state-blocked { border-left-color: #ff7a7a; }
+.pcb-card.state-new     { border-left-color: var(--cyan); }
+.pcb-card.state-zombie  { border-left-color: var(--text-dim); }
+
+.pcb-card--child {
+  border-left-style: dotted;
+  border-left-color: var(--accent);
+}
+
 .pcb-card--current {
-  border-color: var(--amber);
+  background: color-mix(in oklab, var(--green) 6%, var(--surface-1));
   box-shadow: var(--shadow-glow-amber);
-  background: rgba(var(--accent-rgb), 0.04);
 }
 
 .pcb-card--flash {
@@ -471,17 +642,21 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
   100% { background: rgba(var(--accent-rgb), 0.04); }
 }
 
-.pcb-card.state-run    { color: var(--green); }
-.pcb-card.state-ready  { color: #ffd24f; }
-.pcb-card.state-blocked { color: #ff7a7a; }
-.pcb-card.state-zombie { color: var(--text-dim); }
+.pcb-card.state-zombie {
+  opacity: 0.7;
+}
+.pcb-card.state-zombie .pcb-card__name {
+  text-decoration: line-through;
+  text-decoration-color: var(--text-dim);
+}
 
 .pcb-card__head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px dashed var(--border);
+  flex-wrap: wrap;
+  gap: 6px var(--space-3);
   padding-bottom: 4px;
+  border-bottom: 1px dashed var(--border);
 }
 
 .pcb-card__pid {
@@ -490,69 +665,167 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
   letter-spacing: 2px;
   color: var(--amber);
   font-weight: normal;
-}
-
-.pcb-card__state {
-  font-size: 10px;
-  letter-spacing: 2px;
-  font-family: 'JetBrains Mono', monospace;
+  flex-shrink: 0;
 }
 
 .pcb-card__name {
   color: var(--text);
   font-size: 12px;
   font-family: 'JetBrains Mono', monospace;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pcb-card__head-spacer {
+  flex: 1 1 auto;
+}
+
+.pcb-card__core {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.pcb-card__state {
+  font-size: 10px;
+  letter-spacing: 2px;
+  font-family: 'JetBrains Mono', monospace;
+  flex-shrink: 0;
+}
+
+.pcb-card__state.state-run     { color: var(--green); }
+.pcb-card__state.state-ready   { color: #ffd24f; }
+.pcb-card__state.state-blocked { color: #ff7a7a; }
+.pcb-card__state.state-new     { color: var(--cyan); }
+.pcb-card__state.state-zombie  { color: var(--text-dim); }
+
+.pcb-card__chip {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.pcb-card__chip--thread {
+  color: var(--cyan);
+  border-color: var(--cyan);
+}
+
+.pcb-card__chip--parent {
+  color: var(--text-dim);
+}
+
+.pcb-card__meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.pcb-card__addr {
+  color: var(--cyan);
+}
+
+.pcb-card__regs-src {
+  margin-left: auto;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.pcb-card__exit {
+  color: var(--text);
+  letter-spacing: 1px;
+}
+
+.pcb-card__blocked-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #ff7a7a;
+  font-style: italic;
+  padding: 4px 8px;
+  border: 1px dashed rgba(255, 122, 122, 0.4);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 122, 122, 0.04);
+  align-self: flex-start;
 }
 
 .pcb-card__regs {
   list-style: none;
   padding: 0;
   margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: 3px var(--space-4);
 }
 
 .pcb-card__regs li {
   display: flex;
   justify-content: space-between;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 12px;
+  cursor: help;
 }
 
 .pcb-card__reg-name { color: var(--cyan); }
+.pcb-card__reg-val  { color: var(--yellow, #ffd24f); }
 
-.pcb-card__reg-val {
-  color: var(--text);
-  position: relative;
-}
-
-.pcb-card__reg-val--live {
-  color: var(--text-dim);
-  font-style: italic;
-}
-
-.pcb-card__reg-val--live::after {
-  content: '·live';
-  margin-left: 4px;
-  font-size: 9px;
-  color: var(--green);
-  font-style: normal;
-}
-
-.pcb-card__foot {
+.pcb-card__flags {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border);
+}
+
+.pcb-card__flags-label {
+  color: var(--cyan);
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
-  color: var(--text-dim);
-  margin-top: auto;
-  border-top: 1px dashed var(--border);
-  padding-top: 4px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.15s ease, text-shadow 0.15s ease;
 }
 
-.pcb-card__blocked {
-  color: #ff7a7a;
+.pcb-card__flags-label:hover {
+  color: var(--amber);
+  text-shadow: 0 0 6px rgba(var(--accent-rgb), 0.4);
+}
+
+.pcb-flag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text-dim);
+  background: transparent;
+  cursor: help;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.pcb-flag--on {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: rgba(var(--accent-rgb), 0.12);
+  text-shadow: 0 0 4px rgba(var(--accent-rgb), 0.45);
 }
 
 .procs-page__grid {
