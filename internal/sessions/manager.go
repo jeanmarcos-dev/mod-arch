@@ -668,6 +668,10 @@ func (m *Manager) PublicShared() []*Session {
 }
 
 // Programs returns the loadable demo list. Identical for every session.
+//
+// Topics and SyscallsUsed are always emitted as arrays (never null) so the
+// frontend can iterate without guarding. Difficulty falls back to "basic"
+// when unset for the same reason.
 func (m *Manager) Programs() []map[string]any {
 	list := make([]map[string]any, 0, len(m.demos))
 	for _, d := range m.demos {
@@ -677,12 +681,27 @@ func (m *Manager) Programs() []map[string]any {
 			totalSize += len(p.Bytes)
 			procNames[i] = p.Name
 		}
+		difficulty := d.Difficulty
+		if difficulty == "" {
+			difficulty = "basic"
+		}
+		topics := d.Topics
+		if topics == nil {
+			topics = []string{}
+		}
+		syscalls := d.SyscallsUsed
+		if syscalls == nil {
+			syscalls = []string{}
+		}
 		list = append(list, map[string]any{
-			"name":        d.Name,
-			"description": d.Description,
-			"category":    d.Category,
-			"size":        totalSize,
-			"procs":       procNames,
+			"name":          d.Name,
+			"description":   d.Description,
+			"category":      d.Category,
+			"size":          totalSize,
+			"procs":         procNames,
+			"difficulty":    difficulty,
+			"topics":        topics,
+			"syscalls_used": syscalls,
 		})
 	}
 	return list
