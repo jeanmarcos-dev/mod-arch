@@ -418,5 +418,29 @@ async function onCopy() {
   .monitor__screen {
     padding: 8px;
   }
+
+  /* Shrink the title typography on phones so "CONSOLA · sys_write fd=1"
+     fits in a single 32px header strip alongside the actions cluster
+     instead of wrapping into a tall multi-line block. */
+  .monitor__header {
+    height: 30px;
+    min-height: 30px;
+    padding: 0 8px;
+  }
+  .monitor__title {
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .monitor__actions { flex: 0 0 auto; gap: 2px; }
+}
+
+@media (max-width: 360px) {
+  .chunk__body { font-size: 18px; }
+  .monitor__screen { padding: 6px; }
 }
 </style>

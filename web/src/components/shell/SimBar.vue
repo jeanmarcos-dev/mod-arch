@@ -248,7 +248,7 @@ const pauseTooltip = computed(() => {
             <button
               v-else
               type="button"
-              class="sim-btn sim-btn--anim-run is-running"
+              class="sim-btn sim-btn--anim-run"
               :disabled="viewer"
               :title="pauseTooltip"
               @click="cpu.pause()"

@@ -190,6 +190,10 @@ async function doLogout() { await auth.logout(); }
   .mini-bar__spacer { display: none; }
   .mini-bar__login,
   .mini-bar__user { margin-left: auto; }
+  .mini-bar__login,
+  .mini-bar__share { height: 44px; }
+  .mini-bar__user { height: 36px; }
+  .mini-bar__user-name { max-width: 100px; }
 }
 
 @media (max-width: 700px) {
@@ -198,8 +202,16 @@ async function doLogout() { await auth.logout(); }
 
 @media (max-width: 480px) {
   /* Leave room for the floating hamburger button at the top-left. */
-  .mini-bar { padding-left: 52px; }
-  .mini-bar__share span { display: none; }
-  .mini-bar__share { padding: 0 8px; }
+  .mini-bar { padding-left: 52px; gap: var(--space-1); }
+  .mini-bar__share span,
+  .mini-bar__login span { display: none; }
+  .mini-bar__share,
+  .mini-bar__login { padding: 0 10px; min-width: 44px; }
+  .mini-bar__user-name { max-width: 80px; }
+}
+
+@media (max-width: 360px) {
+  .mini-bar { padding-left: 48px; padding-right: var(--space-2); }
+  .mini-bar__user-name { max-width: 60px; }
 }
 </style>

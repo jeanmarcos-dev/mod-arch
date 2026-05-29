@@ -173,4 +173,11 @@ function openGlossary() {
   min-height: 0;
   overflow-y: auto;
 }
+
+@media (max-width: 480px) {
+  .cpanel__head { gap: 4px; padding-bottom: 4px; margin-bottom: 6px; }
+  .cpanel__title { font-size: 12px; }
+  .cpanel__actions { gap: 4px; }
+  .cpanel__toggle { min-width: 32px; min-height: 32px; }
+}
 </style>

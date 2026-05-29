@@ -5,11 +5,13 @@ import { useI18n } from 'vue-i18n';
 import { ChevronDown, ChevronRight, Lock, Search } from '@lucide/vue';
 import { useCpuStore, type ProgramInfo } from '../stores/cpu';
 import { useAppConfigStore } from '../stores/appConfig';
+import { useSimBarStore } from '../stores/simBar';
 import { useIsStudent } from '../composables/useIsStudent';
 
 const cpu = useCpuStore();
 const route = useRoute();
 const appCfg = useAppConfigStore();
+const bar = useSimBarStore();
 const isStudent = useIsStudent();
 const { t, te } = useI18n();
 
@@ -102,12 +104,6 @@ function sectionLabel(s: Section): string {
   return s.label;
 }
 
-function sectionDescription(s: Section): string {
-  const key = `catalog.categories.${s.slug}.description`;
-  if (te(key)) return t(key);
-  return s.description;
-}
-
 function difficultyLabel(d?: string): string {
   if (!d) return '';
   const key = `catalog.difficulty.${d}`;
@@ -195,6 +191,13 @@ const visibleDemos = computed<ProgramInfo[]>(() => {
   return flat;
 });
 
+function focusDemo(name: string) {
+  const el = root.value?.querySelector(
+    `[data-demo-row="${CSS.escape(name)}"]`,
+  ) as HTMLElement | null;
+  el?.focus();
+}
+
 function onItemKey(e: KeyboardEvent, name: string) {
   if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault();
@@ -206,17 +209,46 @@ function onItemKey(e: KeyboardEvent, name: string) {
     const list = visibleDemos.value;
     const idx = list.findIndex(p => p.name === name);
     if (idx < 0) return;
+    if (e.key === 'ArrowUp' && idx === 0) {
+      searchInput.value?.focus();
+      return;
+    }
     const nextIdx = e.key === 'ArrowDown' ? Math.min(idx + 1, list.length - 1) : Math.max(idx - 1, 0);
     const target = list[nextIdx];
     if (!target) return;
-    const el = root.value?.querySelector(
-      `[data-demo-row="${CSS.escape(target.name)}"]`,
-    ) as HTMLElement | null;
-    el?.focus();
+    focusDemo(target.name);
+  }
+}
+
+// First non-locked visible demo. Used by Enter from the search input so we
+// don't accidentally pick a demo the student isn't allowed to load.
+function firstSelectable(): ProgramInfo | undefined {
+  return visibleDemos.value.find(p => !isDemoLocked(p.name));
+}
+
+function onSearchKey(e: KeyboardEvent) {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    const first = visibleDemos.value[0];
+    if (first) focusDemo(first.name);
+    return;
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    const list = visibleDemos.value;
+    const last = list[list.length - 1];
+    if (last) focusDemo(last.name);
+    return;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const target = firstSelectable();
+    if (target) pick(target.name);
   }
 }
 
 watch(open, async (val) => {
+  bar.setProgramPickerOpen(val);
   if (val) {
     await nextTick();
     searchInput.value?.focus();
@@ -234,6 +266,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClick);
   document.removeEventListener('keydown', onKeydown);
+  bar.setProgramPickerOpen(false);
 });
 </script>
 
@@ -249,16 +282,19 @@ onBeforeUnmount(() => {
 
     <div v-if="open" class="dropdown" role="listbox">
       <div class="search-bar">
-        <Search :size="14" :stroke-width="2" class="search-icon" />
-        <input
-          ref="searchInput"
-          v-model="query"
-          type="text"
-          class="search-input"
-          :placeholder="t('catalog.search.placeholder')"
-          :aria-label="t('catalog.search.placeholder')"
-        />
-        <span v-if="!query" class="search-hint">{{ t('catalog.search.hint') }}</span>
+        <label class="search-field" @click="searchInput?.focus()">
+          <Search :size="14" :stroke-width="2" class="search-icon" />
+          <input
+            ref="searchInput"
+            v-model="query"
+            type="text"
+            class="search-input"
+            :placeholder="t('catalog.search.placeholder')"
+            :aria-label="t('catalog.search.placeholder')"
+            @keydown="onSearchKey"
+          />
+          <span v-if="!query" class="search-hint">{{ t('catalog.search.hint') }}</span>
+        </label>
       </div>
 
       <div v-if="sections.length === 0" class="empty">
@@ -393,9 +429,6 @@ onBeforeUnmount(() => {
 }
 
 .search-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   background: var(--surface-1);
@@ -404,9 +437,35 @@ onBeforeUnmount(() => {
   z-index: 1;
 }
 
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: text;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.search-field:hover {
+  border-color: var(--amber-dim);
+}
+
+.search-field:focus-within {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.25);
+}
+
 .search-icon {
   color: var(--text-muted);
   flex-shrink: 0;
+  transition: color var(--transition-fast);
+}
+
+.search-field:focus-within .search-icon {
+  color: var(--amber);
 }
 
 .search-input {
@@ -414,10 +473,13 @@ onBeforeUnmount(() => {
   background: transparent;
   border: none;
   outline: none;
+  box-shadow: none;
   color: var(--text);
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   letter-spacing: 0;
+  padding: 2px 0;
+  min-width: 0;
 }
 
 .search-input::placeholder {
@@ -428,9 +490,13 @@ onBeforeUnmount(() => {
 .search-hint {
   font-size: 10px;
   color: var(--text-muted);
-  opacity: 0.6;
+  opacity: 0.7;
   font-family: 'JetBrains Mono', monospace;
   flex-shrink: 0;
+  border: 1px solid var(--border);
+  padding: 0 5px;
+  border-radius: 3px;
+  line-height: 1.4;
 }
 
 .empty {
@@ -608,15 +674,18 @@ onBeforeUnmount(() => {
   }
 
   .trigger {
-    min-height: 44px;
+    min-height: 40px;
     font-size: 13px;
-    padding: 10px 14px;
+    padding: 6px 12px;
   }
 
   .dropdown {
     min-width: 100%;
     max-width: 100vw;
   }
+
+  .search-field { padding: 8px 12px; }
+  .search-input { min-height: 28px; font-size: 14px; }
 
   .opt {
     padding: 12px 14px 12px 28px;
@@ -626,5 +695,22 @@ onBeforeUnmount(() => {
     font-size: 13px;
     line-height: 1.55;
   }
+}
+
+@media (max-width: 480px) {
+  /* Anchor the dropdown to the viewport, not the trigger, so it never gets
+     clipped by the SimBar wrap. max-height leaves room for the on-screen
+     keyboard on phones. */
+  .dropdown {
+    position: fixed;
+    top: auto;
+    left: var(--space-2);
+    right: var(--space-2);
+    min-width: 0;
+    max-width: none;
+    max-height: 70vh;
+  }
+  .opt { padding: 12px 12px 12px 24px; }
+  .opt-desc { font-size: 12px; line-height: 1.45; }
 }
 </style>

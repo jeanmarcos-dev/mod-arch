@@ -354,11 +354,25 @@ function outcomeLabel(card: NarratorCard): string {
 
 @media (max-width: 768px) {
   /* When stacked under the monitor, the narrator needs an explicit height
-     so the monitor still gets most of the vertical real estate. */
+     so the monitor still gets most of the vertical real estate. The
+     monitor + narrator together must leave enough room for the keyboard
+     section underneath, so we cap this fairly tight. */
   .kbd-narrator {
-    height: 140px;
+    height: 120px;
     flex-shrink: 0;
   }
+}
+
+@media (max-width: 440px) {
+  /* The arrow column is decorative; dropping it lets the hex + outcome
+     keep readable widths down to 320px without overflowing. */
+  .kbd-narrator__row {
+    grid-template-columns: 20px 38px 1fr;
+    font-size: 10px;
+  }
+  .kbd-narrator__arrow { display: none; }
+  .kbd-narrator__char { font-size: 14px; }
+  .kbd-narrator__hex { font-size: 9px; }
 }
 
 .narrator-card-enter-active,

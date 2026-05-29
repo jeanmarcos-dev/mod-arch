@@ -410,33 +410,66 @@ const kbufLabel = computed(() => {
     /* Mobile shows one panel at a time via tab; the desktop viewport cap
        would only shrink the only visible panel for no reason. */
     max-height: none;
+    /* Let the column scroll if the four stacked sections together exceed
+       the available height — better than letting the narrator overlap
+       the keyboard below. */
+    overflow-y: auto;
   }
 
   /* Side-by-side stops making sense on narrow screens — stack the narrator
-     under the monitor with a fixed-height feed to keep it visible. */
+     under the monitor with explicit row weights so the monitor doesn't
+     dominate the viewport while empty and the narrator + keyboard keep
+     readable room below. */
   .console__io {
     grid-template-columns: 1fr;
-    grid-auto-rows: auto;
+    grid-template-rows: auto auto;
+    flex: 0 0 auto;
+  }
+  .console__monitor {
+    min-height: 140px;
+    max-height: 28vh;
+  }
+  .console__narrator { max-height: 28vh; }
+
+  .console__keyboard {
+    flex: 0 0 auto;
   }
 
   .kbd__hint {
     font-size: 12px;
+    min-width: 0;
   }
 
   .kbd__interactor {
     flex-wrap: wrap;
     row-gap: 6px;
+    padding: 6px 8px;
   }
 
+  /* Specials sit in their own row, wrap into a clean grid so ESC/CTRL+C/
+     ENTER/BKSP keep a comfortable tap target each instead of stacking
+     into a column. */
   .kbd__specials {
     width: 100%;
-    flex-wrap: wrap;
-    justify-content: flex-start;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    justify-content: stretch;
   }
 
   .kbd__special {
     font-size: 11px;
-    padding: 4px 8px;
+    padding: 6px 4px;
+    height: auto;
+    min-height: auto;
+    width: 100%;
   }
+}
+
+@media (max-width: 360px) {
+  .console__io { grid-template-rows: minmax(140px, 1fr) auto; }
+  .console__monitor { min-height: 140px; max-height: 36vh; }
+  .kbd__specials { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kbd__hint { font-size: 11px; }
 }
 </style>

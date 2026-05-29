@@ -6,6 +6,7 @@ import { useCpuStore } from '../stores/cpu';
 import { useViewerMirrorStore } from '../stores/viewerMirror';
 import { useAppConfigStore } from '../stores/appConfig';
 import { usePreferencesStore, COLUMN_MIN_PX, COLUMN_MAX_PERCENT } from '../stores/preferences';
+import { useSimBarStore } from '../stores/simBar';
 import { useIsStudent } from '../composables/useIsStudent';
 import { useResizableColumn } from '../composables/useResizableColumn';
 import { useResizableRow } from '../composables/useResizableRow';
@@ -28,6 +29,7 @@ const cpu = useCpuStore();
 const mirror = useViewerMirrorStore();
 const appCfg = useAppConfigStore();
 const prefs = usePreferencesStore();
+const bar = useSimBarStore();
 const isStudent = useIsStudent();
 const { t } = useI18n();
 
@@ -263,6 +265,21 @@ const visible = computed(() => {
   };
 });
 
+// Forward "console panel is the active mobile tab" and "keyboard HW is taking
+// keystrokes" into the SimBar store so TutorLauncher can dim the FAB while
+// either condition holds. Resetting on unmount avoids a stuck-dim state if
+// the user navigates away with the console open.
+watch(
+  () => isMobile.value && visible.value.console,
+  (active) => bar.setConsoleMobileActive(active),
+  { immediate: true },
+);
+watch(
+  () => isMobile.value && visible.value.console && cpu.kbdReaders.length > 0,
+  (active) => bar.setKeyboardHwActive(active),
+  { immediate: true },
+);
+
 onMounted(() => {
   cpu.connect();
   checkMobile();
@@ -271,6 +288,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile);
+  bar.setConsoleMobileActive(false);
+  bar.setKeyboardHwActive(false);
 });
 </script>
 
@@ -328,6 +347,7 @@ onUnmounted(() => {
         <div
           ref="middleTabsEl"
           class="middle__tabs-stack"
+          v-show="visible.code || visible.events || visible.memory"
           :style="!isMobile ? middleTabsStyle : undefined"
         >
           <CodeAsmSplit v-if="!isLocked('code')" v-show="visible.code" />
@@ -503,8 +523,23 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
-  .col-left { width: 100% !important; }
-  .col-right--stack { width: 100% !important; }
+  /* When the layout flips to flex-direction: column on mobile, the side
+     columns lose their flex sizing and fall back to intrinsic height — the
+     stacked CollapsiblePanel children then render as zero-height shells
+     because their parents do not own any vertical real estate. Forcing
+     `min-height: 0` + `flex: 1 1 auto` (so they participate in the column
+     flex split) and a minimum per-panel height restores visible content. */
+  .col-left {
+    width: 100% !important;
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+  .col-right--stack {
+    width: 100% !important;
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+  .col-right--stack > * { min-height: 160px; }
 }
 
 .middle-tabs {
@@ -616,6 +651,7 @@ onUnmounted(() => {
     flex-direction: column;
     padding: 6px;
     gap: 6px;
+    min-height: 0;
   }
 
   .mobile-tabs {

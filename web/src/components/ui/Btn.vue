@@ -113,7 +113,7 @@ defineEmits<{ (e: 'click', ev: MouseEvent): void }>();
 @keyframes btn-blink { 50% { opacity: 0.2; } }
 
 @media (max-width: 768px) {
-  .btn--sm { min-height: 40px; padding: 6px 12px; }
+  .btn--sm { min-height: 44px; padding: 8px 12px; }
   .btn--md { min-height: 44px; padding: 10px 16px; }
 }
 </style>

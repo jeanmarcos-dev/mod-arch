@@ -709,4 +709,26 @@ function pcbChipTitle(c: CoreInfo, p: PCBInfo): string {
     font-size: 13px;
   }
 }
+
+@media (max-width: 360px) {
+  /* On a 320px viewport the auto-fit grid collapses to a single column and
+     the long hex values would push the panel into horizontal scroll. Force
+     two columns and let the value ellipsize — the full value remains in
+     the row's title attribute already used for click-to-copy. */
+  .core-card__regs {
+    grid-template-columns: 1fr 1fr;
+    gap: 2px 8px;
+    font-size: 12px;
+  }
+  .core-card__regs > span {
+    min-width: 0;
+  }
+  .core-card__regs .r-val {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .core-card__flags { row-gap: 4px; }
+}
 </style>

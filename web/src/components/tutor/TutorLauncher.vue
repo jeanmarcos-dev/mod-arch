@@ -9,14 +9,33 @@ import { useTutorStore, type TutorCitation } from '../../stores/tutor';
 import { useCpuStore } from '../../stores/cpu';
 import { useToastStore } from '../../stores/toast';
 import { useAuthStore } from '../../stores/auth';
+import { useSimBarStore } from '../../stores/simBar';
+import { usePreferencesStore } from '../../stores/preferences';
+import { useBreakpoint } from '../../composables/useBreakpoint';
 import { RESET_FAB_EVENT } from '../../composables/useResetUi';
 
 const tutor = useTutorStore();
 const cpu = useCpuStore();
 const toast = useToastStore();
 const auth = useAuthStore();
+const bar = useSimBarStore();
+const prefs = usePreferencesStore();
+const { isMobile } = useBreakpoint();
 const router = useRouter();
 const route = useRoute();
+
+// Dim the FAB whenever a foreground tool needs the bottom of the viewport on
+// mobile. Opacity + pointer-events only — keeping z-index avoids a sudden
+// shadow pop when the overlay closes.
+const isDimmed = computed(() =>
+  isMobile.value && (
+    bar.toolsDrawerOpen
+    || bar.programPickerOpen
+    || bar.consoleMobileActive
+    || bar.keyboardHwActive
+    || prefs.sidebarMobileOpen
+  ),
+);
 
 const needsLogin = computed(() => !auth.user);
 
@@ -50,10 +69,10 @@ function handleCite(citation: TutorCitation) {
     case 'docs':
       toast.info(`Documentación — ${citation.label.replace(/^\[Docs:\s*/, '').replace(/\]$/, '')}`);
       return;
-    case 'stallings':
+    case 'silberschatz':
     default: {
       const ref = citation.page ? `página ${citation.page}` : citation.id;
-      toast.info(`Referencia: Stallings, ${ref}`);
+      toast.info(`Referencia: Silberschatz, ${ref}`);
     }
   }
 }
@@ -213,7 +232,7 @@ function onBackdropClick() {
 </script>
 
 <template>
-  <div class="tutor-host">
+  <div :class="['tutor-host', { 'tutor-host--dim': isDimmed }]">
     <button
       v-if="!tutor.open"
       ref="fabRef"
@@ -319,6 +338,20 @@ function onBackdropClick() {
 }
 .tutor-host > * {
   pointer-events: auto;
+}
+
+/* Mobile-only dim state: a foreground tool (drawer, picker, console,
+   keyboard HW) is taking the bottom area. We hide the FAB outright so
+   it doesn't float over the active tool's input affordances; the user
+   can reach the tutor again as soon as the tool closes. */
+.tutor-host--dim {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 180ms ease, visibility 0s linear 180ms;
+}
+.tutor-host--dim > * {
+  pointer-events: none;
 }
 
 .fab {

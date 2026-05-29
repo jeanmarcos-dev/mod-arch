@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, type Component } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { Lock, PanelLeftClose, PanelLeftOpen } from '@lucide/vue';
@@ -26,6 +26,32 @@ const route = useRoute();
 
 const collapsed = computed(() => prefs.sidebarCollapsed);
 const mobileOpen = computed(() => prefs.sidebarMobileOpen);
+
+const navRef = ref<HTMLElement | null>(null);
+// Captured when the drawer opens so focus can return to the trigger button
+// (typically the hamburger in MobileMenuButton) once the drawer closes.
+let lastFocused: HTMLElement | null = null;
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && prefs.sidebarMobileOpen) {
+    prefs.closeSidebarMobile();
+  }
+}
+
+watch(mobileOpen, async (open) => {
+  if (open) {
+    lastFocused = (document.activeElement as HTMLElement | null) ?? null;
+    await nextTick();
+    const first = navRef.value?.querySelector<HTMLElement>('.sidebar__link');
+    first?.focus();
+  } else if (lastFocused) {
+    lastFocused.focus();
+    lastFocused = null;
+  }
+});
+
+onMounted(() => window.addEventListener('keydown', onKeydown));
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 
 // activeTo picks the most specific item whose `to` matches the current path.
 // Without this, items whose `to` is a prefix of another (e.g. `/admin` vs
@@ -69,7 +95,11 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
     :class="{ 'sidebar--collapsed': collapsed, 'sidebar--mobile-open': mobileOpen }"
     data-pizarra-anchor="sidebar"
   >
-    <nav class="sidebar__nav" :aria-label="t('shell.sidebar.navAria')">
+    <nav
+      ref="navRef"
+      class="sidebar__nav"
+      :aria-label="t('shell.sidebar.navAria')"
+    >
       <template v-for="(item, idx) in items" :key="item.to">
         <div
           v-if="item.group && (idx === 0 || items[idx - 1].group !== item.group)"
@@ -448,22 +478,17 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
 }
 .sidebar--collapsed .sidebar__author { display: none; }
 
+/* Mobile + small tablet: the rail becomes an off-canvas drawer that the
+   hamburger opens. Width scales with viewport so it never crowds a 320px
+   phone (~75% wide) nor swallows a 768px tablet (capped at 280px). The
+   drawer outranks the tutor FAB (--z-modal = 600) so a primary nav action
+   is never trapped underneath a secondary overlay — sits at 650, below
+   toast (700). */
 @media (max-width: 768px) {
-  /* On mobile the rail always behaves like the collapsed state — the
-     transition animation still runs identically when toggling. */
-  .sidebar { width: 56px; }
-}
-
-/* Phone portrait: the icon-rail becomes an off-canvas drawer that the
-   hamburger in the topbar opens. The expanded width returns so labels are
-   readable while the drawer is open. The drawer outranks the tutor FAB
-   (--z-modal = 600) so a primary nav action is never trapped underneath a
-   secondary overlay — sits at 650, below toast (700). */
-@media (max-width: 480px) {
   .sidebar {
     position: fixed;
     inset: 0 auto 0 0;
-    width: 220px;
+    width: clamp(220px, 75vw, 280px);
     transform: translateX(-100%);
     transition: transform var(--transition-base);
     z-index: 650;
@@ -476,6 +501,20 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
 
   /* The desktop collapse handle has no meaning in drawer mode. */
   .sidebar__toggle { display: none; }
+
+  /* Force the expanded layout inside the drawer regardless of the persisted
+     `sidebarCollapsed` preference — the drawer always shows labels. */
+  .sidebar--collapsed .sidebar__label,
+  .sidebar--collapsed .sidebar__brand-full,
+  .sidebar--collapsed .sidebar__author { max-width: 200px; opacity: 1; display: inline; }
+  .sidebar--collapsed .sidebar__brand-mark { display: none; }
+  .sidebar--collapsed .sidebar__link {
+    justify-content: flex-start;
+    padding: 0 var(--space-3);
+    gap: var(--space-3);
+  }
+  .sidebar--collapsed .sidebar__icon { width: 22px; }
+  .sidebar__link { min-height: 44px; }
 }
 
 .sidebar__backdrop {

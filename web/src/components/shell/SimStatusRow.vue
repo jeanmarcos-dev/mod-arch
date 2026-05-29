@@ -238,22 +238,64 @@ function onCoreTabDblClick(id: number) {
 .sim-pill--ws-off { border-color: var(--red); }
 .sim-pill--ws-off .sim-pill__v { color: var(--red); }
 
-@media (max-width: 480px) {
+@media (max-width: 768px) {
+  /* Inline mode normally promotes children to the parent flex row via
+     display:contents — that prevents the SimBar from giving this row its
+     own grid cell. On mobile + small tablet we want a single horizontal
+     strip with TICK/WS that lives in the centred status cell of the
+     SimBar grid, so reclaim a real flex wrapper here. */
+  .sim-status-row--inline {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    min-width: 0;
+  }
   .sim-status-row__header {
     flex-wrap: nowrap;
     overflow-x: auto;
-    justify-content: flex-start;
-    scrollbar-width: thin;
+    overflow-y: hidden;
+    justify-content: center;
     -webkit-overflow-scrolling: touch;
-    mask-image: linear-gradient(to right, black 88%, transparent);
+    scroll-snap-type: x proximity;
+    width: 100%;
+    /* Hide the scrollbar entirely — TICK/WS almost always fit, and when
+       they don't the chips themselves visually overflow toward the edge
+       cleanly without a scrollbar undercutting them. Touch swipe still
+       scrolls on devices that have it. */
+    scrollbar-width: none;
   }
+  .sim-status-row__header::-webkit-scrollbar { display: none; }
   .sim-pill {
-    font-size: 9px;
-    padding: 0 6px;
     flex-shrink: 0;
+    scroll-snap-align: start;
   }
+}
+
+@media (max-width: 480px) {
+  /* Tighter typography only on phones — at 481–768 the chips can keep
+     their regular size and breathe in the centred status cell. */
+  .sim-pill { font-size: 9px; padding: 0 6px; }
   .sim-pill__k { font-size: 8px; }
   .sim-pill--tick  { min-width: 64px; }
   .sim-pill--ws    { min-width: 52px; }
+  .sim-bar__core-tabs { display: none; }
+}
+
+@media (max-width: 300px) {
+  /* The SimBar already reserves enough room for the hamburger and cluster
+     via its grid columns and padding; the row wrapper's own lateral
+     padding becomes redundant at ultra-narrow widths and pushes TICK/WS
+     off-centre. */
+  .sim-status-row { padding-left: 0; padding-right: 0; }
+}
+
+@media (max-width: 360px) {
+  /* TICK and WS both stay visible on the smallest phones — they live in
+     the centred status cell of the SimBar grid. If they don't fit, the
+     header scrolls horizontally with the mask gradient already applied. */
+  .sim-pill { padding: 0 4px; font-size: 8.5px; }
+  .sim-pill__k { font-size: 7.5px; }
+  .sim-pill--tick { min-width: 52px; }
+  .sim-pill--ws { min-width: 46px; }
 }
 </style>
