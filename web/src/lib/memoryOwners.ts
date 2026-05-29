@@ -16,6 +16,9 @@ export type OwnerKind = 'kernel' | 'process';
 /** Cap mirrored from ProcessesPanel.vue so both panes indent the same way. */
 export const OWNER_DEPTH_CAP = 4;
 
+/** Per-task user stack size on the Go side (pkg/kernel/kernel.go: ProcStackSize). */
+export const PROC_STACK_SIZE = 0x40000;
+
 export interface ThreadInfo {
   /** PID of the thread (its kernel-side task id). */
   pid: number;
@@ -25,6 +28,9 @@ export interface ThreadInfo {
   state: string;
   /** Core currently executing this thread, if any. */
   runningOnCore?: number;
+  /** Thread's own stack top (CLONE_THREAD threads share code with the leader
+   *  but get a separate stack slot — see pkg/kernel/clone.go:220). */
+  stackTop: number;
 }
 
 export interface MemoryOwner {
@@ -142,6 +148,7 @@ export function buildOwners(procs: PCBInfo[], cores: CoreInfo[]): MemoryOwner[] 
           name: t.name,
           state: t.state,
           runningOnCore: tcore?.id,
+          stackTop: t.stack_top,
         };
       });
       owners.push({
@@ -175,7 +182,14 @@ export function buildOwners(procs: PCBInfo[], cores: CoreInfo[]): MemoryOwner[] 
     const threadList = threadsByTgid.get(l.pid) ?? [];
     const threads: ThreadInfo[] = threadList.map(t => {
       const tcore = cores.find(c => c.current_pid === t.pid && !c.halted);
-      return { pid: t.pid, tid: t.tid, name: t.name, state: t.state, runningOnCore: tcore?.id };
+      return {
+        pid: t.pid,
+        tid: t.tid,
+        name: t.name,
+        state: t.state,
+        runningOnCore: tcore?.id,
+        stackTop: t.stack_top,
+      };
     });
     owners.push({
       kind: 'process',
@@ -209,6 +223,61 @@ export interface CoreMarker {
   kind: 'EIP' | 'ESP';
   addr: number;
   pid: number;
+}
+
+/**
+ * Resolve the owner of a single byte. `null` if the address falls in the
+ * reserved region or outside any known task. Used by the hex grid popover
+ * so the student sees "kernel" vs "P3 stack" instead of having to map
+ * ranges in their head.
+ */
+export interface AddrOwner {
+  /** PID of the task that owns this byte; undefined for the kernel. */
+  pid?: number;
+  /** Display name (kernel, init, worker, ...). */
+  name: string;
+  /** Whether the byte sits in the code segment or in the stack slot. */
+  role: 'code' | 'stack' | 'kernel';
+  /** Leader pid when the byte is the stack of a CLONE_THREAD thread. */
+  leaderPid?: number;
+  /** Threads sharing this code range (only set when role === 'code' and the
+   *  owner is a leader with one or more CLONE_THREAD children). */
+  sharedWithPids?: number[];
+}
+
+export function ownerAt(addr: number, owners: MemoryOwner[]): AddrOwner | null {
+  for (const o of owners) {
+    if (o.kind === 'kernel') {
+      if (addr >= o.codeBase && addr < o.codeBase + o.codeSize) {
+        return { name: o.name, role: 'kernel' };
+      }
+      continue;
+    }
+    if (addr >= o.codeBase && addr < o.codeBase + o.codeSize) {
+      return {
+        pid: o.pid,
+        name: o.name,
+        role: 'code',
+        sharedWithPids: o.threads.length > 0 ? o.threads.map(t => t.pid) : undefined,
+      };
+    }
+    // Stack range: stack_top is the highest valid byte + 0x10 (see
+    // pkg/kernel/kernel.go:297 — stackBase = stackTop + 0x10 - ProcStackSize).
+    const stackEnd = o.stackTop + 0x10;
+    const stackBase = stackEnd - PROC_STACK_SIZE;
+    if (addr >= stackBase && addr < stackEnd) {
+      return { pid: o.pid, name: o.name, role: 'stack' };
+    }
+    // CLONE_THREAD threads have their own stack slot.
+    for (const t of o.threads) {
+      const tEnd = t.stackTop + 0x10;
+      const tBase = tEnd - PROC_STACK_SIZE;
+      if (addr >= tBase && addr < tEnd) {
+        return { pid: t.pid, name: t.name, role: 'stack', leaderPid: o.pid };
+      }
+    }
+  }
+  return null;
 }
 
 export function buildCoreMarkers(cores: CoreInfo[], visibleIds: Set<number>): CoreMarker[] {

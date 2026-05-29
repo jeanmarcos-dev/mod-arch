@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue';
+import { useI18n } from 'vue-i18n';
 import Card from '../ui/Card.vue';
 import { fmtAddr, fmtByte, regionFor, coreColorVar } from '../../lib/memoryLayout';
-import type { CoreMarker } from '../../lib/memoryOwners';
+import type { CoreMarker, MemoryOwner } from '../../lib/memoryOwners';
+import { ownerAt } from '../../lib/memoryOwners';
+
+const { t } = useI18n();
 
 export interface HeatEntry {
   /** Monotonic id used to force animation restart on each new event. */
@@ -34,6 +38,10 @@ const props = defineProps<{
    *  shared global RAM. Only markers whose addr falls in the visible window
    *  are rendered. */
   coreMarkers?: CoreMarker[];
+  /** Owners snapshot used by the byte popover to resolve "who owns this
+   *  byte" (kernel, PID N · code/stack, thread stack). Optional: when
+   *  omitted, the popover skips the ownership row. */
+  owners?: MemoryOwner[];
 }>();
 
 const emit = defineEmits<{
@@ -209,6 +217,7 @@ const popoverInfo = computed(() => {
   const printable = value !== undefined && value >= 0x20 && value <= 0x7e
     ? `'${String.fromCharCode(value)}'`
     : '';
+  const owner = props.owners ? ownerAt(addr, props.owners) : null;
   return {
     addr,
     value,
@@ -217,8 +226,20 @@ const popoverInfo = computed(() => {
     region,
     lastW,
     lastR,
+    owner,
   };
 });
+
+function ownerLabel(owner: NonNullable<ReturnType<typeof ownerAt>>): string {
+  if (owner.role === 'kernel') return t('shell.memoryHexGrid.popover.ownerKernel');
+  if (owner.role === 'code') {
+    return t('shell.memoryHexGrid.popover.ownerCode', { pid: owner.pid, name: owner.name });
+  }
+  if (owner.leaderPid !== undefined) {
+    return t('shell.memoryHexGrid.popover.ownerThreadStack', { pid: owner.pid, name: owner.name, leader: owner.leaderPid });
+  }
+  return t('shell.memoryHexGrid.popover.ownerStack', { pid: owner.pid, name: owner.name });
+}
 
 function ensureTicker() {
   if (raf === 0 && popoverAddr.value !== null) raf = requestAnimationFrame(tick);
@@ -301,6 +322,17 @@ function ensureTicker() {
           </span>
         </div>
         <dl class="hexgrid__popover-stats">
+          <div v-if="popoverInfo.owner">
+            <dt>{{ t('shell.memoryHexGrid.popover.ownerLabel') }}</dt>
+            <dd class="hexgrid__popover-owner">
+              {{ ownerLabel(popoverInfo.owner) }}
+              <span
+                v-if="popoverInfo.owner.sharedWithPids && popoverInfo.owner.sharedWithPids.length > 0"
+                class="hexgrid__popover-shared"
+                :title="t('shell.memoryHexGrid.popover.sharedHint')"
+              >· {{ t('shell.memoryHexGrid.popover.sharedWith', { tids: popoverInfo.owner.sharedWithPids.map((p) => 'P' + p).join(' ') }) }}</span>
+            </dd>
+          </div>
           <div>
             <dt>último W</dt>
             <dd>
@@ -586,6 +618,19 @@ function ensureTicker() {
 .hexgrid__popover-stats dd {
   color: var(--text);
   font-size: 10.5px;
+}
+
+.hexgrid__popover-owner {
+  color: var(--amber);
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.hexgrid__popover-shared {
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: 9.5px;
+  margin-left: 2px;
 }
 
 /* ─── Core markers ─────────────────────────────────────────────────────── */

@@ -7,7 +7,7 @@ import { usePreferencesStore } from '../../stores/preferences';
 const { t } = useI18n();
 import { useViewerMirrorStore } from '../../stores/viewerMirror';
 import { useNarrators, type MemWrite, type MemRead } from '../../lib/narratorBus';
-import ByteFlightNarrator from '../../components/narrators/ByteFlightNarrator.vue';
+import MemoryRWNarrator from '../../components/memory/MemoryRWNarrator.vue';
 import Term from '../../components/glossary/Term.vue';
 import { Target, Pin as PinIcon } from '@lucide/vue';
 import MemoryMinimap, { type Pin } from '../../components/memory/MemoryMinimap.vue';
@@ -214,9 +214,10 @@ onMounted(() => {
 onUnmounted(() => { if (timer) window.clearInterval(timer); });
 
 watch(baseAddr, () => {
-  // Switching the window invalidates the heatmap for the previous range.
-  // Keep lastWrite/lastRead so jumping back still shows accurate history.
-  heat.value = new Map();
+  // Heat persists across window changes — it decays on its own via gcMaps
+  // (TTL 60 s). Clearing it here used to erase the very event that triggered
+  // an autofocus jump, so the user saw the window snap but no flash on the
+  // address that caused the snap. lastWrite/lastRead are unaffected either way.
   loadWindow();
 });
 
@@ -316,7 +317,12 @@ function onOwnerJumpStack(addr: number) {
 
 <template>
   <div class="memory-page" data-pizarra-anchor="view-memoria">
-    <ByteFlightNarrator class="memory-page__overlay" />
+    <MemoryRWNarrator
+      class="memory-page__overlay"
+      :base-addr="baseAddr"
+      :row-count="ROW_COUNT"
+      :owners="owners"
+    />
 
     <header class="memory-page__head">
       <div class="memory-page__title">
@@ -415,6 +421,7 @@ function onOwnerJumpStack(addr: number) {
         :highlighted-addr="highlightedAddr"
         :highlight-seq="highlightSeq"
         :core-markers="coreMarkers"
+        :owners="owners"
         @scroll-by="scrollBy"
       />
 
@@ -439,7 +446,7 @@ function onOwnerJumpStack(addr: number) {
 }
 
 .memory-page__overlay {
-  /* Narrator sits above grid but below modals/topbar. */
+  /* R/W narrator sits above grid but below modals/topbar. */
 }
 
 .memory-page__head {
