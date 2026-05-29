@@ -231,14 +231,35 @@ func pcbRegsSnapshot(p *PCB) map[string]uint32 {
 //     ECHILD, and goes back to sleep without ever leaving its main loop.
 func (k *Kernel) DispatchIdleCores() []cpu.Event {
 	var out []cpu.Event
+
+	// Eviction pass: any core currently bound to the swapper must yield as
+	// soon as a real user proc (anything not init) joins the ready queue.
+	// Done before the assignment loop so firstIdleCore picks the freshly
+	// vacated core, and so the frontend gets a paired Release→Assign sequence
+	// for the swap rather than a silent CurrentPID overwrite.
+	if k.IdleTaskEnabled && k.hasNonInitReady() {
+		for _, c := range k.Cores {
+			if c.RunningIdle {
+				out = append(out, cpu.EventCoreRelease{
+					CoreID: c.ID, PID: 0, Reason: "idle preempted",
+				})
+				c.RunningIdle = false
+				// Park the core in the legacy "no proc" sentinel so the
+				// assignment loop below treats it as a fresh idle slot.
+				c.CurrentPID = 0
+				c.CPU.Halted = true
+			}
+		}
+	}
+
 	for {
 		idle := k.firstIdleCore()
 		if idle == nil {
-			return out
+			break
 		}
 		pid, ok := k.Ready.Pop()
 		if !ok {
-			return out
+			break
 		}
 		pcb := k.Processes[pid]
 		if pcb == nil {
@@ -267,6 +288,33 @@ func (k *Kernel) DispatchIdleCores() []cpu.Event {
 			cpu.EventProcessState{PID: pid, State: string(StateRun)},
 		)
 	}
+
+	// Idle fallback pass: every core that still has no work gets the
+	// swapper. Guarded by RunningIdle so successive Step calls do not
+	// re-emit EventCoreIdle or replay loadCPUFromPCB — the swapper that is
+	// already halted waiting for an IRQ must stay there.
+	if k.IdleTaskEnabled && k.Processes[0] != nil {
+		for _, c := range k.Cores {
+			if c.CurrentPID == 0 && !c.RunningIdle {
+				out = append(out, k.bindIdleToCore(c)...)
+			}
+		}
+	}
+
+	return out
+}
+
+// hasNonInitReady reports whether the ready queue has any PID other than
+// init. Used by the eviction pass: the swapper must yield to a real user
+// proc, but not to init (init never occupies a core, it just gets reaped
+// in-kernel and goes back to sleep).
+func (k *Kernel) hasNonInitReady() bool {
+	for _, pid := range k.Ready.Snapshot() {
+		if pid != k.InitPID {
+			return true
+		}
+	}
+	return false
 }
 
 // runInitReapCycle is the dispatch-time choreography for init: a visible

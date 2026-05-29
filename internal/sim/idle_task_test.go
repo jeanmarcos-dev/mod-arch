@@ -1,0 +1,256 @@
+package sim
+
+import (
+	"testing"
+)
+
+// TestSetIdleTaskEnabled_TogglesFlag is the primary contract: the WS command
+// flips a kernel-level switch, and any subsequent LoadProgram observes it.
+// The simulator must guard the kernel mutation with s.mu so concurrent
+// callers (the run-loop goroutine and the WS handler) cannot race.
+func TestSetIdleTaskEnabled_TogglesFlag(t *testing.T) {
+	s := New(Config{NumCores: 1})
+	if s.kernel.IdleTaskEnabled {
+		t.Fatal("fresh simulator has IdleTaskEnabled=true; default must be false to keep legacy demos honest")
+	}
+
+	if err := s.SetIdleTaskEnabled(true); err != nil {
+		t.Fatalf("SetIdleTaskEnabled(true): %v", err)
+	}
+	if !s.kernel.IdleTaskEnabled {
+		t.Error("SetIdleTaskEnabled(true) left the kernel flag false")
+	}
+
+	if err := s.SetIdleTaskEnabled(false); err != nil {
+		t.Fatalf("SetIdleTaskEnabled(false): %v", err)
+	}
+	if s.kernel.IdleTaskEnabled {
+		t.Error("SetIdleTaskEnabled(false) left the kernel flag true")
+	}
+}
+
+// TestSetIdleTaskEnabled_SpawnsImmediatelyWhenLoaded covers mid-simulation
+// activation: if a demo is already running and the user flips the toggle ON,
+// PID 0 must appear right away so the next Step can bind it to idle cores.
+// Otherwise the user would have to reload the demo to see the swapper.
+func TestSetIdleTaskEnabled_SpawnsImmediatelyWhenLoaded(t *testing.T) {
+	s := New(Config{
+		NumCores: 1,
+		Demos: []Demo{{
+			Name:  "hlt",
+			Procs: []Proc{{Name: "p1", Bytes: []byte{0xF4}}},
+		}},
+	})
+	if err := s.LoadProgram("hlt"); err != nil {
+		t.Fatalf("LoadProgram: %v", err)
+	}
+	if _, exists := s.kernel.Processes[0]; exists {
+		t.Fatal("setup: Processes[0] already present before SetIdleTaskEnabled")
+	}
+
+	if err := s.SetIdleTaskEnabled(true); err != nil {
+		t.Fatalf("SetIdleTaskEnabled: %v", err)
+	}
+
+	if _, exists := s.kernel.Processes[0]; !exists {
+		t.Error("Processes[0] still nil after SetIdleTaskEnabled(true) on a loaded demo")
+	}
+}
+
+// TestSetIdleTaskEnabled_EvictsButKeepsPCB covers turning idle off mid-run.
+// PID 0 must be unbound from every core (RunningIdle=false) and the cores
+// parked halted so the legacy auto-stop semantics resume. The PCB itself
+// stays in the table so flipping back ON is a no-op spawn instead of a
+// memory allocation thrash.
+func TestSetIdleTaskEnabled_EvictsButKeepsPCB(t *testing.T) {
+	s := New(Config{
+		NumCores: 2,
+		Demos: []Demo{{
+			Name:  "hlt",
+			Procs: []Proc{{Name: "p1", Bytes: []byte{0xF4}}},
+		}},
+	})
+	if err := s.LoadProgram("hlt"); err != nil {
+		t.Fatalf("LoadProgram: %v", err)
+	}
+	if err := s.SetIdleTaskEnabled(true); err != nil {
+		t.Fatalf("SetIdleTaskEnabled(true): %v", err)
+	}
+	_ = s.kernel.DispatchIdleCores() // bind PID 0 to whatever cores remain idle
+
+	if err := s.SetIdleTaskEnabled(false); err != nil {
+		t.Fatalf("SetIdleTaskEnabled(false): %v", err)
+	}
+
+	for _, c := range s.kernel.Cores {
+		if c.RunningIdle {
+			t.Errorf("Core %d still RunningIdle after disabling the toggle", c.ID)
+		}
+	}
+	if _, exists := s.kernel.Processes[0]; !exists {
+		t.Error("Processes[0] cleared after SetIdleTaskEnabled(false); the PCB should stay dormant to avoid spawn thrash")
+	}
+}
+
+// TestLoadProgram_SpawnsIdleWhenEnabled covers the standard wiring: with the
+// kernel flag already on (e.g. the user pre-flipped it via WS, or it survived
+// a Reset from the previous demo), LoadProgram must spawn PID 0 alongside
+// init so dispatching can bind it on the first tick.
+func TestLoadProgram_SpawnsIdleWhenEnabled(t *testing.T) {
+	s := New(Config{
+		NumCores: 1,
+		Demos: []Demo{{
+			Name:  "hlt",
+			Procs: []Proc{{Name: "p1", Bytes: []byte{0xF4}}},
+		}},
+	})
+	s.kernel.IdleTaskEnabled = true
+
+	if err := s.LoadProgram("hlt"); err != nil {
+		t.Fatalf("LoadProgram: %v", err)
+	}
+
+	if _, exists := s.kernel.Processes[0]; !exists {
+		t.Error("Processes[0] not spawned by LoadProgram when IdleTaskEnabled was true")
+	}
+}
+
+// TestLoadProgram_NoIdleWhenDisabled guards the default-off regression: every
+// existing demo's process table size must stay unchanged when the toggle is
+// not flipped. Adding PID 0 unconditionally would break demos that count
+// procs as a sanity check.
+func TestLoadProgram_NoIdleWhenDisabled(t *testing.T) {
+	s := New(Config{
+		NumCores: 1,
+		Demos: []Demo{{
+			Name:  "hlt",
+			Procs: []Proc{{Name: "p1", Bytes: []byte{0xF4}}},
+		}},
+	})
+	if err := s.LoadProgram("hlt"); err != nil {
+		t.Fatalf("LoadProgram: %v", err)
+	}
+	if _, exists := s.kernel.Processes[0]; exists {
+		t.Error("Processes[0] present after LoadProgram with idle disabled")
+	}
+}
+
+// TestProcessListLocked_IncludesPID0 verifies the wire payload exposes the
+// swapper when idle is enabled. The frontend's ProcessesPanel renders the
+// compact PID-0 band off this list; without is_idle in the snapshot, the
+// band can't be told apart from a regular user proc that happens to have
+// no parent.
+func TestProcessListLocked_IncludesPID0(t *testing.T) {
+	s := New(Config{
+		NumCores: 1,
+		Demos: []Demo{{
+			Name:  "hlt",
+			Procs: []Proc{{Name: "p1", Bytes: []byte{0xF4}}},
+		}},
+	})
+	s.kernel.IdleTaskEnabled = true
+	if err := s.LoadProgram("hlt"); err != nil {
+		t.Fatalf("LoadProgram: %v", err)
+	}
+
+	procs := s.processListLocked()
+
+	var idle map[string]any
+	for _, p := range procs {
+		if pid, _ := p["pid"].(int); pid == 0 {
+			idle = p
+			break
+		}
+	}
+	if idle == nil {
+		t.Fatal("processListLocked omitted PID 0 even though IdleTaskEnabled is true")
+	}
+	if got, _ := idle["is_idle"].(bool); !got {
+		t.Errorf("PID 0 snapshot is_idle = %v, want true", idle["is_idle"])
+	}
+}
+
+// TestProcessListLocked_OmitsPID0WhenDisabled covers the default-off
+// regression. With the toggle off, the snapshot must stay byte-for-byte
+// compatible with the legacy schema.
+func TestProcessListLocked_OmitsPID0WhenDisabled(t *testing.T) {
+	s := New(Config{
+		NumCores: 1,
+		Demos: []Demo{{
+			Name:  "hlt",
+			Procs: []Proc{{Name: "p1", Bytes: []byte{0xF4}}},
+		}},
+	})
+	if err := s.LoadProgram("hlt"); err != nil {
+		t.Fatalf("LoadProgram: %v", err)
+	}
+
+	for _, p := range s.processListLocked() {
+		if pid, _ := p["pid"].(int); pid == 0 {
+			t.Error("processListLocked contained PID 0 with idle disabled")
+		}
+	}
+}
+
+// TestStepOnce_NoHaltedBroadcastWithIdle covers the "freezes the UI" gotcha:
+// with idle ON, every core is Halted while the swapper waits for an IRQ, so
+// AllHalted() naturally returns true on most ticks. Emitting the legacy
+// {type:"state", halted:true} broadcast in that situation would push the
+// frontend into its terminal state. The gate must suppress that event when
+// idle is enabled — the run loop is still alive, just sleeping.
+func TestStepOnce_NoHaltedBroadcastWithIdle(t *testing.T) {
+	s := New(Config{
+		NumCores: 1,
+		Demos: []Demo{{
+			Name:  "hlt",
+			Procs: []Proc{{Name: "p1", Bytes: []byte{0xF4}}}, // immediate HLT
+		}},
+	})
+	s.kernel.IdleTaskEnabled = true
+	if err := s.LoadProgram("hlt"); err != nil {
+		t.Fatalf("LoadProgram: %v", err)
+	}
+
+	// Drain a few steps so the user proc HLTs and the swapper takes over.
+	client := NewClient(RoleAny)
+	s.AddClient(client)
+	defer s.RemoveClient(client)
+	for range 30 {
+		if err := s.StepOnce(); err != nil {
+			t.Fatalf("StepOnce: %v", err)
+		}
+	}
+
+	// Scan the client's queue for the legacy "machine halted" broadcast.
+	for drain := true; drain; {
+		select {
+		case msg := <-client.Send:
+			kind, _ := msg["type"].(string)
+			halted, _ := msg["halted"].(bool)
+			if kind == "state" && halted {
+				t.Error("StepOnce emitted {type:state, halted:true} with idle task enabled; this freezes the UI even though the run loop is alive")
+			}
+		default:
+			drain = false
+		}
+	}
+}
+
+// TestCoreSnapshot_ExposesRunningIdle verifies the per-core wire payload
+// carries the new flag. The frontend's CpuPanel keys the dedicated HLT
+// badge animation off it; without it, the panel could not tell a core
+// running the swapper apart from one with no proc at all.
+func TestCoreSnapshot_ExposesRunningIdle(t *testing.T) {
+	s := New(Config{NumCores: 1})
+	if _, err := s.kernel.SpawnIdle(); err != nil {
+		t.Fatalf("SpawnIdle: %v", err)
+	}
+	s.kernel.IdleTaskEnabled = true
+	core := s.kernel.Cores[0]
+	s.kernel.DispatchIdleCores() // bind PID 0
+
+	got := coreSnapshot(core)
+	if v, _ := got["running_idle"].(bool); !v {
+		t.Errorf("coreSnapshot.running_idle = %v after binding PID 0, want true", got["running_idle"])
+	}
+}

@@ -81,6 +81,10 @@ type Command struct {
 	Key      string  `json:"key,omitempty"`
 	Alias    string  `json:"alias,omitempty"`
 	Cores    int     `json:"cores,omitempty"`
+	// IdleTask toggles the kernel swapper (PID 0). Pointer so the client
+	// can distinguish "explicit false" from "field omitted"; a missing
+	// IdleTask field leaves the kernel state untouched.
+	IdleTask *bool `json:"idle_task,omitempty"`
 
 	// Owner-broadcasted presence payload: the section the host is currently
 	// presenting, the visible cores filter, the presentation mode preset and
@@ -390,6 +394,14 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 		sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
 	case "set_num_cores":
 		if err := sess.Sim.SetNumCores(cmd.Cores); err != nil {
+			c.Send <- map[string]any{"type": "error", "message": err.Error()}
+		}
+	case "set_idle_task":
+		if cmd.IdleTask == nil {
+			c.Send <- map[string]any{"type": "error", "message": "set_idle_task requires an idle_task boolean"}
+			return
+		}
+		if err := sess.Sim.SetIdleTaskEnabled(*cmd.IdleTask); err != nil {
 			c.Send <- map[string]any{"type": "error", "message": err.Error()}
 		}
 	case "set_alias":

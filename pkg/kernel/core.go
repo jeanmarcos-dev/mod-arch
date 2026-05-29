@@ -29,4 +29,12 @@ type Core struct {
 	// first quantum delivered N user instructions while later ones
 	// delivered N - handlerTicks.
 	userInstructionsSinceFire uint64
+
+	// RunningIdle disambiguates the overloaded CurrentPID==0 sentinel when
+	// the kernel idle task (PID 0) is enabled. True means the swapper is
+	// bound to this core and the next Step will execute its HLT byte;
+	// false means CurrentPID==0 has its legacy meaning, "no proc". Kept
+	// here (per-core) rather than on the shared PCB so the same PCB can be
+	// simultaneously bound to several cores in multi-core demos.
+	RunningIdle bool
 }

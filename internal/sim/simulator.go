@@ -182,6 +182,16 @@ func (s *Simulator) LoadProgram(name string) error {
 		s.mu.Unlock()
 		return err
 	}
+	// Swapper (PID 0) is spawned alongside init when the toggle is on so
+	// the very first DispatchIdleCores call can bind it to whatever cores
+	// remain idle. With the toggle off this is skipped, leaving the
+	// legacy auto-stop semantics untouched.
+	if s.kernel.IdleTaskEnabled {
+		if _, err := s.kernel.SpawnIdle(); err != nil {
+			s.mu.Unlock()
+			return err
+		}
+	}
 	pids := make([]int, 0, len(demo.Procs))
 	sources := make(map[int]string)
 	sourceMaps := make(map[int][]SourceLine)
@@ -226,6 +236,7 @@ func (s *Simulator) StepOnce() error {
 	evs, err := s.kernel.Step()
 	tick := s.kernel.BootCPU().Tick
 	halted := s.kernel.AllHalted()
+	idleEnabled := s.kernel.IdleTaskEnabled
 	// Process-table mutations (fork, clone-thread, exit, reparent, reap) only
 	// reach the frontend through individual events whose handlers expect the
 	// PCB to already exist in the local list. Without a fresh "procs"
@@ -252,7 +263,13 @@ func (s *Simulator) StepOnce() error {
 		s.Broadcast(map[string]any{"type": "procs", "procs": procsSnap})
 	}
 	s.Broadcast(map[string]any{"type": "tick", "value": tick})
-	if halted {
+	// The legacy "machine halted" broadcast drives the frontend into its
+	// terminal state. With the idle task enabled, AllHalted() is true on
+	// almost every tick (the swapper is parked in HLT waiting for an IRQ),
+	// so emitting it would falsely freeze the UI. Gate it on the toggle:
+	// when idle is on, the run loop is still alive — there is no terminal
+	// halt to announce.
+	if halted && !idleEnabled {
 		s.Broadcast(map[string]any{"type": "state", "halted": true})
 	}
 	return nil
@@ -597,13 +614,75 @@ func (s *Simulator) SetNumCores(n int) error {
 		s.mu.Unlock()
 		return nil
 	}
+	// Preserve the idle-task preference across the rebuild: the toggle is
+	// a user setting, not a per-kernel-instance attribute. Without this,
+	// changing core count would silently flip idle off.
+	wasIdleEnabled := s.kernel.IdleTaskEnabled
 	s.kernel = kernel.NewMulti(cpu.DefaultMemSize, n)
+	s.kernel.IdleTaskEnabled = wasIdleEnabled
 	s.procSources = nil
 	snap := s.snapshotLocked()
 	procs := s.processListLocked()
 	s.mu.Unlock()
 
 	s.Broadcast(map[string]any{"type": "reset"})
+	s.Broadcast(map[string]any{"type": "procs", "procs": procs})
+	s.Broadcast(snap)
+	return nil
+}
+
+// SetIdleTaskEnabled toggles the kernel's swapper (PID 0). When enabling on
+// a loaded demo the PCB is spawned immediately so the next dispatch can bind
+// it. When disabling, the PCB stays in the table but every core bound to it
+// is released so the legacy auto-stop semantics resume. Callers (typically
+// the WS dispatcher) hold no kernel locks; the simulator serializes with its
+// own mutex.
+func (s *Simulator) SetIdleTaskEnabled(enabled bool) error {
+	s.mu.Lock()
+	if s.kernel.IdleTaskEnabled == enabled {
+		s.mu.Unlock()
+		return nil
+	}
+	s.kernel.IdleTaskEnabled = enabled
+
+	var evs []map[string]any
+	if enabled {
+		// Spawn the swapper only if a demo has already been loaded —
+		// otherwise the PCB would sit in an otherwise-empty kernel
+		// and confuse the snapshot the next LoadProgram broadcasts.
+		// InitPID being non-zero is the proxy for "demo loaded".
+		if s.kernel.InitPID != 0 {
+			if _, err := s.kernel.SpawnIdle(); err != nil {
+				s.mu.Unlock()
+				return err
+			}
+			for _, e := range s.kernel.DispatchIdleCores() {
+				evs = append(evs, EventToWire(e))
+			}
+		}
+	} else {
+		// Release any core currently bound to PID 0 so the legacy
+		// auto-stop kicks in once the ready queue drains. The PCB
+		// itself stays in the table to avoid spawn/teardown thrash
+		// when the user flips the toggle again.
+		for _, c := range s.kernel.Cores {
+			if c.RunningIdle {
+				evs = append(evs, EventToWire(cpu.EventCoreRelease{
+					CoreID: c.ID, PID: 0, Reason: "idle disabled",
+				}))
+				c.RunningIdle = false
+				c.CurrentPID = 0
+				c.CPU.Halted = true
+			}
+		}
+	}
+	procs := s.processListLocked()
+	snap := s.snapshotLocked()
+	s.mu.Unlock()
+
+	for _, e := range evs {
+		s.Broadcast(e)
+	}
 	s.Broadcast(map[string]any{"type": "procs", "procs": procs})
 	s.Broadcast(snap)
 	return nil
@@ -701,6 +780,11 @@ func coreSnapshot(core *kernel.Core) map[string]any {
 		"halted":      core.CPU.Halted,
 		"tick":        core.CPU.Tick,
 		"current_pid": core.CurrentPID,
+		// running_idle disambiguates CurrentPID==0: legacy meaning is
+		// "no proc", but the frontend keys its dedicated HLT-loop badge
+		// off this flag when the swapper is bound. Default false keeps
+		// older clients unaffected.
+		"running_idle": core.RunningIdle,
 	}
 }
 
@@ -723,8 +807,15 @@ func (s *Simulator) waitQueueLocked() []map[string]any {
 
 func (s *Simulator) processListLocked() []map[string]any {
 	list := make([]map[string]any, 0, len(s.kernel.Processes))
+	// Walk from PID 0 only when the swapper is wired up; otherwise stay at
+	// the legacy PID 1 starting point so existing demos keep their exact
+	// snapshot shape.
+	startPID := 1
+	if s.kernel.IdleTaskEnabled && s.kernel.Processes[0] != nil {
+		startPID = 0
+	}
 	maxPID := s.maxKnownPIDLocked()
-	for pid := 1; pid <= maxPID; pid++ {
+	for pid := startPID; pid <= maxPID; pid++ {
 		p, ok := s.kernel.Processes[pid]
 		if !ok {
 			continue

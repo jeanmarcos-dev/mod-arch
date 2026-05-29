@@ -100,6 +100,23 @@ type Kernel struct {
 	// loading their programs so the process tree always has a root.
 	InitPID int
 
+	// IdleTaskEnabled controls whether the kernel runs the swapper (PID 0)
+	// as a real idle thread. When false (default) the simulator keeps its
+	// legacy behavior: cores without work stay halted and Simulator.StartRun
+	// auto-stops once HasWork() returns false. When true, SpawnIdle is
+	// invoked on the next LoadProgram (or eagerly via SetIdleTaskEnabled),
+	// the scheduler binds PID 0 to any otherwise-idle core, and the run
+	// loop keeps spinning indefinitely — modeling a real OS where HLT is
+	// itself the work the CPU performs while waiting for the next IRQ.
+	IdleTaskEnabled bool
+
+	// IdlePID records that the swapper PCB exists in this kernel. Held
+	// separately from Processes[0] so callers do not have to map-lookup to
+	// answer the cheap question "is idle wired up?". Zero means "not
+	// spawned"; any other value (we use -1 as a sentinel) means "Processes
+	// has a PCB at key 0". The PID itself is always literally 0.
+	IdlePID int
+
 	// memSpaces and fdSpaces register the AddressSpace and FDSpace objects
 	// referenced by live PCBs. Sharing across tasks of the same thread group
 	// goes through these maps via shareMemSpace / shareFDSpace, which bump
@@ -228,6 +245,13 @@ func (k *Kernel) AllHalted() bool {
 // arriving while every core is halted (e.g. PushKey on a process blocked in
 // sys_read) does not get stuck waiting for a ticker that already shut down.
 func (k *Kernel) HasWork() bool {
+	// Idle task short-circuit: when the swapper is wired up and the toggle
+	// is on, the kernel always has work — PID 0 is the work. The legacy
+	// path below still applies when the flag is off, preserving the old
+	// "auto-stop when every core is halted" semantics for existing demos.
+	if k.IdleTaskEnabled && k.Processes[0] != nil {
+		return true
+	}
 	for _, c := range k.Cores {
 		if !c.CPU.Halted {
 			return true
@@ -273,6 +297,12 @@ func (k *Kernel) Reset() {
 	// AddProcess takes PID 1, leaving the tree rootless. Same hazard for
 	// stale Pipes/FifoByName pointing into a freed process table.
 	k.InitPID = 0
+	// IdlePID rides along with InitPID: the PCB at Processes[0] is wiped by
+	// the map reset above, so the sentinel must be cleared too. The
+	// IdleTaskEnabled flag is intentionally preserved — it's a user
+	// preference that should survive demo reloads and let the next
+	// LoadProgram re-spawn PID 0 automatically.
+	k.IdlePID = 0
 	k.Pipes = nil
 	k.FifoByName = nil
 	// AddressSpace and FDSpace registries must be cleared too: a leftover

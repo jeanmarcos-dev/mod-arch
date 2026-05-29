@@ -247,6 +247,20 @@ type EventCoreRelease struct {
 // Tag returns the event tag.
 func (EventCoreRelease) Tag() string { return "core_release" }
 
+// EventCoreIdle is emitted when the scheduler binds the kernel idle task
+// (PID 0, the Linux-style swapper) to a core because no runnable process
+// remains. Distinct from EventCoreAssign with PID 0 because that pairing is
+// also used for the legacy "no proc" sentinel; consumers that care about the
+// swapper specifically — the HLT badge animation, the idle_ticks counter —
+// key off this event instead.
+type EventCoreIdle struct {
+	CoreID int    `json:"core_id"`
+	Tick   uint64 `json:"tick"`
+}
+
+// Tag returns the event tag.
+func (EventCoreIdle) Tag() string { return "core_idle" }
+
 // EventMutexOp summarizes every action on a kernel mutex so the frontend can
 // animate locks, contention, and handoffs without juggling near-identical
 // event types. Op values:

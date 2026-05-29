@@ -22,6 +22,12 @@ const (
 	StateRun     State = "RUN"
 	StateBlocked State = "BLOCKED"
 	StateZombie  State = "ZOMBIE"
+	// StateIdle is the resting state of the kernel idle task (PID 0). It is
+	// never reached by user processes: the swapper sits in it whenever no
+	// runnable process exists, executing HLT until the next IRQ. Modeled as
+	// a distinct state so the frontend can render the dedicated HLT badge
+	// without branching on PID inside every RUN-state code path.
+	StateIdle State = "IDLE"
 )
 
 // PCB (Process Control Block) is the bookkeeping the kernel maintains per
@@ -150,6 +156,11 @@ type FD struct {
 	PipeID int
 }
 
+// IsIdle reports whether this PCB is the kernel idle task (PID 0, the
+// Linux-style swapper). Callers use it to special-case the swapper without
+// having to thread the IdlePID through every helper.
+func (p *PCB) IsIdle() bool { return p.PID == 0 }
+
 // MemSpace returns the AddressSpace this PCB is bound to. Nil means the
 // PCB has not been initialised yet (only the init PCB before SpawnInit
 // finishes wiring it up).
@@ -195,5 +206,9 @@ func (p *PCB) Snapshot() map[string]any {
 		"tgid":      p.TGID,
 		"tid":       p.PID,
 		"is_leader": p.TGID == p.PID,
+		// is_idle flags the swapper (PID 0) so the frontend can pull it
+		// out of the regular process tree and render it as the compact
+		// kernel-idle band instead of a user-proc row.
+		"is_idle": p.IsIdle(),
 	}
 }
