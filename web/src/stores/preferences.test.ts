@@ -75,23 +75,23 @@ describe('preferences store', () => {
     expect(prefs.columnWidths.rightPx).toBe(380);
   });
 
-  it('hides init by default and respects the manual toggle', () => {
+  it('shows init by default and respects the manual toggle', () => {
     const prefs = usePreferencesStore();
-    expect(prefs.showInit).toBe(false);
-    prefs.setShowInit(true);
     expect(prefs.showInit).toBe(true);
     prefs.setShowInit(false);
     expect(prefs.showInit).toBe(false);
+    prefs.setShowInit(true);
+    expect(prefs.showInit).toBe(true);
   });
 
-  it('applyShowInitDefault hides for single-proc demos and reveals for multi-proc', () => {
+  it('applyShowInitDefault always reveals init while user has not touched the toggle', () => {
     const prefs = usePreferencesStore();
     prefs.applyShowInitDefault(1);
-    expect(prefs.showInit).toBe(false);
+    expect(prefs.showInit).toBe(true);
     prefs.applyShowInitDefault(2);
     expect(prefs.showInit).toBe(true);
     prefs.applyShowInitDefault(0);
-    expect(prefs.showInit).toBe(false);
+    expect(prefs.showInit).toBe(true);
   });
 
   it('applyShowInitDefault stops overriding once the user touches the toggle', () => {

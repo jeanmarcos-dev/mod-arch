@@ -107,7 +107,7 @@ export const COLUMN_MAX_PERCENT = 0.33;
 // them straight away rather than having to discover the toggle.
 const DEFAULTS: PrefsState = {
   sidebarCollapsed: false,
-  showInit: false,
+  showInit: true,
   showInitTouched: false,
   mode: 'pedagogic',
   density: 'comfortable',
@@ -326,15 +326,13 @@ export const usePreferencesStore = defineStore('preferences', () => {
     showInitTouched.value = true;
   }
 
-  // applyShowInitDefault picks a sensible visibility for the init card based
-  // on the demo's shape, called from cpu.ts on every `loaded` event:
-  //   - 0 or 1 user-space procs  → hidden (single-proc demos like ADD)
-  //   - 2 or more user-space procs → visible (fork/threads/IPC demos)
-  // Once the user has explicitly toggled (showInitTouched=true) the default
-  // becomes a no-op: the user's pick wins for the rest of the session.
-  function applyShowInitDefault(nonInitProcCount: number) {
+  // applyShowInitDefault reveals init by default on every `loaded` event,
+  // regardless of demo shape. Once the user has explicitly toggled
+  // (showInitTouched=true) the default becomes a no-op and their pick wins
+  // for the rest of the session.
+  function applyShowInitDefault(_nonInitProcCount: number) {
     if (showInitTouched.value) return;
-    showInit.value = nonInitProcCount > 1;
+    showInit.value = true;
   }
 
   function togglePanel(name: PanelName, value?: boolean) {
