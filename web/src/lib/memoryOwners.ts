@@ -13,6 +13,20 @@ import { MEMORY_REGIONS } from './memoryLayout';
 
 export type OwnerKind = 'kernel' | 'process';
 
+/** Cap mirrored from ProcessesPanel.vue so both panes indent the same way. */
+export const OWNER_DEPTH_CAP = 4;
+
+export interface ThreadInfo {
+  /** PID of the thread (its kernel-side task id). */
+  pid: number;
+  /** Optional tid surfaced by the backend; falls back to pid when absent. */
+  tid?: number;
+  name: string;
+  state: string;
+  /** Core currently executing this thread, if any. */
+  runningOnCore?: number;
+}
+
 export interface MemoryOwner {
   kind: OwnerKind;
   /** Stable id for v-for keys. 'kernel' or `pid-<n>`. */
@@ -32,18 +46,38 @@ export interface MemoryOwner {
   /** Core id currently executing this owner's PID, if any. Kernel owners
    *  surface the lowest core running in kernel mode for the same hint. */
   runningOnCore?: number;
-  /** Thread group leader pid for clone-thread children; undefined for processes. */
+  /** Thread group leader pid; undefined for the kernel and stand-alone procs. */
   tgid?: number;
-  /** When true the owner is a thread sharing memory with its tgid leader. */
-  isThread?: boolean;
+  /** Parent pid (fork tree). 0 / undefined means top-level (init or kernel). */
+  parentPid?: number;
+  /** Depth in the fork tree, clamped to OWNER_DEPTH_CAP. */
+  depth: number;
+  /** Real depth before clamping; used by the chip to surface a `↳dN` badge
+   *  when the tree is too deep for a clean indent. */
+  realDepth: number;
+  /** Threads that share this owner's address space (CLONE_THREAD). The
+   *  leader's own task is NOT included. Empty for non-leaders and procs
+   *  without children threads. */
+  threads: ThreadInfo[];
 }
 
 const KERNEL_REGION = MEMORY_REGIONS.find(r => r.name === 'kernel');
 
+function isThreadOf(p: PCBInfo): boolean {
+  return p.tgid !== undefined && p.tgid !== p.pid;
+}
+
 /**
- * Build [kernel, ...processes] enriched with the core that is currently
- * running each process (if any). Processes are returned in pid order so the
- * list does not visually shuffle between snapshots.
+ * Build the ordered list of memory owners. Layout:
+ *
+ *   [ kernel,                            // always first
+ *     ...leaders in fork-tree DFS order  // threads collapsed inside leaders
+ *   ]
+ *
+ * Threads (tgid !== pid) are NOT emitted as separate owners — they share
+ * the leader's code/stack so duplicating the entry would mislead. Each
+ * leader instead carries a `threads[]` list which the chip renders as a
+ * collapsible "HILOS (n)" section.
  */
 export function buildOwners(procs: PCBInfo[], cores: CoreInfo[]): MemoryOwner[] {
   const owners: MemoryOwner[] = [];
@@ -60,24 +94,104 @@ export function buildOwners(procs: PCBInfo[], cores: CoreInfo[]): MemoryOwner[] 
     codeSize: KERNEL_REGION ? KERNEL_REGION.end - KERNEL_REGION.start + 1 : 0x100000,
     stackTop: KERNEL_REGION?.end ?? 0x1FFFFF,
     runningOnCore: kernelCore?.id,
+    depth: 0,
+    realDepth: 0,
+    threads: [],
   });
 
-  const sorted = [...procs].sort((a, b) => a.pid - b.pid);
-  for (const p of sorted) {
-    const core = cores.find(c => c.current_pid === p.pid && !c.halted);
-    const isThread = p.tgid !== undefined && p.tgid !== p.pid;
+  if (procs.length === 0) return owners;
+
+  // Split tasks into leaders (own their address space) and threads (share
+  // with a leader via tgid). Stand-alone processes count as their own leader.
+  const leaders: PCBInfo[] = [];
+  const threadsByTgid = new Map<number, PCBInfo[]>();
+  for (const p of procs) {
+    if (isThreadOf(p)) {
+      const tgid = p.tgid as number;
+      const list = threadsByTgid.get(tgid);
+      if (list) list.push(p);
+      else threadsByTgid.set(tgid, [p]);
+    } else {
+      leaders.push(p);
+    }
+  }
+  for (const list of threadsByTgid.values()) list.sort((a, b) => a.pid - b.pid);
+
+  // Group leaders by parent_pid so a single DFS walk emits them in fork
+  // order. parent_pid === 0 means "top level" (typically init).
+  const byParent = new Map<number, PCBInfo[]>();
+  for (const l of leaders) {
+    const pp = l.parent_pid ?? 0;
+    const list = byParent.get(pp);
+    if (list) list.push(l);
+    else byParent.set(pp, [l]);
+  }
+  for (const list of byParent.values()) list.sort((a, b) => a.pid - b.pid);
+
+  const visit = (parent: number, depth: number) => {
+    const kids = byParent.get(parent);
+    if (!kids) return;
+    for (const k of kids) {
+      const runningCore = cores.find(c => c.current_pid === k.pid && !c.halted);
+      const threadList = threadsByTgid.get(k.pid) ?? [];
+      const threads: ThreadInfo[] = threadList.map(t => {
+        const tcore = cores.find(c => c.current_pid === t.pid && !c.halted);
+        return {
+          pid: t.pid,
+          tid: t.tid,
+          name: t.name,
+          state: t.state,
+          runningOnCore: tcore?.id,
+        };
+      });
+      owners.push({
+        kind: 'process',
+        id: `pid-${k.pid}`,
+        pid: k.pid,
+        name: k.name,
+        codeBase: k.code_base,
+        codeSize: k.code_size,
+        stackTop: k.stack_top,
+        state: k.state,
+        runningOnCore: runningCore?.id,
+        tgid: k.tgid,
+        parentPid: k.parent_pid,
+        depth: Math.min(depth, OWNER_DEPTH_CAP),
+        realDepth: depth,
+        threads,
+      });
+      visit(k.pid, depth + 1);
+    }
+  };
+  visit(0, 0);
+
+  // Safety net: any leader whose parent_pid points at a non-existent task
+  // (snapshot races, hidden ancestors) would never be visited above. Emit
+  // it at depth 0 so it stays visible.
+  const emittedIds = new Set(owners.filter(o => o.kind === 'process').map(o => o.pid));
+  for (const l of leaders) {
+    if (emittedIds.has(l.pid)) continue;
+    const runningCore = cores.find(c => c.current_pid === l.pid && !c.halted);
+    const threadList = threadsByTgid.get(l.pid) ?? [];
+    const threads: ThreadInfo[] = threadList.map(t => {
+      const tcore = cores.find(c => c.current_pid === t.pid && !c.halted);
+      return { pid: t.pid, tid: t.tid, name: t.name, state: t.state, runningOnCore: tcore?.id };
+    });
     owners.push({
       kind: 'process',
-      id: `pid-${p.pid}`,
-      pid: p.pid,
-      name: p.name,
-      codeBase: p.code_base,
-      codeSize: p.code_size,
-      stackTop: p.stack_top,
-      state: p.state,
-      runningOnCore: core?.id,
-      tgid: p.tgid,
-      isThread,
+      id: `pid-${l.pid}`,
+      pid: l.pid,
+      name: l.name,
+      codeBase: l.code_base,
+      codeSize: l.code_size,
+      stackTop: l.stack_top,
+      state: l.state,
+      runningOnCore: runningCore?.id,
+      tgid: l.tgid,
+      parentPid: l.parent_pid,
+      depth: 0,
+      realDepth: 0,
+      threads,
     });
   }
 
