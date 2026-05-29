@@ -26,6 +26,15 @@ function toggleNarrators() {
   prefs.narratorsEnabled = !prefs.narratorsEnabled;
 }
 
+function onToggleIdleTask() {
+  const next = !settings.cpu.idleTaskEnabled;
+  settings.cpu.setIdleTaskEnabled(next);
+  // When the student turns the swapper on, also reveal init so the full
+  // kernel side is visible at once. Respect explicit user choice: once
+  // they have toggled showInit themselves, leave it alone.
+  if (next && !prefs.showInitTouched) prefs.setShowInit(true, /*fromCoupling*/ true);
+}
+
 function onEsc(e: KeyboardEvent) {
   if (e.key === 'Escape' && bar.toolsDrawerOpen) bar.closeTools();
 }
@@ -143,6 +152,20 @@ watch(() => bar.toolsDrawerOpen, (open) => {
               >{{ n }}</button>
             </div>
             <span class="tools-dock__field-help">{{ t('simbar.settings.coresRestartHint') }}</span>
+          </div>
+          <div class="tools-dock__field">
+            <span class="tools-dock__field-label">{{ t('simbar.settings.idleTask') }}</span>
+            <button
+              type="button"
+              :class="['tools-dock__btn', { 'tools-dock__btn--on': settings.cpu.idleTaskEnabled }]"
+              :aria-pressed="settings.cpu.idleTaskEnabled"
+              :disabled="settings.viewer.value"
+              :title="settings.cpu.idleTaskEnabled ? t('simbar.settings.idleTaskTooltipOn') : t('simbar.settings.idleTaskTooltipOff')"
+              @click="onToggleIdleTask"
+            >
+              <span>{{ settings.cpu.idleTaskEnabled ? t('simbar.settings.idleTaskOn') : t('simbar.settings.idleTaskOff') }}</span>
+            </button>
+            <span class="tools-dock__field-help">{{ t('simbar.settings.idleTaskHint') }}</span>
           </div>
         </section>
 

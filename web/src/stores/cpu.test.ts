@@ -123,3 +123,85 @@ describe('cpu store — wake and init_reap events', () => {
     expect(cpu.readyQueue).toEqual([]);
   });
 });
+
+describe('cpu store — idle task (PID 0)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('keeps is_idle and running_idle from the snapshot payload', () => {
+    const cpu = useCpuStore();
+    cpu.__applyEvent({
+      type: 'snapshot',
+      regs: {}, segments: {}, mode: 0, halted: false, tick: 0,
+      procs: [
+        { pid: 0, name: 'swapper', state: 'IDLE', regs: {}, is_idle: true },
+        { pid: 1, name: 'init', state: 'BLOCKED', regs: {} },
+      ],
+      cores: [
+        { id: 0, regs: {}, segments: {}, mode: 0, halted: true, tick: 0, current_pid: 0, running_idle: true },
+      ],
+    } as any);
+
+    const swapper = cpu.procs.find(p => p.pid === 0);
+    expect(swapper?.is_idle).toBe(true);
+    const core0 = cpu.cores.find(c => c.id === 0);
+    expect(core0?.running_idle).toBe(true);
+  });
+
+  it('flips running_idle on the right core when core_idle fires', () => {
+    const cpu = useCpuStore();
+    cpu.__applyEvent({
+      type: 'snapshot',
+      regs: {}, segments: {}, mode: 0, halted: false, tick: 0,
+      procs: [],
+      cores: [
+        { id: 0, regs: {}, segments: {}, mode: 0, halted: false, tick: 0, current_pid: 0, running_idle: false },
+        { id: 1, regs: {}, segments: {}, mode: 0, halted: false, tick: 0, current_pid: 0, running_idle: false },
+      ],
+    } as any);
+
+    cpu.__applyEvent({ type: 'core_idle', core_id: 1, tick: 5 } as any);
+
+    expect(cpu.cores.find(c => c.id === 0)?.running_idle).toBe(false);
+    expect(cpu.cores.find(c => c.id === 1)?.running_idle).toBe(true);
+  });
+
+  it('clears running_idle when a real proc takes the core', () => {
+    const cpu = useCpuStore();
+    cpu.__applyEvent({
+      type: 'snapshot',
+      regs: {}, segments: {}, mode: 0, halted: false, tick: 0,
+      procs: [],
+      cores: [
+        { id: 0, regs: {}, segments: {}, mode: 0, halted: false, tick: 0, current_pid: 0, running_idle: true },
+      ],
+    } as any);
+
+    cpu.__applyEvent({ type: 'core_assign', core_id: 0, pid: 7 } as any);
+
+    expect(cpu.cores.find(c => c.id === 0)?.running_idle).toBe(false);
+  });
+
+  it('idleTaskEnabled mirrors the presence of PID 0 in procs', () => {
+    const cpu = useCpuStore();
+    expect(cpu.idleTaskEnabled).toBe(false);
+
+    cpu.__applyEvent({
+      type: 'procs',
+      procs: [
+        { pid: 0, name: 'swapper', state: 'IDLE', regs: {}, is_idle: true },
+        { pid: 1, name: 'init', state: 'BLOCKED', regs: {} },
+      ],
+    } as any);
+    expect(cpu.idleTaskEnabled).toBe(true);
+
+    cpu.__applyEvent({
+      type: 'procs',
+      procs: [
+        { pid: 1, name: 'init', state: 'BLOCKED', regs: {} },
+      ],
+    } as any);
+    expect(cpu.idleTaskEnabled).toBe(false);
+  });
+});

@@ -145,6 +145,15 @@ func Demos() []Demo {
 			SyscallsUsed: []string{"sys_read", "sys_write"},
 			Procs:        []Proc{buildReadkey()},
 		},
+		{
+			Name:         "idle_demo",
+			Description:  "Bloquea en sys_read y termina. Compare lado a lado con la tarea ociosa apagada (autostop) y encendida (PID 0 ocupa el núcleo en HLT).",
+			Category:     CategoryScheduling,
+			Difficulty:   DifficultyBasic,
+			Topics:       []string{"idle-task", "swapper", "blocking-io", "halt-loop"},
+			SyscallsUsed: []string{"sys_read", "sys_exit"},
+			Procs:        []Proc{buildIdleDemo()},
+		},
 
 		// ─── Scheduling ────────────────────────────────────────────────
 		{

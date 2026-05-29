@@ -318,12 +318,14 @@ export const usePreferencesStore = defineStore('preferences', () => {
     sidebarCollapsed.value = !sidebarCollapsed.value;
   }
 
-  function setShowInit(v: boolean) {
+  function setShowInit(v: boolean, fromCoupling = false) {
     showInit.value = v;
     // Flag the toggle as user-driven so later `loaded` events stop overwriting
     // the pick via applyShowInitDefault. This is persisted alongside showInit
-    // so the override survives reloads.
-    showInitTouched.value = true;
+    // so the override survives reloads. Coupled flips (e.g. the idle-task
+    // toggle revealing init) pass fromCoupling=true so the user's own
+    // preference is preserved if they later change their mind.
+    if (!fromCoupling) showInitTouched.value = true;
   }
 
   // applyShowInitDefault reveals init by default on every `loaded` event,
@@ -440,6 +442,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     sidebarCollapsed,
     sidebarMobileOpen,
     showInit,
+    showInitTouched,
     setShowInit,
     applyShowInitDefault,
     mode,

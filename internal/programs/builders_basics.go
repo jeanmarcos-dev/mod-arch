@@ -194,6 +194,37 @@ int main(void) {
 	return dslProc(b)
 }
 
+// buildIdleDemo: blocks on a single sys_read and exits. With the idle task
+// off, the simulator auto-stops the instant the proc blocks (legacy
+// behavior). With the idle task on, the same instant the proc blocks the
+// swapper takes the core in HLT — and the run loop keeps ticking,
+// waiting for a key. Side-by-side it surfaces exactly what the swapper
+// adds to the model.
+func buildIdleDemo() Proc {
+	b := asm.NewProc("idle_demo").Source(`// Bloquea en sys_read y termina. Demuestra el rol de la tarea ociosa.
+// Con la tarea ociosa apagada: la simulación se detiene cuando el proceso
+// bloquea (no hay más trabajo). Encendida: PID 0 (swapper) ocupa el núcleo
+// en HLT esperando una IRQ del teclado. Pulse una tecla para reanudar.
+
+char buf;
+
+int main(void) {
+    read(0, &buf, 1);   // BLOQUEA → con idle ON, el núcleo lo agarra el swapper
+    return buf;         // exit code = byte leído
+}
+`)
+	const bufAddr uint32 = 0x33FFE0
+	b.At(7).Comment("sys_read").MovImm(asm.EAX, kernel.SysRead)
+	b.At(7).Comment("fd=stdin").MovImm(asm.EBX, 0)
+	b.At(7).MovImm(asm.ECX, bufAddr)
+	b.At(7).MovImm(asm.EDX, 1)
+	b.At(7).Int(kernel.IRQSyscall)
+	b.At(8).Comment("exit code = EAX (bytes read)").MovReg(asm.EBX, asm.EAX)
+	b.At(8).Comment("sys_exit").MovImm(asm.EAX, kernel.SysExit)
+	b.At(8).Int(kernel.IRQSyscall)
+	return dslProc(b)
+}
+
 // buildBadmem: write to a kernel address. MMU traps it as a page fault and
 // the kernel kills the process before the exit sequence runs.
 func buildBadmem() Proc {

@@ -145,8 +145,12 @@ const allExpanded = computed(() =>
   visibleCores.value.length > 0 && visibleCores.value.every(c => isExpanded(c.id)),
 );
 
-type CoreStateKind = 'run' | 'idle' | 'halt';
+type CoreStateKind = 'run' | 'idle' | 'idle-task' | 'halt';
 function coreState(c: CoreInfo): CoreStateKind {
+  // idle-task wins over halt: when the swapper is bound, halted=true is the
+  // expected resting state between IRQs, not a terminal stop. The dedicated
+  // badge tells the student the core is *intentionally* sleeping, not dead.
+  if (c.running_idle) return 'idle-task';
   if (c.halted) return 'halt';
   if ((c.current_pid ?? 0) > 0) return 'run';
   return 'idle';
@@ -156,16 +160,18 @@ function stateClass(kind: CoreStateKind) {
 }
 function stateLabel(kind: CoreStateKind): string {
   switch (kind) {
-    case 'run':  return t('panels.cores.stateRun');
-    case 'idle': return t('panels.cores.stateIdle');
-    case 'halt': return t('panels.cores.stateHalt');
+    case 'run':       return t('panels.cores.stateRun');
+    case 'idle':      return t('panels.cores.stateIdle');
+    case 'idle-task': return t('panels.cores.stateIdleTask');
+    case 'halt':      return t('panels.cores.stateHalt');
   }
 }
 function stateTitle(kind: CoreStateKind, coreId: number): string {
   switch (kind) {
-    case 'run':  return t('panels.cores.stateRunTitle',  { core: coreId });
-    case 'idle': return t('panels.cores.stateIdleTitle', { core: coreId });
-    case 'halt': return t('panels.cores.stateHaltTitle', { core: coreId });
+    case 'run':       return t('panels.cores.stateRunTitle',      { core: coreId });
+    case 'idle':      return t('panels.cores.stateIdleTitle',     { core: coreId });
+    case 'idle-task': return t('panels.cores.stateIdleTaskTitle', { core: coreId });
+    case 'halt':      return t('panels.cores.stateHaltTitle',     { core: coreId });
   }
 }
 
@@ -417,9 +423,10 @@ function pcbChipTitle(c: CoreInfo, p: PCBInfo): string {
   container-type: inline-size;
 }
 
-.core-card.state-run  { border-left-color: var(--green); }
-.core-card.state-idle { border-left-color: var(--text-muted); }
-.core-card.state-halt { border-left-color: var(--red-soft); }
+.core-card.state-run       { border-left-color: var(--green); }
+.core-card.state-idle      { border-left-color: var(--text-muted); }
+.core-card.state-idle-task { border-left-color: var(--cyan, #6cf); }
+.core-card.state-halt      { border-left-color: var(--red-soft); }
 
 .core-card--focus {
   box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.25);
@@ -427,6 +434,20 @@ function pcbChipTitle(c: CoreInfo, p: PCBInfo): string {
 
 .core-card.state-halt {
   opacity: 0.85;
+}
+
+/* idle-task badge breathes slowly to suggest "asleep, not dead". The
+ * pulse only animates the state chip background, not the whole card,
+ * so the rest of the regs stay legible while the core HLTs. */
+.core-card.state-idle-task {
+  opacity: 0.92;
+}
+.core-card.state-idle-task .core-card__state {
+  animation: idleTaskPulse 2.4s ease-in-out infinite;
+}
+@keyframes idleTaskPulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
 }
 
 .core-card__head {
@@ -466,9 +487,10 @@ function pcbChipTitle(c: CoreInfo, p: PCBInfo): string {
   font-weight: 700;
   flex-shrink: 0;
 }
-.core-card__state.state-run  { color: var(--green); }
-.core-card__state.state-idle { color: var(--text-muted); }
-.core-card__state.state-halt { color: var(--red-soft); }
+.core-card__state.state-run       { color: var(--green); }
+.core-card__state.state-idle      { color: var(--text-muted); }
+.core-card__state.state-idle-task { color: var(--cyan, #6cf); }
+.core-card__state.state-halt      { color: var(--red-soft); }
 
 .core-card__id {
   font-size: 11px;

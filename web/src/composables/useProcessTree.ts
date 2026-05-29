@@ -16,6 +16,10 @@ export interface UseProcessTreeOptions {
 export interface UseProcessTreeResult {
   treeNodes: ComputedRef<ProcTreeNode[]>;
   initPID: ComputedRef<number>;
+  // idleProc is the kernel idle task (PID 0, swapper) when present —
+  // pulled out of the regular tree so the panel can render it as a
+  // dedicated compact band instead of a top-level node.
+  idleProc: ComputedRef<PCBInfo | null>;
   treeParentOf: (p: PCBInfo) => number;
   isThreadOf: (p: PCBInfo) => boolean;
 }
@@ -44,11 +48,19 @@ export function useProcessTree(opts: UseProcessTreeOptions = {}): UseProcessTree
     return p?.pid ?? 0;
   });
 
+  const idleProc = computed<PCBInfo | null>(() => {
+    return cpu.procs.find(p => p.is_idle === true) ?? null;
+  });
+
   const treeNodes = computed<ProcTreeNode[]>(() => {
     const hideInit = !prefs.showInit && initPID.value > 0;
+    // PID 0 is always excluded from the tree: it has no parent, no
+    // children, and the panel renders it as a dedicated band. Filtering
+    // here keeps the rest of the tree logic oblivious to the swapper.
+    const filtered = cpu.procs.filter(p => p.is_idle !== true);
     const visibleProcs = hideInit
-      ? cpu.procs.filter(p => p.pid !== initPID.value)
-      : cpu.procs;
+      ? filtered.filter(p => p.pid !== initPID.value)
+      : filtered;
     const byParent = new Map<number, PCBInfo[]>();
     for (const p of visibleProcs) {
       let pp = treeParentOf(p);
@@ -87,5 +99,5 @@ export function useProcessTree(opts: UseProcessTreeOptions = {}): UseProcessTree
     return out;
   });
 
-  return { treeNodes, initPID, treeParentOf, isThreadOf };
+  return { treeNodes, initPID, idleProc, treeParentOf, isThreadOf };
 }

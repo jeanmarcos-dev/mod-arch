@@ -42,6 +42,7 @@ export type CpuEvent =
   | { type: 'kbd_state'; buf_used: number; buf_cap: number; readers: { pid: number; prog: string }[] }
   | { type: 'core_assign'; core_id: number; pid: number }
   | { type: 'core_release'; core_id: number; pid: number; reason?: string }
+  | { type: 'core_idle'; core_id: number; tick: number }
   | { type: 'mutex_op'; core_id: number; pid: number; mutex_id: number; op: 'create' | 'acquired' | 'waiting' | 'released' | 'handoff' | 'rejected'; next_pid?: number; waiters?: number[] }
   | { type: 'sem_op'; core_id: number; pid: number; sem_id: number; op: 'create' | 'wait_immediate' | 'wait_blocked' | 'signal' | 'handoff'; count: number; next_pid?: number; waiters?: number[] }
   | { type: 'session_info'; id: string; mode: string; role: string; label: string; view_token: string; user_id?: string; user_name?: string; user_email?: string; presence?: { section: string; cores: number[]; mode?: string; narrators?: boolean; focus?: Focus } }
@@ -60,6 +61,9 @@ export interface CoreInfo {
   halted: boolean;
   tick: number;
   current_pid: number;
+  // running_idle disambiguates current_pid===0: legacy "no proc" vs the
+  // kernel swapper (PID 0) being bound. Drives the dedicated HLT badge.
+  running_idle?: boolean;
 }
 
 export interface MutexState {
@@ -162,6 +166,9 @@ export interface PCBInfo {
   tgid?: number;
   tid?: number;
   is_leader?: boolean;
+  // is_idle flags the kernel swapper (PID 0). Pulled out of the regular
+  // process tree and rendered as the compact kernel-idle band instead.
+  is_idle?: boolean;
 }
 
 // One IPC channel (pipe or FIFO) tracked in the store. Buffer is held
@@ -1134,6 +1141,10 @@ export const useCpuStore = defineStore('cpu', () => {
       case 'core_assign': {
         const c = ensureCoreSlot(ev.core_id);
         c.current_pid = ev.pid;
+        // Any non-zero PID assignment unbinds the swapper from this core.
+        // PID 0 also lands here when the kernel uses EventCoreAssign for
+        // the idle case; the dedicated core_idle event sets the flag back.
+        if (ev.pid !== 0) c.running_idle = false;
         markCoreActive(c, ev.core_id);
         pushLog(formatLog.coreAssign(ev.core_id, ev.pid), 'amber', ev.core_id);
         if (isSelected(ev.core_id)) currentPID.value = ev.pid;
@@ -1142,8 +1153,14 @@ export const useCpuStore = defineStore('cpu', () => {
       case 'core_release': {
         const c = ensureCoreSlot(ev.core_id);
         c.current_pid = 0;
+        c.running_idle = false;
         pushLog(formatLog.coreRelease(ev.core_id, ev.pid, ev.reason), 'amber', ev.core_id);
         if (isSelected(ev.core_id)) currentPID.value = 0;
+        break;
+      }
+      case 'core_idle': {
+        const c = ensureCoreSlot(ev.core_id);
+        c.running_idle = true;
         break;
       }
       case 'mutex_op': {
@@ -1375,6 +1392,14 @@ export const useCpuStore = defineStore('cpu', () => {
   function unshare() { send({ cmd: 'unshare' }); }
   function setAlias(alias: string) { send({ cmd: 'set_alias', alias }); }
   function setNumCores(n: number) { send({ cmd: 'set_num_cores', cores: n }); }
+  function setIdleTaskEnabled(enabled: boolean) { send({ cmd: 'set_idle_task', idle_task: enabled }); }
+
+  // idleTaskEnabled is derived from the process table: PID 0 only appears
+  // when the kernel toggle is on (LoadProgram / SetIdleTaskEnabled spawn
+  // it, SetIdleTaskEnabled(false) does NOT despawn but the broadcast
+  // procs list excludes it via processListLocked). Using the snapshot as
+  // single source of truth avoids drifting state when reconnecting.
+  const idleTaskEnabled = computed(() => procs.value.some(p => p.is_idle === true));
 
   // Presence is owner-only: send the current section + visible cores so
   // autofollowing viewers can mirror them. Debounced so a flurry of route
@@ -1490,7 +1515,7 @@ export const useCpuStore = defineStore('cpu', () => {
     lastPresence, handRaiseSignal, lastHandRaiseLabel, ownerGlossaryHover,
     connect, load, step, run, pause, reset, clearLog, setQuantum,
     setSpeed, setClockHz, setSpeedMul, pushKey, openGlossary,
-    share, unshare, setAlias, setNumCores, sendPresence, sendFocus, raiseHand, sendPointer, sendPointerOff, sendClick, sendGlossaryHover, sendGlossaryHoverOff,
+    share, unshare, setAlias, setNumCores, setIdleTaskEnabled, idleTaskEnabled, sendPresence, sendFocus, raiseHand, sendPointer, sendPointerOff, sendClick, sendGlossaryHover, sendGlossaryHoverOff,
     // Tutor: keep the wire shape private to this store so consumers do not
     // have to know the WS command name.
     sendTutorAsk: (

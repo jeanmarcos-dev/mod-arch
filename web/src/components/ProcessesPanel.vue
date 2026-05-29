@@ -39,7 +39,13 @@ const sortedProcs = computed(() => [...cpu.procs].sort((a, b) => a.pid - b.pid))
 // subtrees still render but stop accumulating horizontal offset and surface
 // a ↳ dN chip via realDepth.
 const TREE_DEPTH_CAP = 4;
-const { treeNodes, initPID } = useProcessTree({ depthCap: TREE_DEPTH_CAP });
+const { treeNodes, initPID, idleProc } = useProcessTree({ depthCap: TREE_DEPTH_CAP });
+
+// The swapper (PID 0) gets a compact band when the user has chosen to see
+// the kernel side of the process table. Coupled to showInit so toggling
+// "see the kernel" reveals init + idle together, which matches the
+// pedagogical pair (both are kernel artifacts the student usually ignores).
+const showIdleBand = computed(() => prefs.showInit && idleProc.value !== null);
 
 const EXPANDED_KEY = 'modos.procs.expandedPids';
 
@@ -246,6 +252,16 @@ function regsSrcTitle(p: PCBInfo): string {
       {{ t('panels.processes.emptyDemo') }}
     </div>
 
+    <div
+      v-if="showIdleBand"
+      class="proc-idle-band"
+      :title="t('panels.processes.idleBandTitle')"
+    >
+      <span class="proc-idle-band__badge">PID 0</span>
+      <span class="proc-idle-band__name">{{ idleProc!.name }}</span>
+      <span class="proc-idle-band__hint">{{ t('panels.processes.idleBandHint') }}</span>
+    </div>
+
     <div v-if="treeNodes.length > 0" class="proc-list">
       <section
         v-for="node in treeNodes"
@@ -441,6 +457,37 @@ function regsSrcTitle(p: PCBInfo): string {
   .proc-toolbar__btn-label {
     display: none;
   }
+}
+
+/* Compact band for the kernel idle task (PID 0). Slim header above the
+ * tree so the swapper is visible without occupying a full proc row. */
+.proc-idle-band {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--cyan, #6cf);
+  background: rgba(102, 204, 255, 0.06);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-radius: 3px;
+  user-select: none;
+}
+.proc-idle-band__badge {
+  font-weight: 600;
+  color: var(--cyan, #6cf);
+  letter-spacing: 0.4px;
+}
+.proc-idle-band__name {
+  color: var(--text);
+}
+.proc-idle-band__hint {
+  margin-left: auto;
+  opacity: 0.75;
+  font-style: italic;
 }
 
 .proc-list {
