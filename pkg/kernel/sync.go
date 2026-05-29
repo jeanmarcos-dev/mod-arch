@@ -363,7 +363,11 @@ func removeInt(xs []int, target int) []int {
 // idle, the PID is handed straight to it via loadCPUFromPCB — switchTo cannot
 // be used because the idle core has no kernel-stack frame to patch (the
 // process state must come up fresh from the PCB). Otherwise the PID is queued
-// for the scheduler to pick up later.
+// for the scheduler to pick up later, and the queue change is announced via a
+// sched_decision so the WS client can refresh cpu.readyQueue. Without that
+// announcement the frontend's haltedDead heuristic (cpu.halted && readyQueue
+// empty) wrongly disables the STEP button after a sync wake hands a process
+// to a busy core.
 func (k *Kernel) wakeWaiter(pid int, reason string) []cpu.Event {
 	pcb := k.Processes[pid]
 	if pcb == nil {
@@ -389,5 +393,11 @@ func (k *Kernel) wakeWaiter(pid int, reason string) []cpu.Event {
 		return out
 	}
 	k.Ready.Push(pid)
+	out = append(out, cpu.EventSchedDecision{
+		FromPID:    0,
+		ToPID:      pid,
+		Reason:     "wake",
+		ReadyQueue: k.Ready.Snapshot(),
+	})
 	return out
 }

@@ -379,3 +379,53 @@ type EventSemOp struct {
 
 // Tag returns the event tag.
 func (EventSemOp) Tag() string { return "sem_op" }
+
+// EventWake narrates a BLOCKED → READY transition. It is emitted by every
+// path that wakes a sleeping process (sys_exit notifying a waiting parent,
+// vfork child wake-up, keyboard wake), each carrying the reason the PCB was
+// blocked on so the frontend can show "wake P3 (from wait(any))" or
+// "wake P2 (from vfork)" without inventing the label client-side.
+//
+// Wakes are NOT scheduling decisions — they only move the PID into the ready
+// queue. The eventual dispatch is a separate EventSchedDecision or, for
+// init, the consolidated EventInitReap. Splitting wake from schedule is what
+// lets the log differentiate state transitions from runqueue activity.
+type EventWake struct {
+	PID        int    `json:"pid"`
+	FromReason string `json:"from_reason"`
+	ReadyQueue []int  `json:"ready_queue"`
+}
+
+// Tag returns the event tag.
+func (EventWake) Tag() string { return "wake" }
+
+// ReapDetail describes a single zombie cosechado within EventInitReap.
+// Reparented is true only when the child was transferred to init because its
+// original parent died (genuine orphan, set by markZombieAndReparent), and
+// false when the child was adopted by init at load time via AdoptUnderInit
+// (birth-adoption). The frontend uses it to choose between "orphan" and
+// "child" wording when rendering the reap.
+type ReapDetail struct {
+	ChildPID   int    `json:"child_pid"`
+	ExitCode   uint32 `json:"exit_code"`
+	Reparented bool   `json:"reparented"`
+}
+
+// EventInitReap is the kernel-emulated reap cycle of PID 1. Init never
+// occupies a core in this simulator — it is woken by SIGCHLD, drains every
+// queued PendingReap, and re-blocks in wait(any) without executing user
+// code. This event consolidates the cycle so the log communicates that init
+// is special-cased; the per-zombie EventWaitOp{Op:"reap"} and the
+// EventSchedDecision{Reason:"wake-init"} previously emitted are folded into
+// the single Reaps[] list here.
+//
+// Regular (non-init) parents still cosechan vía EventWaitOp; the new event
+// only fires for init's emulated reaper.
+type EventInitReap struct {
+	InitPID    int          `json:"init_pid"`
+	Reaps      []ReapDetail `json:"reaps"`
+	ReadyQueue []int        `json:"ready_queue"`
+}
+
+// Tag returns the event tag.
+func (EventInitReap) Tag() string { return "init_reap" }

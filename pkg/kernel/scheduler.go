@@ -270,19 +270,48 @@ func (k *Kernel) DispatchIdleCores() []cpu.Event {
 }
 
 // runInitReapCycle is the dispatch-time choreography for init: a visible
-// READY → RUN, drain every PendingReap (one event per orphan), and back to
-// BLOCKED("wait()"). Init never actually executes its own code — the cycle
-// is implemented entirely in the kernel.
+// READY → RUN, drain every PendingReap as a single EventInitReap, and back
+// to BLOCKED("wait()"). Init never actually executes its own code — the
+// cycle is implemented entirely in the kernel. EventInitReap is what tells
+// the frontend that this whole sequence is kernel-emulated, so the alumno
+// sees a label like "init reaps (kernel-emulated): P{n}" instead of
+// guessing why init's registers mutate without a PCB restore.
 //
 // The idle core passed in is NOT bound to init at the end; the caller
 // continues its dispatch loop and assigns the slot to the next eligible
 // READY PID.
+//
+// init.Regs.EAX is stamped with the first reaped PID for consistency with
+// the regular consumePendingReaps path; with N orphans in one cycle only
+// the first PID is preserved — that is a known limitation flagged in the
+// implementation plan and is harmless because init does not occupy a core.
 func (k *Kernel) runInitReapCycle(idle *Core, init *PCB) []cpu.Event {
 	out := []cpu.Event{
-		cpu.EventSchedDecision{FromPID: 0, ToPID: init.PID, Reason: "wake-init", ReadyQueue: k.Ready.Snapshot()},
 		cpu.EventProcessState{PID: init.PID, State: string(StateRun), Reason: "SIGCHLD"},
 	}
-	out = append(out, k.consumePendingReaps(init)...)
+
+	reaps := make([]cpu.ReapDetail, 0, len(init.PendingReaps))
+	first := true
+	for _, cpid := range init.PendingReaps {
+		child := k.Processes[cpid]
+		if child == nil {
+			continue
+		}
+		detail := k.reapOne(init, child)
+		if first {
+			init.Regs.EAX = uint32(detail.ChildPID)
+			first = false
+		}
+		reaps = append(reaps, detail)
+	}
+	init.PendingReaps = nil
+
+	out = append(out, cpu.EventInitReap{
+		InitPID:    init.PID,
+		Reaps:      reaps,
+		ReadyQueue: k.Ready.Snapshot(),
+	})
+
 	init.State = StateBlocked
 	init.BlockedOn = initBlockedReason
 	init.Core = -1

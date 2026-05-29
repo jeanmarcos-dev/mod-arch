@@ -56,6 +56,26 @@ const (
 	FdStderr uint32 = 2
 )
 
+// syscallArgs returns the slice of argument registers actually consumed by
+// the given syscall, in argv order. The event log shows only the args the
+// syscall touches; trailing register values that the caller did not set
+// would be noise (e.g. sys_exit(10, 0xa, 0) suggesting three arguments when
+// the syscall is unary). Linux i386 calling convention passes args in
+// EBX, ECX, EDX (in that order).
+func syscallArgs(num uint32, ebx, ecx, edx uint32) []uint32 {
+	switch num {
+	case SysFork, SysVfork:
+		return []uint32{}
+	case SysExit, SysPipe, SysMknod:
+		return []uint32{ebx}
+	case SysOpen, SysWaitpid:
+		return []uint32{ebx, ecx}
+	default:
+		// SysWrite, SysRead, SysClone, and unknown carry three args.
+		return []uint32{ebx, ecx, edx}
+	}
+}
+
 // handleSyscall dispatches based on EAX of the calling core. Called from
 // runHandlerLogic when an IRQ on vector 0x80 arrives with source SW.
 //
@@ -80,7 +100,7 @@ func (k *Kernel) handleSyscall(core *Core) []cpu.Event {
 			PID:    callerPID,
 			Num:    num,
 			Name:   "exit",
-			Args:   []uint32{arg1, arg2, arg3},
+			Args:   syscallArgs(num, arg1, arg2, arg3),
 			Result: 0,
 		}}
 		return append(out, k.sysExit(core, arg1)...)
@@ -105,7 +125,7 @@ func (k *Kernel) handleSyscall(core *Core) []cpu.Event {
 		if blocked {
 			syscallEv := cpu.EventSyscall{
 				PID: callerPID, Num: num, Name: name,
-				Args: []uint32{arg1, arg2, arg3}, Result: result,
+				Args: syscallArgs(num, arg1, arg2, arg3), Result: result,
 			}
 			return append([]cpu.Event{syscallEv}, out...)
 		}
@@ -141,7 +161,7 @@ func (k *Kernel) handleSyscall(core *Core) []cpu.Event {
 			// pre-stage; the eventual reap will surface the real PID.
 			syscallEv := cpu.EventSyscall{
 				PID: callerPID, Num: num, Name: name,
-				Args: []uint32{arg1, arg2, arg3}, Result: 0,
+				Args: syscallArgs(num, arg1, arg2, arg3), Result: 0,
 			}
 			return append([]cpu.Event{syscallEv}, out...)
 		}
@@ -168,7 +188,7 @@ func (k *Kernel) handleSyscall(core *Core) []cpu.Event {
 		PID:    core.CurrentPID,
 		Num:    num,
 		Name:   name,
-		Args:   []uint32{arg1, arg2, arg3},
+		Args:   syscallArgs(num, arg1, arg2, arg3),
 		Result: result,
 	}
 	out = append([]cpu.Event{syscallEv}, out...)
@@ -265,7 +285,6 @@ func (k *Kernel) sysExit(core *Core, code uint32) []cpu.Event {
 	pcb := k.Processes[core.CurrentPID]
 	var out []cpu.Event
 	if pcb != nil {
-		pcb.Regs.EAX = code
 		pcb.ExitCode = code
 		// A task whose TGID differs from its PID was spawned via
 		// clone(CLONE_THREAD): it is a thread of its leader, not a
@@ -279,9 +298,6 @@ func (k *Kernel) sysExit(core *Core, code uint32) []cpu.Event {
 			})
 		}
 	}
-	out = append(out, k.killCurrent(core, "exit")...)
-	if pcb != nil {
-		out = append(out, k.notifyParentOfExit(pcb)...)
-	}
+	out = append(out, k.exitProcess(core, "exit")...)
 	return out
 }

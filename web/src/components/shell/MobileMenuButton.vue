@@ -30,12 +30,15 @@ const shiftedDown = computed(() => bannerVisible.value);
 .mobile-menu-btn {
   display: none;
   position: fixed;
-  /* Geometry matches .sim-btn (32px high) so the button sits on the same
-     baseline as LOAD/STEP/RUN/RESET when docked over the SimBar. */
-  top: 10px;
-  left: 12px;
-  width: 32px;
-  height: 32px;
+  /* Geometry matches .sim-bar__right .icon-btn (28×28 on mobile) so the
+     hamburger is the same size as the tools / expand toggles it sits
+     across the SimBar from. `top` mirrors the SimBar row's
+     `padding-top: var(--space-2)` so the icon shares the vertical
+     baseline with TICK/WS and the settings/cores cluster. */
+  top: 8px;
+  left: 8px;
+  width: 28px;
+  height: 28px;
   align-items: center;
   justify-content: center;
   background: var(--surface-2);
@@ -62,9 +65,12 @@ const shiftedDown = computed(() => bannerVisible.value);
 
 /* Drawer open: slide the toggle to the right edge of the drawer so the X
    sits over the dim backdrop instead of overlapping the first group label
-   ("SIMULACIÓN") inside the menu. */
+   ("SIMULACIÓN") inside the menu. The drawer itself uses
+   `clamp(220px, 75vw, 280px)`, so we follow it with the same formula plus
+   an 8px gutter so the button hugs the drawer's right edge across all
+   mobile viewports (320 → 768). */
 .mobile-menu-btn--open {
-  left: 228px;
+  left: clamp(228px, calc(75vw + 8px), 288px);
   border-color: var(--accent);
   box-shadow: var(--shadow-glow-amber);
 }
@@ -76,7 +82,7 @@ const shiftedDown = computed(() => bannerVisible.value);
 
 .mobile-menu-btn svg { display: block; }
 
-@media (max-width: 480px) {
+@media (max-width: 768px) {
   .mobile-menu-btn { display: inline-flex; }
 }
 

@@ -19,7 +19,14 @@ type Core struct {
 	// or an IRQ wakes it up.
 	CurrentPID int
 
-	// lastTimerFiredAt remembers the CPU.Tick at which the PIT last fired on
-	// this core, so shouldFireTimer can quantize per-core preemption.
-	lastTimerFiredAt uint64
+	// userInstructionsSinceFire counts user-mode instructions that have
+	// actually executed (execNext succeeded) since the last timer fire on
+	// this core. Kernel-mode handler instructions, IRQ dispatch cycles and
+	// halted noops do NOT increment it — only honest user-instruction
+	// ticks count toward the quantum. shouldFireTimer fires when this
+	// reaches TimerQuantum, then resets it to zero. Decoupling the quantum
+	// from raw CPU.Tick eliminates the off-by-handler-cost bug where the
+	// first quantum delivered N user instructions while later ones
+	// delivered N - handlerTicks.
+	userInstructionsSinceFire uint64
 }

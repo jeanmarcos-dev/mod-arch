@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
@@ -263,6 +264,69 @@ func TestSemaphore_UnknownIDFails(t *testing.T) {
 	}
 	if _, ok := k.semSignal(k.BootCore(), 99); ok {
 		t.Error("semSignal(99) ok=true, want false")
+	}
+}
+
+// TestMutexUnlock_NoIdleCore_EmitsReadyQueueSnapshot exercises the "no idle
+// core" branch of wakeWaiter: with only one core (Boot Core, busy holding the
+// holder PID), unlocking must push the next waiter onto the ready queue AND
+// announce the change to the WS client via a sched_decision carrying the
+// updated ReadyQueue. Without that announcement, cpu.readyQueue in the
+// frontend stays empty and SimBar's haltedDead heuristic disables STEP even
+// though the kernel still has work to do.
+func TestMutexUnlock_NoIdleCore_EmitsReadyQueueSnapshot(t *testing.T) {
+	k := freshKernelWithProcs(t, 2)
+	id := k.mutexCreate()
+
+	// PID 1 owns the mutex (Boot Core, CurrentPID=1).
+	if _, _, ok := k.mutexLock(k.BootCore(), id); !ok {
+		t.Fatal("PID 1 mutexLock ok=false")
+	}
+
+	// Stage PID 2 trying to lock. Remove it from the ready queue first so
+	// blockOnSync does not accidentally pop PID 2 itself as the "next"
+	// runnable and switch the core back to a process we are blocking.
+	k.Ready.Remove(2)
+	k.BootCore().CurrentPID = 2
+	if _, blocked, ok := k.mutexLock(k.BootCore(), id); !ok || !blocked {
+		t.Fatalf("PID 2 mutexLock: ok=%v blocked=%v, want both true", ok, blocked)
+	}
+
+	// Restore Boot Core to PID 1 so the unlock comes from the legitimate
+	// holder, and keep the core busy so firstIdleCore returns nil — that is
+	// the path under test.
+	k.BootCore().CurrentPID = 1
+	k.BootCore().CPU.Halted = false
+
+	evs, ok := k.mutexUnlock(k.BootCore(), id)
+	if !ok {
+		t.Fatal("PID 1 mutexUnlock ok=false")
+	}
+
+	// PID 2 must be on the ready queue (handoff via wakeWaiter's
+	// no-idle-core branch).
+	if !slices.Contains(k.Ready.Snapshot(), 2) {
+		t.Fatalf("PID 2 not on ready queue after unlock: %v", k.Ready.Snapshot())
+	}
+
+	// And the emitted events must carry the ready-queue snapshot so the
+	// frontend can refresh cpu.readyQueue.
+	var sawWakeDecision bool
+	for _, e := range evs {
+		sd, isSched := e.(cpu.EventSchedDecision)
+		if !isSched {
+			continue
+		}
+		if sd.ToPID != 2 {
+			continue
+		}
+		if !slices.Contains(sd.ReadyQueue, 2) {
+			t.Errorf("sched_decision ReadyQueue = %v, want it to include PID 2", sd.ReadyQueue)
+		}
+		sawWakeDecision = true
+	}
+	if !sawWakeDecision {
+		t.Errorf("wakeWaiter on no-idle-core path emitted no EventSchedDecision — frontend cpu.readyQueue will drift out of sync with k.Ready")
 	}
 }
 

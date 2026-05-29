@@ -34,6 +34,8 @@ export type CpuEvent =
   | { type: 'pcb_save'; core_id: number; pid: number; regs: Record<string, number> }
   | { type: 'pcb_restore'; core_id: number; pid: number; regs: Record<string, number> }
   | { type: 'sched_decision'; from_pid: number; to_pid: number; reason?: string; ready_queue: number[] }
+  | { type: 'wake'; pid: number; from_reason: string; ready_queue: number[] }
+  | { type: 'init_reap'; init_pid: number; reaps: { child_pid: number; exit_code: number; reparented: boolean }[]; ready_queue: number[] }
   | { type: 'process_state'; pid: number; state: string; reason?: string; exit_code?: number }
   | { type: 'syscall'; pid: number; num: number; name: string; args: number[]; result: number }
   | { type: 'console_out'; core_id?: number; pid: number; kind?: 'in' | 'out'; bytes: number[]; text: string }
@@ -1000,6 +1002,34 @@ export const useCpuStore = defineStore('cpu', () => {
         pushLog(formatLog.schedule(ev.from_pid, ev.to_pid, ev.reason, rq), 'yellow');
         break;
       }
+      case 'wake': {
+        // BLOCKED → READY transition. Sync the ready queue so the haltedDead
+        // heuristic in SimBar (halted && readyQueue.empty) does not stay
+        // stuck after a child sys_exit wakes a parent. The state change
+        // itself travels in the accompanying EventProcessState; this event
+        // exists so wakes are not conflated with scheduling decisions.
+        const rq = ev.ready_queue ?? [];
+        readyQueue.value = rq;
+        pushLog(formatLog.wake(ev.pid, ev.from_reason, rq), 'yellow');
+        break;
+      }
+      case 'init_reap': {
+        // Kernel-emulated reap cycle of PID 1: init does not occupy a core,
+        // it drains every PendingReap and goes back to wait(any) without
+        // executing user code. The event carries one ReapDetail per zombie
+        // collected (with Reparented telling apart genuine orphans from
+        // birth-adopted children of init).
+        const rq = ev.ready_queue ?? [];
+        readyQueue.value = rq;
+        for (const r of ev.reaps) {
+          // Remove the reaped child from the local procs mirror; the
+          // backend already dropped it from k.Processes.
+          const idx = procs.value.findIndex(x => x.pid === r.child_pid);
+          if (idx >= 0) procs.value.splice(idx, 1);
+        }
+        pushLog(formatLog.initReap(ev.init_pid, ev.reaps), 'yellow');
+        break;
+      }
       case 'process_state': {
         const p = procs.value.find(x => x.pid === ev.pid);
         if (p) {
@@ -1231,8 +1261,11 @@ export const useCpuStore = defineStore('cpu', () => {
             parent.children = parent.children.filter(c => c !== ev.child_pid);
           }
           flashPID(ev.pid);
-          const byInit = ev.pid === 1; // init PID convention; sufficient until the store carries InitPID explicitly
-          pushLog(formatLog.waitReap(ev.pid, ev.child_pid, ev.exit_code ?? 0, byInit), 'yellow');
+          // Init reaps no longer travel as EventWaitOp — they fire as the
+          // consolidated EventInitReap, formatted by formatLog.initReap.
+          // So a wait_op event reaching here is always a regular parent
+          // collecting through sys_waitpid.
+          pushLog(formatLog.waitReap(ev.pid, ev.child_pid, ev.exit_code ?? 0), 'yellow');
         } else if (ev.op === 'call') {
           pushLog(formatLog.waitCall(ev.pid, ev.child_pid), 'cyan');
         }

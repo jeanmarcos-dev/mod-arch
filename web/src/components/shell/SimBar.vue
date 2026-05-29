@@ -509,21 +509,93 @@ const pauseTooltip = computed(() => {
   flex-wrap: nowrap;
 }
 
+/* Phone + tablet portrait layout (≤ 768px) requested by the user:
+     Row 1 — [hamb] | TICK · WS (centered) | settings · cores
+     Row 2 — Select demo (ProgramPicker)
+     Row 3 — RESET     CLEAR    RESET-UI
+     Row 4 — LOAD      STEP     RUN
+   The hamburger is fixed-positioned by AppShell at left:12, width:32. We
+   reserve column 1 (44px) for its visual footprint so the status chips can
+   hug the centre of column 2 instead of leaving a hole between the
+   hamburger and TICK. `.sim-bar__center` becomes `display: contents` so
+   its children (picker, btns) become direct grid items and the
+   destructive/primary buttons swap rows via explicit grid placement. */
 @media (max-width: 768px) {
   .sim-bar__row--main {
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    padding-right: 120px;
+    display: grid;
+    grid-template-columns: 28px 1fr auto;
+    grid-template-areas:
+      ".      status cluster"
+      "picker picker picker"
+      "btns   btns   btns";
+    align-items: center;
+    padding: var(--space-2);
+    row-gap: var(--space-2);
+    column-gap: var(--space-2);
     min-height: 0;
   }
-  .sim-bar__center {
-    flex: 1 1 100%;
-    justify-content: flex-start;
+
+  .sim-bar__center { display: contents; }
+
+  .sim-bar__status-inline {
+    grid-area: status;
+    min-width: 0;
+    justify-self: center;
+    max-width: 100%;
   }
+
+  .sim-bar__right {
+    grid-area: cluster;
+    position: static;
+    transform: none;
+    margin-left: 0;
+    gap: var(--space-1);
+  }
+  .sim-bar__right .icon-btn { width: 28px; height: 28px; }
+
+  .sim-bar__picker {
+    grid-area: picker;
+    flex: 1 1 auto;
+    max-width: none;
+    min-width: 0;
+  }
+
   .sim-bar__btns {
-    flex-wrap: wrap;
-    justify-content: flex-start;
+    grid-area: btns;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    /* Rows shape the cell height; the button itself stretches into the
+       cell via the grid's default `align-items: stretch`, so we don't
+       need to fix the button's own height. */
+    grid-template-rows: 40px 40px;
+    gap: 4px;
+    width: 100%;
   }
+  .sim-bar__btns .sim-btn {
+    width: 100%;
+    min-width: 0;
+    padding: 0;
+    height: auto;
+    min-height: auto;
+    justify-content: center;
+  }
+  /* Bump the icon up a notch on mobile so it doesn't look lost in the
+     button cell. */
+  .sim-bar__btns .sim-btn > svg { width: 18px; height: 18px; }
+  .sim-bar__btns .sim-btn > span { display: none; }
+  .sim-bar__btns .sim-btn--reset-ui { display: inline-flex; }
+
+  /* Explicit cell placement: secondary (destructive/danger) actions on
+     row 1, primary execution controls on row 2. */
+  .sim-bar__btns .sim-btn--reset    { grid-row: 1; grid-column: 1; }
+  .sim-bar__btns .sim-btn--clear    { grid-row: 1; grid-column: 2; }
+  .sim-bar__btns .sim-btn--reset-ui { grid-row: 1; grid-column: 3; }
+  .sim-bar__btns .sim-btn--anim-load { grid-row: 2; grid-column: 1; }
+  .sim-bar__btns .sim-btn--anim-step { grid-row: 2; grid-column: 2; }
+  .sim-bar__btns .sim-btn--anim-run  { grid-row: 2; grid-column: 3; }
+
+  /* Floating mode collapses to a static docked strip on mobile — a
+     draggable bar would crowd the limited width. */
   .sim-bar--floating {
     position: static;
     max-width: none;
@@ -534,25 +606,24 @@ const pauseTooltip = computed(() => {
   }
 }
 
-@media (max-width: 600px) {
-  .sim-bar__picker {
-    flex: 1 1 100%;
-    max-width: none;
-  }
-}
-
-@media (max-width: 480px) {
-  .sim-bar__row--main {
-    padding-left: 52px;
-    justify-content: flex-start;
-  }
-  .sim-bar__center {
-    justify-content: flex-start;
-    flex-wrap: nowrap;
-  }
+/* Very narrow viewports (≤300px, e.g. ultra-mobile or embedded panes):
+   shrink the 6-cell action grid so the icons no longer float in
+   oversized boxes. Below this width the bar already sits inside a
+   pulled-in container and the 44px rows feel padded. */
+@media (max-width: 300px) {
   .sim-bar__btns {
-    flex-wrap: nowrap;
-    justify-content: flex-start;
+    grid-template-rows: 36px 36px;
+    column-gap: 4px;
+    row-gap: 8px;
+  }
+  .sim-bar__btns .sim-btn {
+    padding: 0;
+    height: auto;
+    min-height: auto;
+  }
+  .sim-bar__btns .sim-btn > svg {
+    width: 12px;
+    height: 12px;
   }
 }
 
@@ -743,13 +814,47 @@ const pauseTooltip = computed(() => {
 }
 
 @media (max-width: 480px) {
+  /* The cores panel hides overflow at desktop sizes so the accordion looks
+     clean. On phones each row needs to scroll horizontally instead, so the
+     panel must expose its own overflow to let the children scroll. */
+  .sim-bar__cores-panel { overflow: visible; padding: var(--space-2); }
+
   .sim-core-row {
     flex-wrap: nowrap;
     overflow-x: auto;
+    overflow-y: hidden;
     scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
     -webkit-overflow-scrolling: touch;
-    mask-image: linear-gradient(to right, black 88%, transparent);
+    scroll-snap-type: x proximity;
+    /* Fade in both edges so the row visually signals more content on
+       either side. */
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      black 12px,
+      black calc(100% - 12px),
+      transparent 100%
+    );
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      black 12px,
+      black calc(100% - 12px),
+      transparent 100%
+    );
+    /* Reserve 4px so the thin scrollbar lives below the chips instead of
+       cutting through them. */
+    padding-bottom: 4px;
   }
+  .sim-core-row::-webkit-scrollbar { height: 3px; }
+  .sim-core-row::-webkit-scrollbar-track { background: transparent; }
+  .sim-core-row::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 2px;
+  }
+  .sim-core-row > * { scroll-snap-align: start; }
+
   .core-cell__k { font-size: 8px; }
   .core-cell__v { font-size: 9.5px; }
   .core-cell--pid   { min-width: 44px; }

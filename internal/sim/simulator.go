@@ -265,7 +265,7 @@ func (s *Simulator) StepOnce() error {
 func procTableMutated(evs []cpu.Event) bool {
 	for _, e := range evs {
 		switch ev := e.(type) {
-		case cpu.EventFork, cpu.EventThreadCreate, cpu.EventThreadExit, cpu.EventReparent:
+		case cpu.EventFork, cpu.EventThreadCreate, cpu.EventThreadExit, cpu.EventReparent, cpu.EventInitReap:
 			return true
 		case cpu.EventWaitOp:
 			if ev.Op == "reap" {
@@ -524,12 +524,22 @@ func (s *Simulator) PushKey(key string) {
 	tick := s.kernel.BootCPU().Tick
 	running := s.running
 	userPaused := s.userPaused
+	exitDraining := len(s.kernel.PendingKernelWork) > 0
 	s.mu.Unlock()
 	for _, e := range evs {
 		s.events.push(e, tick)
 		s.Broadcast(EventToWire(e))
 	}
 	if running || userPaused {
+		return
+	}
+	// If the kernel is mid-do_exit (phases queued on PendingKernelWork),
+	// stepping inline here would consume an exit phase on behalf of a
+	// keyboard IRQ — which would hide the death cascade the user is
+	// observing click by click. Leave the byte and the IRQ buffered;
+	// they will dispatch the moment the cascade drains and the user (or
+	// the run loop) takes the next Step.
+	if exitDraining {
 		return
 	}
 	// Idle autostop case: step once so the IRQ dispatches immediately and

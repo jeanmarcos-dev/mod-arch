@@ -191,10 +191,16 @@ func (k *Kernel) queueReapAndWake(parent, child *PCB, reason string) []cpu.Event
 // pedagogically important so the alumno sees the parent wait its turn
 // instead of teleporting from BLOCKED to RUN.
 //
+// Emits an EventWake alongside the state transition. EventWake carries the
+// updated ready-queue snapshot so the WS client keeps its mirror in sync
+// without conflating wakes (BLOCKED → READY) with scheduling decisions
+// (which now travel through EventSchedDecision and EventInitReap only).
+//
 // Idempotent: if the PCB is already READY (woken earlier in the same Step
 // and still queued), the function returns nil instead of double-queueing.
-// That guards against scenarios where killCurrent has already enqueued init
-// for orphan reaping and notifyParentOfExit then tries to enqueue it again.
+// That guards against scenarios where markZombieAndReparent has already
+// enqueued init for orphan reaping and notifyParentOfExit then tries to
+// enqueue it again.
 func (k *Kernel) wakeToQueue(pid int, reason string) []cpu.Event {
 	pcb := k.Processes[pid]
 	if pcb == nil {
@@ -208,14 +214,38 @@ func (k *Kernel) wakeToQueue(pid int, reason string) []cpu.Event {
 	k.Ready.Push(pid)
 	return []cpu.Event{
 		cpu.EventProcessState{PID: pid, State: string(StateReady), Reason: "woken from " + reason},
+		cpu.EventWake{
+			PID:        pid,
+			FromReason: reason,
+			ReadyQueue: k.Ready.Snapshot(),
+		},
 	}
 }
 
+// reapOne removes the zombie child from the process table and from the
+// parent's Children list, returning the bookkeeping detail without emitting
+// any event. Callers decide how to surface the reap: regular parents wrap
+// the detail in EventWaitOp{Op:"reap"}; init folds every detail of the
+// cycle into a single EventInitReap.
+func (k *Kernel) reapOne(parent, child *PCB) cpu.ReapDetail {
+	detail := cpu.ReapDetail{
+		ChildPID:   child.PID,
+		ExitCode:   child.ExitCode,
+		Reparented: child.WasReparentedToInit,
+	}
+	delete(k.Processes, child.PID)
+	parent.Children = removePID(parent.Children, child.PID)
+	return detail
+}
+
 // consumePendingReaps drains every queued reap on the given PCB, emitting
-// one EventWaitOp{Op:"reap"} per zombie collected. For non-init parents the
-// EAX of the first reap is stamped into Regs.EAX so the resuming sys_waitpid
-// returns the reaped PID; subsequent reaps in the same dispatch leave EAX
-// alone (a real parent must loop on wait() to collect multiple zombies).
+// one EventWaitOp{Op:"reap"} per zombie collected. The EAX of the first
+// reap is stamped into Regs.EAX so the resuming sys_waitpid returns the
+// reaped PID; subsequent reaps in the same dispatch leave EAX alone (a real
+// parent must loop on wait() to collect multiple zombies). Used by the
+// regular waitpid path; init's reaper uses runInitReapCycle which folds the
+// per-zombie details into a single EventInitReap instead of emitting
+// EventWaitOp.
 //
 // Returns the slice of events. Safe to call when PendingReaps is empty —
 // returns nil.
@@ -230,12 +260,17 @@ func (k *Kernel) consumePendingReaps(parent *PCB) []cpu.Event {
 		if child == nil {
 			continue
 		}
-		reapedPID, reapEvs := k.reapZombie(parent, child, 0)
+		detail := k.reapOne(parent, child)
 		if first {
-			parent.Regs.EAX = reapedPID
+			parent.Regs.EAX = uint32(detail.ChildPID)
 			first = false
 		}
-		out = append(out, reapEvs...)
+		out = append(out, cpu.EventWaitOp{
+			PID:      parent.PID,
+			ChildPID: detail.ChildPID,
+			Op:       "reap",
+			ExitCode: detail.ExitCode,
+		})
 	}
 	parent.PendingReaps = nil
 	return out

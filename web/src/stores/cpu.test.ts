@@ -81,3 +81,45 @@ describe('cpu store — exit_code propagation', () => {
     expect(p?.exit_code).toBe(7);
   });
 });
+
+describe('cpu store — wake and init_reap events', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('updates readyQueue from EventWake (BLOCKED→READY transition)', () => {
+    const cpu = useCpuStore();
+    expect(cpu.readyQueue).toEqual([]);
+    cpu.__applyEvent({
+      type: 'wake',
+      pid: 1,
+      from_reason: 'wait(any)',
+      ready_queue: [1],
+    } as any);
+    expect(cpu.readyQueue).toEqual([1]);
+  });
+
+  it('removes reaped children from procs when EventInitReap fires', () => {
+    const cpu = useCpuStore();
+    cpu.__applyEvent({
+      type: 'loaded',
+      name: 'demo',
+      pids: [1, 2],
+      procs: [
+        { pid: 1, name: 'init', state: 'BLOCKED', parent_pid: 0, regs: {} },
+        { pid: 2, name: 'add', state: 'ZOMBIE', parent_pid: 1, regs: {}, exit_code: 42 },
+      ],
+      sources: {},
+    } as any);
+
+    cpu.__applyEvent({
+      type: 'init_reap',
+      init_pid: 1,
+      reaps: [{ child_pid: 2, exit_code: 42, reparented: false }],
+      ready_queue: [],
+    } as any);
+
+    expect(cpu.procs.find(x => x.pid === 2)).toBeUndefined();
+    expect(cpu.readyQueue).toEqual([]);
+  });
+});

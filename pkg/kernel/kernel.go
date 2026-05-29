@@ -116,6 +116,15 @@ type Kernel struct {
 	// PID 1 without consuming slot 0 — that way demo bodies always land at
 	// 0x200000 and any hardcoded jump targets they carry stay valid.
 	nextUserSlot int
+
+	// PendingKernelWork is a FIFO of deferred kernel phases consumed one per
+	// Step. Today only the five do_exit phases land here (sys_exit / page
+	// fault / #GP all converge on enqueueExitPhases); the design is
+	// intentionally generic so fork/vfork/waitpid can be split into phases
+	// later without renaming the queue. Step() drains one non-empty phase
+	// before falling through to the normal core-tick loop, which is what
+	// gives the alumno a click-per-do_exit-step view of process death.
+	PendingKernelWork []pendingKernelWork
 }
 
 // New builds a single-core Kernel — the original behavior. Delegates to
@@ -227,7 +236,13 @@ func (k *Kernel) HasWork() bool {
 			return true
 		}
 	}
-	return k.Ready.Len() > 0
+	if k.Ready.Len() > 0 {
+		return true
+	}
+	// A mid-do_exit cascade leaves cores halted with nothing in the ready
+	// queue but with phases still queued. Without this branch the run loop
+	// would auto-stop between phases, freezing the cascade mid-way.
+	return len(k.PendingKernelWork) > 0
 }
 
 // Reset clears the process table and reinstalls the IDT. Useful for loading a
@@ -236,7 +251,7 @@ func (k *Kernel) Reset() {
 	for _, c := range k.Cores {
 		c.CPU.Reset()
 		c.CurrentPID = 0
-		c.lastTimerFiredAt = 0
+		c.userInstructionsSinceFire = 0
 		// CPU.Reset clears Halted; with no process loaded every core has
 		// nothing to run, so park them all halted. loadCPUFromPCB clears
 		// Halted on the core that receives the next AddProcess call.
@@ -267,6 +282,11 @@ func (k *Kernel) Reset() {
 	k.fdSpaces = make(map[int]*FDSpace)
 	k.nextMemSpaceID = 0
 	k.nextFDSpaceID = 0
+	// Wipe any half-drained do_exit cascade. Without this, a Reset issued
+	// mid-exit (e.g. user pressing LOAD between phase 2 and phase 3) would
+	// leave dangling pendingKernelWork entries pointing at PIDs that no
+	// longer exist; the next Step would dispatch ghost phases.
+	k.PendingKernelWork = nil
 	// The IDT lives in kernel memory and CPU.Reset does not touch it, but
 	// reinstall defensively in case a test mutated entries.
 	k.InstallDefaultIDT()
@@ -382,7 +402,18 @@ func (k *Kernel) popNextRunnable() (int, bool) {
 // deferred-reap flow: when a parent is woken to the ready queue at the end
 // of one Step (e.g. its child just exited), this dispatch picks the parent
 // up on the very next Step instead of leaving the boot core halted forever.
+//
+// Pedagogical note: when PendingKernelWork is non-empty, Step drains exactly
+// ONE non-empty phase from the queue and returns — cores do not tick during
+// the drain. This is the mechanism behind the click-per-do_exit-step view
+// of process death: each phase (mark zombie, notify parent, schedule out,
+// release_task, halt) lands on its own Step. The model is honest because
+// in a real kernel do_exit runs with preemption disabled in long stretches;
+// the simulator extends that invariant to all five phases for visibility.
 func (k *Kernel) Step() ([]cpu.Event, error) {
+	if len(k.PendingKernelWork) > 0 {
+		return k.drainOneKernelWorkPhase(), nil
+	}
 	out := k.DispatchIdleCores()
 	for _, core := range k.Cores {
 		evs, err := k.stepCore(core)
@@ -405,14 +436,24 @@ func (k *Kernel) stepCore(core *Core) ([]cpu.Event, error) {
 	}
 	if k.shouldFireTimer(core) {
 		core.CPU.PendingIRQs = append(core.CPU.PendingIRQs, IRQTimer)
-		core.lastTimerFiredAt = core.CPU.Tick
+		core.userInstructionsSinceFire = 0
 	}
+	// Capture pre-Step state AFTER any timer-IRQ push: that way the snapshot
+	// reflects what CPU.Step will actually do this tick (dispatch an IRQ vs.
+	// run execNext). Only ticks where execNext ran in user mode count toward
+	// the next quantum.
+	preMode := core.CPU.Mode
+	wasHalted := core.CPU.Halted
+	willDispatchIRQ := len(core.CPU.PendingIRQs) > 0 && core.CPU.FlagOn(cpu.FlagIF)
 	// Snapshot the running PID *before* the step so EventInstruction (emitted
 	// at fetch time, inside CPU.Step) can be stamped with the process that
 	// actually executed it — even if a later handler in this same step
 	// switches the core to a different process.
 	runningPID := core.CurrentPID
 	evs, err := core.CPU.Step()
+	if !wasHalted && !willDispatchIRQ && preMode == cpu.ModeUser && runningPID != 0 {
+		core.userInstructionsSinceFire++
+	}
 	for i, e := range evs {
 		if inst, ok := e.(cpu.EventInstruction); ok {
 			inst.PID = runningPID
@@ -439,23 +480,21 @@ func (k *Kernel) stepCore(core *Core) ([]cpu.Event, error) {
 }
 
 // shouldFireTimer decides whether the PIT should fire on this step of the
-// given core. The quantum counts only user-mode ticks — while the core is
-// executing kernel code (handlers, IRETs) or sitting idle (CurrentPID=0),
-// lastFired keeps advancing so the next user slice gets its full quantum.
-// Without this, timer IRQs would accumulate in PendingIRQs while IF=0 and
-// all dispatch back-to-back on the next IRET, starving user instructions
-// between successive fires. The idle-core check also prevents a halted core
-// (post-killCurrent with no Ready left) from being woken into running stale
+// given core. The quantum is measured in user-mode instructions actually
+// executed since the last fire (see Core.userInstructionsSinceFire) so a
+// handler that takes K kernel ticks does NOT shrink the next user slice by
+// K — every fire gives the next user code TimerQuantum full instructions
+// to run. The idle-core / kernel-mode short-circuit also prevents a halted
+// core (post-exit with no Ready left) from being woken into running stale
 // user EIPs past sys_exit.
 func (k *Kernel) shouldFireTimer(core *Core) bool {
 	if k.TimerQuantum <= 0 {
 		return false
 	}
 	if core.CurrentPID == 0 || core.CPU.Mode != cpu.ModeUser {
-		core.lastTimerFiredAt = core.CPU.Tick
 		return false
 	}
-	return core.CPU.Tick >= core.lastTimerFiredAt+uint64(k.TimerQuantum) && core.CPU.Tick > 0
+	return core.userInstructionsSinceFire >= uint64(k.TimerQuantum)
 }
 
 // runHandlerLogic executes the work a real OS would perform between handler
@@ -491,17 +530,21 @@ func (k *Kernel) runHandlerLogic(core *Core, vector uint8, source string) []cpu.
 	case IRQPageFault:
 		// Page faults always come via "fault" (the MMU raises them on access
 		// violation). A real OS could resolve some (page-in, COW); here we
-		// kill the offending process.
+		// kill the offending process with a SIGSEGV-encoded status so a
+		// waiting parent reaps a meaningful wstatus instead of zero.
 		if source != "fault" {
 			return nil
 		}
+		k.setFaultExitCode(core, SIGSEGV)
 		return k.killAndNotify(core, "page_fault")
 	case IRQGeneralProt:
 		// #GP is raised by the CPU when user code executes a privileged
-		// instruction (HLT in PL3), uses a bad segment, etc. Kill the process.
+		// instruction (HLT in PL3), uses a bad segment, etc. Encode the
+		// death as SIGILL so the parent's wstatus reflects the cause.
 		if source != "fault" {
 			return nil
 		}
+		k.setFaultExitCode(core, SIGILL)
 		return k.killAndNotify(core, "general_protection")
 	case IRQKeyboard:
 		// Keyboard: HW (PushKey) injects this IRQ with source HW. Deliver any
@@ -515,48 +558,69 @@ func (k *Kernel) runHandlerLogic(core *Core, vector uint8, source string) []cpu.
 	}
 }
 
-// killAndNotify is the death path used by fault handlers (page fault, #GP).
-// It mirrors what sys_exit does after marking ZOMBIE: hand the orphan over
-// to init via notifyParentOfExit so the reaper picks it up on the next
-// dispatch and the process table does not stay polluted with corpses.
-func (k *Kernel) killAndNotify(core *Core, reason string) []cpu.Event {
-	curPID := core.CurrentPID
-	out := k.killCurrent(core, reason)
-	if pcb := k.Processes[curPID]; pcb != nil {
-		out = append(out, k.notifyParentOfExit(pcb)...)
+// exitProcess is the shared death path used by sys_exit, page faults and #GP.
+// It enqueues the five do_exit phases on PendingKernelWork and immediately
+// drains phase 1 so the click that triggered the INT 0x80 (or fault) still
+// shows the ZOMBIE transition. Phases 2-5 stay in the queue for the next
+// Steps, which is what gives the alumno fine-grained control over the rest
+// of the cascade — see Step()'s godoc for the pedagogical rationale.
+//
+// Phase mapping to do_exit (Robert Love, LKD chap. 3):
+//
+//   1. mark_zombie       → freeze CPU into PCB, ZOMBIE, reparent children
+//   2. notify_parent     → SIGCHLD + wake parent (and/or init for orphans)
+//   3. schedule_out      → final schedule(): context switch off the core
+//   4. reap_cycle        → release_task in the parent's (or init's) context
+//   5. halt              → terminal HALT if the core ends up genuinely idle
+//
+// PRECONDITION: the caller MUST have written pcb.ExitCode with the cause of
+// death before invoking. For sys_exit that is the EBX arg; for page fault
+// and #GP the handler stores the WIFSIGNALED status (raw signal number in
+// the low 7 bits, e.g. SIGSEGV or SIGILL). Skipping this leaves the parent
+// reaping garbage.
+func (k *Kernel) exitProcess(core *Core, reason string) []cpu.Event {
+	deadPID := core.CurrentPID
+	if k.Processes[deadPID] == nil {
+		// Degenerate case: nothing to bury. Halt the core defensively so
+		// the run loop does not spin on a stale CurrentPID.
+		core.CPU.Halted = true
+		return nil
 	}
-	return out
+	k.enqueueExitPhases(core, deadPID, reason)
+	return k.drainOneKernelWorkPhase()
 }
 
-// killCurrent terminates the current process on the given core and schedules
-// the next one if any remain. Used by sys_exit and by page-fault handling.
-// The PCB is left as ZOMBIE with the cause recorded in BlockedOn.
+// killAndNotify is the death path used by fault handlers (page fault, #GP).
+// Thin shim over exitProcess kept for callers that still address it by name.
+// The fault handler must set pcb.ExitCode before invoking.
+func (k *Kernel) killAndNotify(core *Core, reason string) []cpu.Event {
+	return k.exitProcess(core, reason)
+}
+
+// markZombieAndReparent flips the running PCB to ZOMBIE and adopts its live
+// children under init. Does NOT touch core.CurrentPID — the dispatch (or the
+// halt) is finalizeExit's job, so notifyParentOfExit can run in between to
+// wake the parent before the scheduler evaluates the ready queue.
 //
 // Before flipping the state we evict the dying PID from every sync queue it
 // might still appear in (mutexes, semaphores, keyboard, ready). Otherwise a
 // later unlock/signal could "wake" the zombie via wakeWaiter and switchTo
 // would resurrect it — IRET would land at its saved EIP past sys_exit and
 // execute garbage opcodes.
-func (k *Kernel) killCurrent(core *Core, reason string) []cpu.Event {
+func (k *Kernel) markZombieAndReparent(core *Core, reason string) []cpu.Event {
 	curPID := core.CurrentPID
 	curPCB := k.Processes[curPID]
 	if curPCB == nil {
-		core.CPU.Halted = true
 		return nil
 	}
 	k.evictFromAllQueues(curPID)
 	// Freeze the live CPU into the PCB before marking ZOMBIE so the frontend
-	// (and any wait() reader) sees the registers at the moment of death,
-	// not the stale snapshot from process loading. saveCurrentToPCB copies
-	// core.CPU.R into pcb.Regs, so after it returns EAX holds the syscall
-	// number (1 for sys_exit) — that is fine for page-fault deaths, but
-	// sys_exit conventionally leaves EAX = exit code (matches Linux's
-	// wait()-readable value), so we restore it from pcb.ExitCode which
-	// sysExit already wrote before delegating to us.
+	// sees the registers at the moment of death, not the stale snapshot from
+	// process loading. The PCB is a faithful snapshot of core.CPU.R: after
+	// sys_exit, EAX holds the syscall number (1), matching what the core
+	// panel shows at the trap. The exit code lives in pcb.ExitCode and is
+	// what EventProcessState/EventWaitOp carry to the frontend.
 	k.saveCurrentToPCB(core)
-	if reason == "exit" {
-		curPCB.Regs.EAX = curPCB.ExitCode
-	}
 	curPCB.State = StateZombie
 	curPCB.BlockedOn = reason
 	curPCB.Core = -1
@@ -575,88 +639,37 @@ func (k *Kernel) killCurrent(core *Core, reason string) []cpu.Event {
 	// Re-parent any surviving children to init so they remain reachable
 	// in the process tree and so orphan zombies do not stick to a PCB
 	// that is itself about to disappear. Live children land under init
-	// as normal; orphan zombies queue on init.PendingReaps and init is
-	// woken to the ready queue — the actual reap fires when the
-	// dispatcher picks init on the next Step. Without this deferral the
-	// zombie would vanish in the same tick it was orphaned, hiding the
-	// "init wakes, cleans up, sleeps again" cycle from the alumno.
+	// as normal; orphan zombies queue on init.PendingReaps. Waking init
+	// for those reaps is the job of the notify_parent phase — keeping the
+	// wake out of this phase lets "the dying task finalizes" and "init is
+	// woken to reap" land on separate Steps.
 	if k.InitPID != 0 && curPID != k.InitPID && len(curPCB.Children) > 0 {
 		init := k.Processes[k.InitPID]
 		if init != nil {
-			initWokenForReap := false
 			for _, childPID := range curPCB.Children {
 				child := k.Processes[childPID]
 				if child == nil {
 					continue
 				}
 				child.ParentPID = k.InitPID
+				child.WasReparentedToInit = true
 				out = append(out, cpu.EventReparent{
 					PID: childPID, OldParent: curPID, NewParent: k.InitPID,
 				})
 				init.Children = append(init.Children, childPID)
 				if child.State == StateZombie {
 					init.PendingReaps = append(init.PendingReaps, childPID)
-					initWokenForReap = true
 				}
 			}
 			curPCB.Children = nil
-			if initWokenForReap && init.State == StateBlocked {
-				out = append(out, k.wakeToQueue(k.InitPID, initBlockedReason)...)
-			}
 		}
 	}
 
-	// If other READY processes exist, hand the core to the first one. This is
-	// the scheduleNext pattern WITHOUT re-enqueueing the current PID (zombie
-	// processes do not return). Skip init here — it must never be dispatched
-	// onto a core through the regular path because it has no user code worth
-	// running (its slot only holds two hlt bytes). Init runs only via
-	// runInitReapCycle, which DispatchIdleCores invokes on the next Step
-	// when it sees init at the head of the queue.
-	if nextPID, ok := k.popNextRunnable(); ok {
-		nextPCB := k.Processes[nextPID]
-		if nextPCB != nil {
-			out = append(out, cpu.EventSchedDecision{
-				FromPID:    curPID,
-				ToPID:      nextPID,
-				Reason:     reason,
-				ReadyQueue: k.Ready.Snapshot(),
-			})
-
-			core.CPU.R.EAX = nextPCB.Regs.EAX
-			core.CPU.R.EBX = nextPCB.Regs.EBX
-			core.CPU.R.ECX = nextPCB.Regs.ECX
-			core.CPU.R.EDX = nextPCB.Regs.EDX
-			core.CPU.R.ESI = nextPCB.Regs.ESI
-			core.CPU.R.EDI = nextPCB.Regs.EDI
-			core.CPU.R.EBP = nextPCB.Regs.EBP
-			core.CPU.R.DS = nextPCB.Regs.DS
-			core.CPU.SavedUserESP = nextPCB.SavedUserESP
-			core.CPU.SavedUserSS = nextPCB.SavedUserSS
-
-			writeKernelDWORD(core.CPU, core.CPU.R.ESP+0, nextPCB.Regs.EIP)
-			writeKernelDWORD(core.CPU, core.CPU.R.ESP+4, uint32(nextPCB.Regs.CS))
-			writeKernelDWORD(core.CPU, core.CPU.R.ESP+8, nextPCB.Regs.EFLAGS)
-
-			out = append(out, cpu.EventPCBRestore{CoreID: core.ID, PID: nextPID, Regs: pcbRegsSnapshot(nextPCB)})
-			nextPCB.State = StateRun
-			nextPCB.Core = core.ID
-			core.CurrentPID = nextPID
-			out = append(out,
-				cpu.EventCoreRelease{CoreID: core.ID, PID: curPID, Reason: reason},
-				cpu.EventCoreAssign{CoreID: core.ID, PID: nextPID},
-				cpu.EventProcessState{PID: nextPID, State: string(StateRun)},
-			)
-			return out
-		}
-	}
-
-	// No remaining processes for this core: release it and halt the CPU.
-	core.CPU.Halted = true
-	core.CurrentPID = 0
-	out = append(out,
-		cpu.EventCoreRelease{CoreID: core.ID, PID: curPID, Reason: reason},
-		cpu.EventHalt{CoreID: core.ID, PID: curPID},
-	)
 	return out
 }
+
+// Note: the old finalizeExit was replaced by the discrete phases in
+// kernel_work.go (schedule_out / reap_cycle / halt). enqueueExitPhases
+// stages all five phases; Step() drains them one at a time so the alumno
+// sees each transition on its own click. See kernel_work.go for the
+// per-phase semantics.

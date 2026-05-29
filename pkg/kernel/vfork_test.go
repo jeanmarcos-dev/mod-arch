@@ -73,8 +73,8 @@ func TestSysVfork_ParentSeesChildMemoryMutation(t *testing.T) {
 	if parent.State != StateZombie {
 		t.Errorf("parent.State = %s, want ZOMBIE (the parent should have exited)", parent.State)
 	}
-	if parent.Regs.EAX != 0xDEADBEEF {
-		t.Errorf("parent exit code = 0x%08X, want 0xDEADBEEF (the value the vfork child stored)", parent.Regs.EAX)
+	if parent.ExitCode != 0xDEADBEEF {
+		t.Errorf("parent exit code = 0x%08X, want 0xDEADBEEF (the value the vfork child stored)", parent.ExitCode)
 	}
 }
 

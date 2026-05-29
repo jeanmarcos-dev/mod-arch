@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 
@@ -169,6 +170,58 @@ func TestTimer_FiresAtQuantum(t *testing.T) {
 	}
 	if !timerFired {
 		t.Fatal("timer never fired within 30 steps")
+	}
+}
+
+// TestTimer_QuantumCountsUserInstructionsExactly pins the determinism the
+// userInstructionsSinceFire refactor delivers. With a fixed-cost handler
+// (NOP + IRET = two kernel ticks) every quantum — the first AND every
+// subsequent one — must consume EXACTLY TimerQuantum user instructions.
+// Pre-refactor the first quantum had Q user instrs and later ones had
+// Q - handlerCost: the kernel "ate" the handler ticks out of the next user
+// slice. That divergence is what made counting clicks in the trace
+// pedagogically confusing.
+func TestTimer_QuantumCountsUserInstructionsExactly(t *testing.T) {
+	// 32 NOPs + HLT. The NOPs give us a long, easily-counted user slice;
+	// HLT at the end stops the program cleanly when the test finishes.
+	prog := append(bytes.Repeat([]byte{0x90}, 32), 0xF4)
+	k := newTestKernel(t, prog)
+	k.TimerQuantum = 8
+
+	var fires []int
+	userInstrSinceLastFire := 0
+	for range 200 {
+		evs, err := k.Step()
+		if err != nil {
+			t.Fatalf("step error: %v", err)
+		}
+		for _, e := range evs {
+			switch v := e.(type) {
+			case cpu.EventInstruction:
+				// stepCore stamps every executed instruction with runningPID,
+				// including handler bytes (NOP+IRET at 0x101020). Filter by
+				// address: user code lives at AddrUserBase (0x200000) and up.
+				if v.EIP >= cpu.AddrUserBase {
+					userInstrSinceLastFire++
+				}
+			case cpu.EventIRQFire:
+				if v.Vector == IRQTimer && v.Source == "HW" {
+					fires = append(fires, userInstrSinceLastFire)
+					userInstrSinceLastFire = 0
+				}
+			}
+		}
+		if len(fires) >= 3 {
+			break
+		}
+	}
+	if len(fires) < 3 {
+		t.Fatalf("only %d timer fires observed, want at least 3", len(fires))
+	}
+	for i, n := range fires {
+		if n != 8 {
+			t.Errorf("fire #%d preceded by %d user instrs, want 8 (handler cost must not steal from the next quantum)", i+1, n)
+		}
 	}
 }
 

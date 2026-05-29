@@ -70,10 +70,11 @@ func TestSysWaitpid_ParentReapsChildZombie(t *testing.T) {
 	if parent == nil {
 		t.Fatalf("parent PID %d disappeared", parentPID)
 	}
-	// Parent's exit code (in Regs.EAX after sys_exit) carries the reaped
-	// child PID. Fork allocates PID 2 for the first child.
-	if parent.Regs.EAX != 2 {
-		t.Errorf("parent.Regs.EAX = %d after exit; want 2 (reaped child PID)", parent.Regs.EAX)
+	// The parent's exit code carries the reaped child PID — the program
+	// stashes EAX (which sys_waitpid filled with the reaped PID) into EBX
+	// before calling sys_exit. Fork allocates PID 2 for the first child.
+	if parent.ExitCode != 2 {
+		t.Errorf("parent.ExitCode = %d; want 2 (reaped child PID)", parent.ExitCode)
 	}
 	// Child PCB must be gone from the process table.
 	if _, ok := k.Processes[2]; ok {

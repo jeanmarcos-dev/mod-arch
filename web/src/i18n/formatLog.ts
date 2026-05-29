@@ -65,14 +65,10 @@ export const formatLog = {
     })}`;
   },
   syscall(name: string, args: number[], result: number, pid: number): string {
-    return `⚙ ${t('logEvents.syscall', {
-      name,
-      a0: args[0],
-      a1: `0x${(args[1] >>> 0).toString(16)}`,
-      a2: args[2],
-      result,
-      pid,
-    })}`;
+    const argsStr = args
+      .map((a) => `0x${(a >>> 0).toString(16)}`)
+      .join(', ');
+    return `⚙ ${t('logEvents.syscall', { name, args: argsStr, result, pid })}`;
   },
   coreAssign(coreId: number, pid: number): string {
     return `◈ ${t('logEvents.coreAssign', { core: coreId, pid })}`;
@@ -127,10 +123,24 @@ export const formatLog = {
     const target = targetPid === -1 ? '−1' : targetPid.toString();
     return `⏳ ${t('logEvents.waitCall', { pid, target })}`;
   },
-  waitReap(parentPid: number, childPid: number, exitCode: number, byInit: boolean): string {
+  waitReap(parentPid: number, childPid: number, exitCode: number): string {
     const exit = (exitCode >>> 0).toString(16).padStart(8, '0').toUpperCase();
-    const key = byInit ? 'logEvents.initReap' : 'logEvents.waitReap';
-    return `☠ ${t(key, { parent: parentPid, child: childPid, exit })}`;
+    return `☠ ${t('logEvents.waitReap', { parent: parentPid, child: childPid, exit })}`;
+  },
+  wake(pid: number, fromReason: string, readyQueue: number[]): string {
+    return `↺ ${t('logEvents.wake', {
+      pid,
+      from: fromReason,
+      ready: readyQueue.join(','),
+    })}`;
+  },
+  initReap(initPid: number, reaps: { child_pid: number; exit_code: number; reparented: boolean }[]): string {
+    const parts = reaps.map(r => {
+      const exit = (r.exit_code >>> 0).toString(16).padStart(8, '0').toUpperCase();
+      const kindKey = r.reparented ? 'logEvents.initReapKindOrphan' : 'logEvents.initReapKindChild';
+      return t('logEvents.initReapItem', { child: r.child_pid, exit, kind: t(kindKey) });
+    });
+    return `☠ ${t('logEvents.initReap', { init: initPid, items: parts.join(', ') })}`;
   },
   threadCreate(tid: number, tgid: number, creatorPid: number): string {
     return `⤳ ${t('logEvents.threadCreate', { tid, tgid, creator: creatorPid })}`;

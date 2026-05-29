@@ -121,7 +121,12 @@ func TestWS_LoadAndStep(t *testing.T) {
 	drainN(t, ctx, conn, initialMessages)
 
 	send(t, ctx, conn, Command{Cmd: "load", Program: "add"})
-	for range 6 {
+	// "add" runs a handful of instructions and exits. With the do_exit
+	// cascade split across five phases (mark_zombie → notify_parent →
+	// schedule_out → reap_cycle → halt), the program needs more clicks to
+	// reach HALT than before — keep the margin generous so this test is
+	// not coupled to the exact Step count of the demo.
+	for range 16 {
 		send(t, ctx, conn, Command{Cmd: "step"})
 	}
 

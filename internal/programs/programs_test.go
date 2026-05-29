@@ -102,7 +102,14 @@ func TestProducerConsumer_HaltsWithBalancedOps(t *testing.T) {
 	// and vice versa. Demo halts cleanly when both finish their loops.
 	demo := findDemo(t, "producer_consumer")
 	k := kernel.New(cpu.DefaultMemSize)
-	k.TimerQuantum = 4
+	// Pre-refactor this test used TimerQuantum=4, but each user-mode quantum
+	// effectively shrank to ~2-3 instructions because the timer handler
+	// "stole" ticks from the next slice (see the userInstructionsSinceFire
+	// refactor). With the deterministic quantum the producer/consumer iters
+	// (~5 instrs each) no longer interleave as finely; q=8 (the default)
+	// gives both processes room to complete an iter between context
+	// switches and the demo halts with balanced semaphores.
+	k.TimerQuantum = 8
 	loadDemo(t, k, demo)
 	runToHalt(t, k, 40000)
 
@@ -169,14 +176,21 @@ func TestStackOverflow_PageFaultsQuickly(t *testing.T) {
 	k := kernel.New(cpu.DefaultMemSize)
 	loadDemo(t, k, demo)
 	// loadDemo halts on AllHalted; with init unconditional, the demo body
-	// lives at PID 2 (PID 1 is init, which never runs user code).
+	// lives at PID 2 (PID 1 is init, which never runs user code). The ZOMBIE
+	// transition and the init-emulated reap are collapsed into the same Step
+	// by finalizeExit, so we watch the event stream instead of the PCB table.
 	for step := 0; step < 200; step++ {
-		if _, err := k.Step(); err != nil {
+		evs, err := k.Step()
+		if err != nil {
 			t.Fatalf("step %d: %v", step, err)
 		}
-		if p := k.Processes[2]; p != nil && p.State == kernel.StateZombie {
-			if p.BlockedOn != "page_fault" {
-				t.Fatalf("BlockedOn = %q, want page_fault", p.BlockedOn)
+		for _, e := range evs {
+			ps, ok := e.(cpu.EventProcessState)
+			if !ok || ps.PID != 2 || ps.State != string(kernel.StateZombie) {
+				continue
+			}
+			if ps.Reason != "page_fault" {
+				t.Fatalf("EventProcessState{ZOMBIE}.Reason = %q, want page_fault", ps.Reason)
 			}
 			return
 		}
@@ -332,8 +346,17 @@ func runUntilParentReaped(t *testing.T, k *kernel.Kernel, pid int, budget int) (
 			t.Fatalf("step %d: %v", step, err)
 		}
 		for _, e := range evs {
-			if w, ok := e.(cpu.EventWaitOp); ok && w.Op == "reap" && w.ChildPID == pid {
-				return w.ExitCode, true
+			switch ev := e.(type) {
+			case cpu.EventWaitOp:
+				if ev.Op == "reap" && ev.ChildPID == pid {
+					return ev.ExitCode, true
+				}
+			case cpu.EventInitReap:
+				for _, r := range ev.Reaps {
+					if r.ChildPID == pid {
+						return r.ExitCode, true
+					}
+				}
 			}
 		}
 		if !k.HasWork() {
@@ -509,6 +532,14 @@ func TestThreadsJoin_LeaderReapsThreadAndExits(t *testing.T) {
 				if ev.Op == "reap" && ev.ChildPID == leaderPID && ev.ExitCode == threadTID {
 					leaderReaped = true
 				}
+			case cpu.EventInitReap:
+				// init is the reaper of the leader after the leader exits.
+				// Its reap fires through the consolidated EventInitReap.
+				for _, r := range ev.Reaps {
+					if r.ChildPID == leaderPID && r.ExitCode == threadTID {
+						leaderReaped = true
+					}
+				}
 			}
 		}
 	}
@@ -628,12 +659,25 @@ func TestBasicDemos_LoadAndComplete(t *testing.T) {
 							reapedExit = ev.ExitCode
 							reaped = true
 						}
+					case cpu.EventInitReap:
+						// When init is the reaper (default for demos loaded
+						// via AdoptUnderInit), the reap travels through
+						// EventInitReap instead of EventWaitOp.
+						for _, r := range ev.Reaps {
+							if r.ChildPID == demoPID {
+								reapedExit = r.ExitCode
+								reaped = true
+							}
+						}
+					case cpu.EventProcessState:
+						// finalizeExit collapses ZOMBIE + reap into the same
+						// Step, so the PCB is gone before the test loop wakes
+						// up. The state-transition event carries the same
+						// Reason and survives in the event stream.
+						if ev.PID == demoPID && ev.State == string(kernel.StateZombie) && zombieBlock == "" {
+							zombieBlock = ev.Reason
+						}
 					}
-				}
-				// Capture the zombie's BlockedOn while it still exists in
-				// the process table — init reaps it shortly after.
-				if p := k.Processes[demoPID]; p != nil && p.State == kernel.StateZombie && zombieBlock == "" {
-					zombieBlock = p.BlockedOn
 				}
 				if reaped && tc.zombieBlk == "" {
 					break

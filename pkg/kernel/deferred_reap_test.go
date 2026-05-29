@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
@@ -146,6 +147,11 @@ func TestDispatch_InitCollectsOrphanAndReblocks(t *testing.T) {
 	}
 	orphan := k.Processes[orphanPID]
 	orphan.ParentPID = initPID
+	// The orphan in this test simulates a child whose original parent died
+	// and was reparented to init by markZombieAndReparent. The real flow
+	// would set this flag inside that function; we set it by hand here so
+	// the EventInitReap surfaces Reparented=true.
+	orphan.WasReparentedToInit = true
 	orphan.State = StateZombie
 	orphan.ExitCode = 7
 	init := k.Processes[initPID]
@@ -180,7 +186,12 @@ func TestDispatch_InitCollectsOrphanAndReblocks(t *testing.T) {
 		t.Errorf("boot core left with CurrentPID=init (%d) — init must release the core after reaping", initPID)
 	}
 	// 4) Event log must contain the visible transition: RUN, reap, BLOCKED.
-	var sawRun, sawReap, sawBlocked bool
+	//    Init's reap is consolidated into a single EventInitReap (one event
+	//    even with N orphans); regular waitpid reaps still travel as
+	//    EventWaitOp. The orphan in this test was reparented to init by
+	//    markZombieAndReparent, so Reparented must be true.
+	var sawRun, sawBlocked bool
+	var initReap *cpu.EventInitReap
 	for _, e := range evs {
 		switch v := e.(type) {
 		case cpu.EventProcessState:
@@ -190,19 +201,98 @@ func TestDispatch_InitCollectsOrphanAndReblocks(t *testing.T) {
 			if v.PID == initPID && v.State == string(StateBlocked) && sawRun {
 				sawBlocked = true
 			}
+		case cpu.EventInitReap:
+			ev := v
+			initReap = &ev
 		case cpu.EventWaitOp:
-			if v.Op == "reap" && v.PID == initPID && v.ChildPID == orphanPID {
-				sawReap = true
+			if v.Op == "reap" && v.PID == initPID {
+				t.Errorf("init must NOT emit EventWaitOp{Op:reap} %+v — its reap cycle is consolidated into EventInitReap", v)
 			}
 		}
 	}
 	if !sawRun {
 		t.Error("missing EventProcessState{init, RUN} — alumno must see init wake up")
 	}
-	if !sawReap {
-		t.Error("missing EventWaitOp{Op:reap} for orphan by init")
+	if initReap == nil {
+		t.Fatal("missing EventInitReap for init's reap cycle")
+	}
+	if initReap.InitPID != initPID {
+		t.Errorf("EventInitReap.InitPID = %d, want %d", initReap.InitPID, initPID)
+	}
+	if len(initReap.Reaps) != 1 {
+		t.Fatalf("EventInitReap.Reaps len = %d, want 1", len(initReap.Reaps))
+	}
+	if initReap.Reaps[0].ChildPID != orphanPID {
+		t.Errorf("EventInitReap.Reaps[0].ChildPID = %d, want %d", initReap.Reaps[0].ChildPID, orphanPID)
+	}
+	if !initReap.Reaps[0].Reparented {
+		t.Errorf("EventInitReap.Reaps[0].Reparented = false, want true (the orphan was transferred to init by markZombieAndReparent)")
 	}
 	if !sawBlocked {
 		t.Error("missing EventProcessState{init, BLOCKED} after the reap — init must visibly go back to wait()")
+	}
+}
+
+// TestNotifyParentOfExit_EmitsReadyQueueSnapshot guards against a frontend
+// desync: when a child exits and wakeToQueue pushes the parent onto the ready
+// queue, the kernel must emit an EventWake carrying the updated ReadyQueue
+// snapshot. Without it, the WS client never learns the parent is runnable and
+// its haltedDead heuristic (cpu.halted && readyQueue.empty) keeps the STEP
+// button disabled, freezing step-by-step execution after the child's
+// sys_exit. EventWake replaces the EventSchedDecision{Reason:"wake"} that
+// previously carried this contract — wakes are state transitions, not
+// scheduling decisions, so they travel on their own event type now.
+func TestNotifyParentOfExit_EmitsReadyQueueSnapshot(t *testing.T) {
+	k := New(cpu.DefaultMemSize)
+
+	parentPID, err := k.AddProcess("parent", []byte{0xF4})
+	if err != nil {
+		t.Fatalf("AddProcess parent: %v", err)
+	}
+	childPID, err := k.AddProcess("child", []byte{0xF4})
+	if err != nil {
+		t.Fatalf("AddProcess child: %v", err)
+	}
+
+	parent := k.Processes[parentPID]
+	child := k.Processes[childPID]
+	parent.Children = []int{childPID}
+	child.ParentPID = parentPID
+
+	// Park the parent in wait(P{childPID}) — the state sys_waitpid leaves it
+	// in when no zombie is ready. Drop it from the ready queue to match.
+	parent.State = StateBlocked
+	parent.BlockedOn = waitpidBlockedReason(childPID)
+	parent.Waiter = childPID
+	k.Ready.Remove(parentPID)
+
+	child.State = StateZombie
+	child.ExitCode = 123
+
+	evs := k.notifyParentOfExit(child)
+
+	// The parent must end up on the ready queue.
+	if !slices.Contains(k.Ready.Snapshot(), parentPID) {
+		t.Fatalf("parent PID %d not in ready queue after wake: %v", parentPID, k.Ready.Snapshot())
+	}
+
+	// And the emitted events must announce that ready-queue change with an
+	// EventWake carrying the updated snapshot.
+	var sawWake bool
+	for _, e := range evs {
+		wake, ok := e.(cpu.EventWake)
+		if !ok {
+			continue
+		}
+		if wake.PID != parentPID {
+			continue
+		}
+		if !slices.Contains(wake.ReadyQueue, parentPID) {
+			t.Errorf("EventWake.ReadyQueue = %v, want it to include parent PID %d", wake.ReadyQueue, parentPID)
+		}
+		sawWake = true
+	}
+	if !sawWake {
+		t.Errorf("notifyParentOfExit emitted no EventWake for the BLOCKED→READY transition — frontend cpu.readyQueue will drift out of sync with k.Ready")
 	}
 }

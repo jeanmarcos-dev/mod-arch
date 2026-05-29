@@ -126,6 +126,16 @@ type PCB struct {
 	// child's death and the parent's wait() return. For init this queue
 	// can grow when several orphans die before init is scheduled.
 	PendingReaps []int
+
+	// WasReparentedToInit is true when this PCB was adopted under init
+	// because its original parent died with the PCB still alive — i.e. a
+	// genuine orphan in the Unix sense. Set by markZombieAndReparent when
+	// it walks the dying parent's Children list. Stays false for PCBs
+	// adopted by init at load time via AdoptUnderInit (birth-adoption,
+	// which is what every WithInit demo currently does). The frontend uses
+	// this to tell "init reaped orphan P{n}" apart from "init reaped child
+	// P{n}" without having to replay the EventReparent history.
+	WasReparentedToInit bool
 }
 
 // FD describes one entry of the per-process file-descriptor table.
