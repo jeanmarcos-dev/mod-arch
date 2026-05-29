@@ -32,7 +32,7 @@ func TestSplitParagraphsRespectsTarget(t *testing.T) {
 	for i := range paras {
 		paras[i] = strings.Repeat("foo bar baz ", 50)
 	}
-	doc := RawDoc{Source: SourceStallings, SourceID: "ch1", Text: strings.Join(paras, "\n\n")}
+	doc := RawDoc{Source: SourceSilberschatz, SourceID: "ch1", Text: strings.Join(paras, "\n\n")}
 	chunks := SplitParagraphs(doc, ChunkOptions{TargetTokens: 150, OverlapRatio: 0.1})
 	if len(chunks) < 2 {
 		t.Fatalf("expected multiple chunks, got %d", len(chunks))

@@ -104,7 +104,7 @@ export interface IncomingProgress {
 }
 
 export interface TutorCitation {
-  source: string; // 'glossary' | 'stallings' | ...
+  source: string; // 'glossary' | 'silberschatz' | ...
   id: string;
   label: string;
   page?: number;

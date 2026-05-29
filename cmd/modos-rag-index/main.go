@@ -40,7 +40,7 @@ func main() {
 	dbPath := flag.String("db", "", "ruta al SQLite (default: misma que usa el server, vía store.DefaultPath)")
 	glossaryPath := flag.String("glossary", defaultGlossaryPath(), "ruta a glossary.ts")
 	pdfPath := flag.String("pdf", "", "ruta al PDF (cuando -source=pdf o all)")
-	pdfSourceID := flag.String("pdf-source-id", "stallings-5e", "identificador corto del libro, usado en citas")
+	pdfSourceID := flag.String("pdf-source-id", "silberschatz-9e-es", "identificador corto del libro, usado en citas")
 	chunkTokens := flag.Int("chunk-tokens", 450, "tamaño objetivo de chunk para PDF (en tokens)")
 	chunkOverlap := flag.Float64("chunk-overlap", 0.10, "overlap entre chunks de PDF (0..0.5)")
 	repoRoot := flag.String("repo-root", ".", "ruta al repo (para -source=docs o all)")

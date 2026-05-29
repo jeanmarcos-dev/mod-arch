@@ -139,8 +139,8 @@ function decodeHtmlEntities(s: string): string {
                 <ExternalLink :size="11" :stroke-width="2" />
                 Cargar demo en el simulador
               </button>
-              <span v-else-if="c.source === 'stallings'" class="extract-hint">
-                Consulte Stallings <strong v-if="c.page">p. {{ c.page }}</strong> en su biblioteca.
+              <span v-else-if="c.source === 'silberschatz'" class="extract-hint">
+                Consulte Silberschatz <strong v-if="c.page">p. {{ c.page }}</strong> en su biblioteca.
               </span>
               <span v-else-if="c.source === 'isa'" class="extract-hint">
                 ISA propio del simulador MODARCH.
@@ -311,16 +311,16 @@ function decodeHtmlEntities(s: string): string {
 }
 /* Differentiate by source so the user knows what the click will do.
    - glossary (default): amber, opens the glossary modal
-   - stallings:          blue, external reference
+   - silberschatz:          blue, external reference
    - demos:              green, loads the demo into the simulator
    - isa:                pink, simulator ISA reference
    - docs:               purple, project documentation */
-.cite-chip.cite-stallings {
+.cite-chip.cite-silberschatz {
   background: rgba(147, 197, 253, 0.08);
   border-color: rgba(147, 197, 253, 0.5);
   color: #93c5fd;
 }
-.cite-chip.cite-stallings:hover {
+.cite-chip.cite-silberschatz:hover {
   background: rgba(147, 197, 253, 0.2);
 }
 .cite-chip.cite-demos {
@@ -350,7 +350,7 @@ function decodeHtmlEntities(s: string): string {
   color: #e2e8f0;
   max-width: 100%;
 }
-.cite-item.expanded .cite-chip.cite-stallings + .cite-extract {
+.cite-item.expanded .cite-chip.cite-silberschatz + .cite-extract {
   border-left-color: rgba(147, 197, 253, 0.5);
 }
 .extract-text {

@@ -29,7 +29,7 @@ func TestInsertAndListChunks(t *testing.T) {
 	chunks := []Chunk{
 		{Source: SourceGlossary, SourceID: "PL3", Text: "user mode", Metadata: map[string]any{"category": "Modos"}, Embedding: []float32{0.1, 0.2, 0.3}, CorpusVersion: 1},
 		{Source: SourceGlossary, SourceID: "PL0", Text: "kernel mode", Metadata: map[string]any{"category": "Modos"}, Embedding: []float32{0.4, 0.5, 0.6}, CorpusVersion: 1},
-		{Source: SourceStallings, SourceID: "ch3.2", Text: "scheduling", Embedding: []float32{0.7, 0.8, 0.9}, CorpusVersion: 1},
+		{Source: SourceSilberschatz, SourceID: "ch3.2", Text: "scheduling", Embedding: []float32{0.7, 0.8, 0.9}, CorpusVersion: 1},
 	}
 	if err := s.InsertChunks(ctx, chunks); err != nil {
 		t.Fatalf("InsertChunks: %v", err)
@@ -75,15 +75,15 @@ func TestCountByCorpus(t *testing.T) {
 	_ = s.InsertChunks(ctx, []Chunk{
 		{Source: SourceGlossary, SourceID: "a", Text: "x", Embedding: []float32{1}, CorpusVersion: 1},
 		{Source: SourceGlossary, SourceID: "b", Text: "y", Embedding: []float32{1}, CorpusVersion: 1},
-		{Source: SourceStallings, SourceID: "c", Text: "z", Embedding: []float32{1}, CorpusVersion: 1},
+		{Source: SourceSilberschatz, SourceID: "c", Text: "z", Embedding: []float32{1}, CorpusVersion: 1},
 		{Source: SourceGlossary, SourceID: "d", Text: "w", Embedding: []float32{1}, CorpusVersion: 2},
 	})
 	got, err := s.CountByCorpus(ctx, 1)
 	if err != nil {
 		t.Fatalf("CountByCorpus: %v", err)
 	}
-	if got[SourceGlossary] != 2 || got[SourceStallings] != 1 {
-		t.Errorf("counts = %v, want {glossary:2, stallings:1}", got)
+	if got[SourceGlossary] != 2 || got[SourceSilberschatz] != 1 {
+		t.Errorf("counts = %v, want {glossary:2, silberschatz:1}", got)
 	}
 }
 

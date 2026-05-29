@@ -22,12 +22,12 @@ REGLAS DE VOZ:
 FORMATO ESTRICTO DE CITAS:
 Solo se aceptan estos formatos exactos al final de la respuesta entre corchetes:
 - [Glosario: <término exacto>]    ← p. ej. [Glosario: Mode switch]
-- [Stallings p. <N>]               ← p. ej. [Stallings p. 142]
+- [Silberschatz p. <N>]               ← p. ej. [Silberschatz p. 142]
 - [Demo: <nombre>]                 ← p. ej. [Demo: two_counters]
 - [ISA: <tema>]                    ← p. ej. [ISA: Tabla de descriptores de interrupciones (IDT)]
 - [Docs: <sección>]                ← p. ej. [Docs: Memoria]
-NUNCA invente formatos intermedios como [mode_switch], [Stallings], [Glossary], [Capítulo X]. Si no encontró fuente concreta, no cite.
-Prefiera siempre las fuentes del proyecto (Demo, ISA, Docs) sobre Stallings cuando la pregunta es específica al simulador; use Stallings para fundamentos teóricos generales.
+NUNCA invente formatos intermedios como [mode_switch], [Silberschatz], [Glossary], [Capítulo X]. Si no encontró fuente concreta, no cite.
+Prefiera siempre las fuentes del proyecto (Demo, ISA, Docs) sobre Silberschatz cuando la pregunta es específica al simulador; use Silberschatz para fundamentos teóricos generales.
 
 PREGUNTAS SOBRE CÓDIGO:
 Cuando el estudiante pida explicar/entender el código de un programa cargado:
@@ -85,7 +85,7 @@ HERRAMIENTAS:
 Igual que el tutor directo, puede consultar el estado del simulador (get_processes, get_recent_events, get_program_source, etc.) para hacer preguntas basadas en datos reales, no abstractos. Por ejemplo, después de inspeccionar los procesos puede preguntar: "Veo que P1 está en estado BLOCKED — ¿qué tipo de evento podría haberlo bloqueado?".
 
 FORMATO ESTRICTO DE CITAS (igual que el tutor directo):
-Solo [Glosario: <término exacto>] o [Stallings p. <N>]. Nunca formatos intermedios.`
+Solo [Glosario: <término exacto>] o [Silberschatz p. <N>]. Nunca formatos intermedios.`
 
 // BuildMessages assembles the LLM chat history. It is exported so callers can
 // inspect or log the exact bytes that will be sent. history (already
@@ -134,19 +134,19 @@ type promptMessage struct {
 // citationLabel formats a chunk into a human-readable citation string the
 // model is instructed to copy into its answer. The page number for book
 // citations is what disambiguates one chunk from another in the UI; the
-// generic "[Stallings]" form is only a fallback.
+// generic "[Silberschatz]" form is only a fallback.
 func citationLabel(c rag.Chunk) string {
 	switch c.Source {
 	case rag.SourceGlossary:
 		return fmt.Sprintf("[Glosario: %s]", c.SourceID)
-	case rag.SourceStallings:
+	case rag.SourceSilberschatz:
 		if page, ok := pageFromMetadata(c.Metadata); ok {
-			return fmt.Sprintf("[Stallings p. %d]", page)
+			return fmt.Sprintf("[Silberschatz p. %d]", page)
 		}
 		if chap, ok := c.Metadata["chapter"].(string); ok && chap != "" {
-			return fmt.Sprintf("[Stallings cap. %s]", chap)
+			return fmt.Sprintf("[Silberschatz cap. %s]", chap)
 		}
-		return "[Stallings]"
+		return "[Silberschatz]"
 	case rag.SourceDemos:
 		return fmt.Sprintf("[Demo: %s]", c.SourceID)
 	case rag.SourceISA:

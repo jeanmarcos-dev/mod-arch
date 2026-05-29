@@ -22,7 +22,7 @@ type Source string
 
 const (
 	SourceGlossary  Source = "glossary"
-	SourceStallings Source = "stallings"
+	SourceSilberschatz Source = "silberschatz"
 	// Project-native sources cover what neither the textbook nor the
 	// glossary can: the simulator's own demos, its simplified ISA and the
 	// repo's educational docs. They let the tutor speak about this exact

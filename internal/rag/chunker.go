@@ -8,7 +8,7 @@ import (
 
 // RawDoc is the input to Chunk: a piece of source material to be split into
 // retrieval units. Metadata flows through to every produced chunk so we can
-// cite "Stallings cap 3.2" or "Glosario: PL3" later.
+// cite "Silberschatz cap 3.2" or "Glosario: PL3" later.
 type RawDoc struct {
 	Source   Source
 	SourceID string

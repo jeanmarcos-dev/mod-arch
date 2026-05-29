@@ -11,9 +11,9 @@ import (
 // LoadPDFAsRawDocs reads `path`, extracts the text of every page and returns
 // one RawDoc per page. The chunker downstream re-splits each page into
 // retrieval-sized passages while keeping the page number in metadata so the
-// tutor can cite "Stallings p. 142" precisely.
+// tutor can cite "Silberschatz p. 142" precisely.
 //
-// sourceID identifies the corpus inside rag_chunks (e.g. "stallings-5e").
+// sourceID identifies the corpus inside rag_chunks (e.g. "silberschatz-9e-es").
 // Pages with no extractable text (cover, blank pages) are skipped.
 func LoadPDFAsRawDocs(path, sourceID string) ([]RawDoc, error) {
 	f, r, err := pdf.Open(path)
@@ -45,7 +45,7 @@ func LoadPDFAsRawDocs(path, sourceID string) ([]RawDoc, error) {
 			continue
 		}
 		out = append(out, RawDoc{
-			Source:   SourceStallings,
+			Source:   SourceSilberschatz,
 			SourceID: sourceID,
 			Text:     text,
 			Metadata: map[string]any{
