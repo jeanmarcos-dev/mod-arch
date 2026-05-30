@@ -93,3 +93,95 @@ func TestDispatchIdleCores_NoopWhenReadyEmpty(t *testing.T) {
 		}
 	}
 }
+
+// TestDispatchIdleCores_StampsCoreAndTick ensures every kernel event emitted
+// by the dispatcher carries the CoreID of the core receiving the work and a
+// Tick number sourced from that core's CPU. The frontend relies on both
+// fields to place each event in its column / row of the multicore log grid;
+// regressing here would silently misalign the timeline view.
+func TestDispatchIdleCores_StampsCoreAndTick(t *testing.T) {
+	k := NewMulti(cpu.DefaultMemSize, 2)
+	if _, err := k.AddProcess("p1", []byte{0x90, 0xF4}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.AddProcess("p2", []byte{0x90, 0xF4}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Drive a couple of ticks so Tick != 0 distinguishes "stamped" from
+	// "zero-value default".
+	k.Cores[0].CPU.Tick = 7
+	k.Cores[1].CPU.Tick = 11
+
+	evs := k.DispatchIdleCores()
+	if len(evs) == 0 {
+		t.Fatal("DispatchIdleCores returned no events")
+	}
+
+	// Build the expected (CoreID, Tick) per dispatched PID. P1 went to core 0,
+	// P2 to core 1, in that order.
+	for _, e := range evs {
+		switch v := e.(type) {
+		case cpu.EventSchedDecision:
+			want := struct{ core int; tick uint64 }{}
+			switch v.ToPID {
+			case 1:
+				want = struct{ core int; tick uint64 }{0, 7}
+			case 2:
+				want = struct{ core int; tick uint64 }{1, 11}
+			}
+			if v.CoreID != want.core || v.Tick != want.tick {
+				t.Errorf("SchedDecision ToPID=%d: CoreID=%d Tick=%d, want CoreID=%d Tick=%d",
+					v.ToPID, v.CoreID, v.Tick, want.core, want.tick)
+			}
+		case cpu.EventCoreAssign:
+			if v.Tick == 0 {
+				t.Errorf("CoreAssign{CoreID:%d PID:%d}: Tick=0 (not stamped)", v.CoreID, v.PID)
+			}
+		case cpu.EventPCBRestore:
+			if v.Tick == 0 {
+				t.Errorf("PCBRestore{CoreID:%d PID:%d}: Tick=0 (not stamped)", v.CoreID, v.PID)
+			}
+		case cpu.EventProcessState:
+			if v.Tick == 0 {
+				t.Errorf("ProcessState{PID:%d State:%s}: Tick=0 (not stamped)", v.PID, v.State)
+			}
+			if v.CoreID == 0 && v.PID == 2 {
+				t.Errorf("ProcessState for PID 2 went to CoreID 0 (expected 1)")
+			}
+		}
+	}
+}
+
+// TestStampKernelContext_TargetCorePreserved verifies that events naming a
+// target core (CoreAssign, CoreRelease, PCBSave, PCBRestore, MutexOp, SemOp)
+// keep the CoreID the caller set, even when stamped by a different executing
+// core. This matters when a wake-on-unlock hands a PID to an idle core: the
+// stamper must not overwrite idle.ID with the unlocking core's ID.
+func TestStampKernelContext_TargetCorePreserved(t *testing.T) {
+	evs := []cpu.Event{
+		cpu.EventCoreAssign{CoreID: 3, PID: 5},
+		cpu.EventPCBRestore{CoreID: 3, PID: 5},
+		cpu.EventMutexOp{CoreID: 2, PID: 7, MutexID: 1, Op: "acquired"},
+		cpu.EventSchedDecision{ToPID: 5, Reason: "wake"},
+	}
+	out := stampKernelContext(evs, 1, 42)
+
+	assign := out[0].(cpu.EventCoreAssign)
+	if assign.CoreID != 3 || assign.Tick != 42 {
+		t.Errorf("CoreAssign: CoreID=%d Tick=%d, want CoreID=3 Tick=42", assign.CoreID, assign.Tick)
+	}
+	restore := out[1].(cpu.EventPCBRestore)
+	if restore.CoreID != 3 || restore.Tick != 42 {
+		t.Errorf("PCBRestore: CoreID=%d Tick=%d, want CoreID=3 Tick=42", restore.CoreID, restore.Tick)
+	}
+	mtx := out[2].(cpu.EventMutexOp)
+	if mtx.CoreID != 2 || mtx.Tick != 42 {
+		t.Errorf("MutexOp: CoreID=%d Tick=%d, want CoreID=2 Tick=42", mtx.CoreID, mtx.Tick)
+	}
+	sched := out[3].(cpu.EventSchedDecision)
+	if sched.CoreID != 1 || sched.Tick != 42 {
+		t.Errorf("SchedDecision (execute-on-core): CoreID=%d Tick=%d, want CoreID=1 Tick=42",
+			sched.CoreID, sched.Tick)
+	}
+}

@@ -110,12 +110,18 @@ type Kernel struct {
 	// itself the work the CPU performs while waiting for the next IRQ.
 	IdleTaskEnabled bool
 
-	// IdlePID records that the swapper PCB exists in this kernel. Held
-	// separately from Processes[0] so callers do not have to map-lookup to
-	// answer the cheap question "is idle wired up?". Zero means "not
-	// spawned"; any other value (we use -1 as a sentinel) means "Processes
-	// has a PCB at key 0". The PID itself is always literally 0.
+	// IdlePID is a legacy sentinel: zero means "the swapper has not been
+	// spawned yet", -1 means "spawned" (the actual PID of every swapper is
+	// literally 0). Kept around so existing call sites can keep using it
+	// as a cheap "is idle wired up?" check.
 	IdlePID int
+
+	// IdleByCore holds one swapper PCB per core, mirroring Linux's per-CPU
+	// idle thread layout (init/0, init/1, …). All share PID 0 — the
+	// pedagogically canonical value — but each carries a unique negative
+	// TID so snapshots can disambiguate them. nil entries are valid only
+	// in the brief window between NewMulti and the first SpawnIdle call.
+	IdleByCore []*PCB
 
 	// memSpaces and fdSpaces register the AddressSpace and FDSpace objects
 	// referenced by live PCBs. Sharing across tasks of the same thread group
@@ -249,7 +255,7 @@ func (k *Kernel) HasWork() bool {
 	// is on, the kernel always has work — PID 0 is the work. The legacy
 	// path below still applies when the flag is off, preserving the old
 	// "auto-stop when every core is halted" semantics for existing demos.
-	if k.IdleTaskEnabled && k.Processes[0] != nil {
+	if k.IdleTaskEnabled && k.idleSpawned() {
 		return true
 	}
 	for _, c := range k.Cores {
@@ -297,12 +303,16 @@ func (k *Kernel) Reset() {
 	// AddProcess takes PID 1, leaving the tree rootless. Same hazard for
 	// stale Pipes/FifoByName pointing into a freed process table.
 	k.InitPID = 0
-	// IdlePID rides along with InitPID: the PCB at Processes[0] is wiped by
-	// the map reset above, so the sentinel must be cleared too. The
+	// IdlePID + IdleByCore ride along with InitPID. The per-core swapper
+	// PCBs are dropped here so the next LoadProgram (which re-runs
+	// SpawnIdle when the flag is on) starts from a clean slate. The
 	// IdleTaskEnabled flag is intentionally preserved — it's a user
-	// preference that should survive demo reloads and let the next
-	// LoadProgram re-spawn PID 0 automatically.
+	// preference that should survive demo reloads.
 	k.IdlePID = 0
+	k.IdleByCore = nil
+	for _, c := range k.Cores {
+		c.RunningIdle = false
+	}
 	k.Pipes = nil
 	k.FifoByName = nil
 	// AddressSpace and FDSpace registries must be cleared too: a leftover
@@ -399,12 +409,12 @@ func (k *Kernel) firstIdleCore() *Core {
 	return nil
 }
 
-// popNextRunnable pops the head of the ready queue, skipping init. Any
-// init PID encountered is re-queued at the tail so DispatchIdleCores can
-// pick it up later and route it through runInitReapCycle. Returns
-// (pid, true) when a non-init PID was found, (0, false) when only init
-// remained (or the queue was empty). Used by killCurrent and scheduleNext
-// — the regular dispatch paths that must never bind init to a core.
+// popNextRunnable pops the head of the ready queue, skipping init and any
+// kthread (kthreadd or kernel/N). Init is re-queued at the tail so
+// DispatchIdleCores can pick it up later and route it through
+// runInitReapCycle; kthreads are dropped silently because they never belong
+// in the ready queue in the first place — finding one there is a bug, and
+// re-queueing would just spin.
 func (k *Kernel) popNextRunnable() (int, bool) {
 	for i := 0; i < k.Ready.Len(); i++ {
 		pid, ok := k.Ready.Pop()
@@ -413,6 +423,9 @@ func (k *Kernel) popNextRunnable() (int, bool) {
 		}
 		if k.InitPID != 0 && pid == k.InitPID {
 			k.Ready.Push(pid)
+			continue
+		}
+		if p := k.Processes[pid]; p != nil && p.IsKThread {
 			continue
 		}
 		return pid, true
@@ -462,6 +475,13 @@ func (k *Kernel) Step() ([]cpu.Event, error) {
 // scheduler assigns it work or routes an interrupt its way.
 func (k *Kernel) stepCore(core *Core) ([]cpu.Event, error) {
 	if core.CurrentPID == 0 && len(core.CPU.PendingIRQs) == 0 {
+		// Count idle ticks even though we skip the rest of the work:
+		// the swapper is "executing" HLT every cycle, the only honest
+		// way to surface that to the UI without spamming the event
+		// stream is a per-core counter.
+		if core.RunningIdle {
+			core.IdleTicks++
+		}
 		return nil, nil
 	}
 	if k.shouldFireTimer(core) {
@@ -491,7 +511,7 @@ func (k *Kernel) stepCore(core *Core) ([]cpu.Event, error) {
 		}
 	}
 	if err != nil {
-		return evs, err
+		return stampKernelContext(evs, core.ID, core.CPU.Tick), err
 	}
 	for _, e := range evs {
 		irq, ok := e.(cpu.EventIRQFire)
@@ -506,7 +526,103 @@ func (k *Kernel) stepCore(core *Core) ([]cpu.Event, error) {
 		evs = append(evs, handlerEvs...)
 		evs = append(evs, schedEvs...)
 	}
-	return evs, nil
+	return stampKernelContext(evs, core.ID, core.CPU.Tick), nil
+}
+
+// stampKernelContext fills CoreID/Tick on kernel-emitted events that lack
+// them. Events the CPU itself emits (instruction, reg_write, mem_*, etc.)
+// already carry both, so the helper leaves them untouched. Two groups are
+// handled separately:
+//
+//   - "Execute-on-core" events (sched_decision, process_state, syscall,
+//     fork, ...) inherit both CoreID and Tick from the executing core.
+//   - "Target-core" events (core_assign, core_release, pcb_*, mutex_op,
+//     sem_op) keep the CoreID the caller chose — that ID may name the
+//     core receiving the assignment, not the one running the scheduler.
+//     Only Tick is stamped.
+func stampKernelContext(evs []cpu.Event, coreID int, tick uint64) []cpu.Event {
+	for i, e := range evs {
+		switch v := e.(type) {
+		case cpu.EventSchedDecision:
+			v.CoreID = coreID
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventProcessState:
+			v.CoreID = coreID
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventSyscall:
+			v.CoreID = coreID
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventFork:
+			v.CoreID = coreID
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventWaitOp:
+			v.CoreID = coreID
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventReparent:
+			v.CoreID = coreID
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventPipeCreate:
+			v.CoreID = coreID
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventPipeOp:
+			v.CoreID = coreID
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventWake:
+			v.CoreID = coreID
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventInitReap:
+			v.CoreID = coreID
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventThreadCreate:
+			v.CoreID = coreID
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventThreadExit:
+			v.CoreID = coreID
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventConsoleOut:
+			if v.CoreID == 0 && coreID != 0 {
+				v.CoreID = coreID
+			}
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventPCBSave:
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventPCBRestore:
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventCoreAssign:
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventCoreRelease:
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventCoreIdle:
+			if v.Tick == 0 {
+				v.Tick = tick
+			}
+			evs[i] = v
+		case cpu.EventMutexOp:
+			v.Tick = tick
+			evs[i] = v
+		case cpu.EventSemOp:
+			v.Tick = tick
+			evs[i] = v
+		}
+	}
+	return evs
 }
 
 // shouldFireTimer decides whether the PIT should fire on this step of the

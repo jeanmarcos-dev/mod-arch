@@ -50,7 +50,7 @@ func (c *CPU) setRegByIdx(i uint8, val uint32) {
 		return
 	}
 	*p = val
-	c.Emit(EventRegWrite{CoreID: c.CoreID, Reg: regNames[i], Old: old, New: val})
+	c.Emit(EventRegWrite{CoreID: c.CoreID, Tick: c.Tick, Reg: regNames[i], Old: old, New: val})
 }
 
 // setEIP redirects the instruction pointer and emits reg_write so the UI sees
@@ -63,7 +63,7 @@ func (c *CPU) setEIP(val uint32) {
 	}
 	old := c.R.EIP
 	c.R.EIP = val
-	c.Emit(EventRegWrite{CoreID: c.CoreID, Reg: "EIP", Old: old, New: val})
+	c.Emit(EventRegWrite{CoreID: c.CoreID, Tick: c.Tick, Reg: "EIP", Old: old, New: val})
 }
 
 // fetch8 reads one instruction byte at EIP, requiring execute permission, and
@@ -407,7 +407,14 @@ func execInstruction(c *CPU) error {
 			return c.dispatchFault(0x0D)
 		}
 		c.Halted = true
-		c.Emit(EventHalt{CoreID: c.CoreID})
+		// Kernel-mode HLT is the swapper's resting state, not a noteworthy
+		// event: the idle thread loops on it every time an IRQ wakes it up
+		// and IRET bounces back through the JMP. Emitting EventHalt for it
+		// would flood the log with one entry per IRQ. The frontend already
+		// surfaces idle activity through core.running_idle and idle_ticks.
+		if c.Mode != ModeKernel {
+			c.Emit(EventHalt{CoreID: c.CoreID, Tick: c.Tick})
+		}
 
 	case opcode == 0x90:
 		c.emitInstr(startEIP, "NOP")
@@ -497,6 +504,7 @@ func (c *CPU) emitInstr(startEIP uint32, mnemonic string) {
 	bytes := append([]byte(nil), c.Mem.Bytes[startEIP:c.R.EIP]...)
 	c.Emit(EventInstruction{
 		CoreID: c.CoreID,
+		Tick:   c.Tick,
 		// PID is stamped by Kernel.stepCore (which knows the running process);
 		// CPU itself has no notion of processes.
 		PID:      0,

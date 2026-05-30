@@ -330,6 +330,36 @@ func TestMutexUnlock_NoIdleCore_EmitsReadyQueueSnapshot(t *testing.T) {
 	}
 }
 
+// TestMutex_BlockedSinceStampedAndCleared verifies the PCB carries the CPU
+// tick at which it entered BLOCKED so the frontend can render "esperando hace
+// N ticks", and that the field is cleared once the waiter is woken.
+func TestMutex_BlockedSinceStampedAndCleared(t *testing.T) {
+	k := freshKernelWithProcs(t, 2)
+	id := k.mutexCreate()
+	_, _, _ = k.mutexLock(k.BootCore(), id)
+
+	// Advance the boot CPU tick so BlockedSince is provably non-zero.
+	k.BootCPU().Tick = 42
+	k.BootCore().CurrentPID = 2
+
+	_, blocked, _ := k.mutexLock(k.BootCore(), id)
+	if !blocked {
+		t.Fatal("expected PID 2 to block while PID 1 holds")
+	}
+	p2 := k.Processes[2]
+	if p2.BlockedSince != 42 {
+		t.Errorf("BlockedSince = %d, want 42", p2.BlockedSince)
+	}
+
+	k.BootCore().CurrentPID = 1
+	if _, ok := k.mutexUnlock(k.BootCore(), id); !ok {
+		t.Fatal("unlock ok=false")
+	}
+	if p2.BlockedSince != 0 {
+		t.Errorf("BlockedSince after handoff = %d, want 0", p2.BlockedSince)
+	}
+}
+
 func mutexOps(evs []cpu.Event) []string {
 	var out []string
 	for _, e := range evs {

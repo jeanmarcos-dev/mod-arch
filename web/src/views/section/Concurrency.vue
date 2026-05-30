@@ -44,6 +44,20 @@ function pidShort(pid: number) {
   if (pid === 0) return '—';
   return `P${pid}`;
 }
+function procName(pid: number): string {
+  return cpu.procs.find(p => p.pid === pid)?.name ?? '';
+}
+// Format the tick delta as "~N ticks" while the proc is still blocked.
+// We prefer waitQueue.blocked_since (kept in sync via process_state) and
+// fall back to procs[].blocked_since from the last snapshot. Returns an
+// empty string when neither source is available — the cell renders a dash.
+function blockedFor(pid: number): string {
+  const w = cpu.waitQueue.find(x => x.pid === pid);
+  const bs = w?.blocked_since ?? cpu.procs.find(p => p.pid === pid)?.blocked_since;
+  if (typeof bs !== 'number' || bs <= 0) return '';
+  const dt = Math.max(0, cpu.tick - bs);
+  return t('sections.concurrency.blockedForFmt', { n: dt });
+}
 </script>
 
 <template>
@@ -118,7 +132,19 @@ function pidShort(pid: number) {
                 <td><code v-if="m.holder >= 0" :title="pidName(m.holder)">P{{ m.holder }}</code><span v-else class="muted">{{ t('sections.concurrency.holderFree') }}</span></td>
                 <td>
                   <span v-if="m.waiters.length === 0" class="muted">—</span>
-                  <span v-else class="waiters">{{ m.waiters.map(w => 'P' + w).join(' → ') }}</span>
+                  <ol v-else class="waiters-list">
+                    <li
+                      v-for="(pid, idx) in m.waiters"
+                      :key="pid"
+                      class="waiter"
+                      :class="{ 'waiter--head': idx === 0 }"
+                    >
+                      <span class="waiter__pos">{{ idx + 1 }}°</span>
+                      <code class="waiter__pid">P{{ pid }}</code>
+                      <span class="waiter__name">{{ procName(pid) }}</span>
+                      <span class="waiter__time">{{ blockedFor(pid) }}</span>
+                    </li>
+                  </ol>
                 </td>
               </tr>
             </tbody>
@@ -144,7 +170,19 @@ function pidShort(pid: number) {
                 <td><code>{{ s.count }}</code></td>
                 <td>
                   <span v-if="s.waiters.length === 0" class="muted">—</span>
-                  <span v-else class="waiters">{{ s.waiters.map(w => 'P' + w).join(' → ') }}</span>
+                  <ol v-else class="waiters-list">
+                    <li
+                      v-for="(pid, idx) in s.waiters"
+                      :key="pid"
+                      class="waiter"
+                      :class="{ 'waiter--head': idx === 0 }"
+                    >
+                      <span class="waiter__pos">{{ idx + 1 }}°</span>
+                      <code class="waiter__pid">P{{ pid }}</code>
+                      <span class="waiter__name">{{ procName(pid) }}</span>
+                      <span class="waiter__time">{{ blockedFor(pid) }}</span>
+                    </li>
+                  </ol>
                 </td>
               </tr>
             </tbody>
@@ -307,6 +345,60 @@ function pidShort(pid: number) {
 .lock-block tr.free td:nth-child(2) { color: var(--text-muted); }
 .lock-block .muted { color: var(--text-muted); }
 .lock-block .waiters { color: var(--yellow, #ffd54f); }
+
+.waiters-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.waiter {
+  display: grid;
+  grid-template-columns: 22px auto 1fr auto;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+}
+.waiter__pos {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-align: right;
+}
+.waiter__pid {
+  color: var(--yellow, #ffd54f);
+  background: rgba(255, 213, 79, 0.08);
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+}
+.waiter__name {
+  color: var(--text-dim);
+  font-size: 10px;
+  text-transform: lowercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.waiter__time {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: italic;
+}
+/* The head of each waiter list is the next process the kernel will hand
+   the resource to once the holder releases it — pulsing it on a yellow
+   halo telegraphs that hierarchy without resorting to a separate label. */
+.waiter--head {
+  border-color: color-mix(in oklab, var(--yellow, #ffd54f) 60%, transparent);
+  background: rgba(255, 213, 79, 0.05);
+  animation: waiter-head-pulse 1.8s ease-in-out infinite;
+}
+@keyframes waiter-head-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50%      { box-shadow: 0 0 10px 0 color-mix(in oklab, var(--yellow, #ffd54f) 35%, transparent); }
+}
 
 .state-tag {
   display: inline-block;

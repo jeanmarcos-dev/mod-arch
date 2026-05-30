@@ -23,6 +23,7 @@ import ColumnResizer from '../components/shell/ColumnResizer.vue';
 import RowResizer from '../components/shell/RowResizer.vue';
 import ByteFlightNarrator from '../components/narrators/ByteFlightNarrator.vue';
 import ModeFlipNarrator from '../components/narrators/ModeFlipNarrator.vue';
+import TrapFrameNarrator from '../components/narrators/TrapFrameNarrator.vue';
 import PCBCopyNarrator from '../components/narrators/PCBCopyNarrator.vue';
 
 const cpu = useCpuStore();
@@ -80,14 +81,15 @@ watch(() => prefs.columnWidths.rightPx, (px) => {
   if (rightWidth.value !== px) rightWidth.value = px;
 });
 
-// Refs to the three panels stacked in the right column. useResizableRow reads
+// Refs to the panels stacked in each side column. useResizableRow reads
 // their offsetHeight at drag start to translate pointer deltas into weight
 // changes. Template refs on Vue components resolve to a public instance, not
 // a DOM node — useResizableRow walks $el internally.
 type PanelRef = ComponentPublicInstance | HTMLElement | null;
+const cpuEl = ref<PanelRef>(null);
+const ipcEl = ref<PanelRef>(null);
 const processesEl = ref<PanelRef>(null);
 const queuesEl = ref<PanelRef>(null);
-const ipcEl = ref<PanelRef>(null);
 const middleTabsEl = ref<PanelRef>(null);
 const consolePanelEl = ref<PanelRef>(null);
 
@@ -95,12 +97,22 @@ const consolePanelEl = ref<PanelRef>(null);
 // from this inline style and applies it only to flex-grow. The collapsed
 // override targets the long-hand properties with !important, so a toggle
 // always wins over the inline weight without depending on shorthand cascade.
+const cpuStyle = computed(() => ({ '--cpanel-weight': String(prefs.panelHeights.cpu) }));
+const ipcStyle = computed(() => ({ '--cpanel-weight': String(prefs.panelHeights.ipc) }));
 const processesStyle = computed(() => ({ '--cpanel-weight': String(prefs.panelHeights.processes) }));
 const queuesStyle = computed(() => ({ '--cpanel-weight': String(prefs.panelHeights.queues) }));
-const ipcStyle = computed(() => ({ '--cpanel-weight': String(prefs.panelHeights.ipc) }));
 // Center column: tabs pile (Código/Bitácora/Memoria) vs ConsolePanel below.
 const middleTabsStyle = computed(() => ({ '--mc-weight': String(prefs.panelHeights.middleTabs) }));
 const middleConsoleStyle = computed(() => ({ '--mc-weight': String(prefs.panelHeights.middleConsole) }));
+
+const { isResizing: cpuIpcResizing, start: startCpuIpcResize } = useResizableRow({
+  topEl: cpuEl,
+  bottomEl: ipcEl,
+  getTopWeight: () => prefs.panelHeights.cpu,
+  getBottomWeight: () => prefs.panelHeights.ipc,
+  setTopWeight: (w) => prefs.setPanelHeight('cpu', w),
+  setBottomWeight: (w) => prefs.setPanelHeight('ipc', w),
+});
 
 const { isResizing: processesQueuesResizing, start: startProcessesQueuesResize } = useResizableRow({
   topEl: processesEl,
@@ -109,15 +121,6 @@ const { isResizing: processesQueuesResizing, start: startProcessesQueuesResize }
   getBottomWeight: () => prefs.panelHeights.queues,
   setTopWeight: (w) => prefs.setPanelHeight('processes', w),
   setBottomWeight: (w) => prefs.setPanelHeight('queues', w),
-});
-
-const { isResizing: queuesIpcResizing, start: startQueuesIpcResize } = useResizableRow({
-  topEl: queuesEl,
-  bottomEl: ipcEl,
-  getTopWeight: () => prefs.panelHeights.queues,
-  getBottomWeight: () => prefs.panelHeights.ipc,
-  setTopWeight: (w) => prefs.setPanelHeight('queues', w),
-  setBottomWeight: (w) => prefs.setPanelHeight('ipc', w),
 });
 
 // Center column: splits vertical space between the active tab (Código /
@@ -135,11 +138,11 @@ const { isResizing: middleTabsConsoleResizing, start: startMiddleTabsConsoleResi
 
 // Row resizers only make sense when both neighbours are expanded — a
 // collapsed panel is fixed at its header height and has no slack to trade.
+const showCpuIpcResizer = computed(() =>
+  !prefs.panelsCollapsed.cores && !prefs.panelsCollapsed.ipc,
+);
 const showProcessesQueuesResizer = computed(() =>
   !prefs.panelsCollapsed.processes && !prefs.panelsCollapsed.queues,
-);
-const showQueuesIpcResizer = computed(() =>
-  !prefs.panelsCollapsed.queues && !prefs.panelsCollapsed.ipc,
 );
 
 // Panel IDs disabled by the admin, scoped to students. Privileged users
@@ -308,11 +311,38 @@ onUnmounted(() => {
     <main class="layout">
       <div
         v-show="visible.cpu"
-        class="col-left"
+        class="col-left col-left--stack"
         :style="!isMobile ? leftStyle : undefined"
       >
-        <CpuPanel v-if="!isLocked('cpu')" />
-        <LockedPanel v-else />
+        <CpuPanel
+          v-if="!isLocked('cpu')"
+          ref="cpuEl"
+          class="col-left__panel"
+          :style="!isMobile ? cpuStyle : undefined"
+        />
+        <LockedPanel
+          v-else
+          ref="cpuEl"
+          class="col-left__panel"
+          :style="!isMobile ? cpuStyle : undefined"
+        />
+        <RowResizer
+          v-if="!isMobile && showCpuIpcResizer"
+          :active="cpuIpcResizing"
+          @pointerdown="startCpuIpcResize"
+        />
+        <IpcPanel
+          v-if="!isLocked('ipc')"
+          ref="ipcEl"
+          class="col-left__panel"
+          :style="!isMobile ? ipcStyle : undefined"
+        />
+        <LockedPanel
+          v-else
+          ref="ipcEl"
+          class="col-left__panel"
+          :style="!isMobile ? ipcStyle : undefined"
+        />
       </div>
       <ColumnResizer
         v-if="!isMobile && visible.cpu"
@@ -409,23 +439,6 @@ onUnmounted(() => {
           class="col-right__panel"
           :style="!isMobile ? queuesStyle : undefined"
         />
-        <RowResizer
-          v-if="!isMobile && showQueuesIpcResizer"
-          :active="queuesIpcResizing"
-          @pointerdown="startQueuesIpcResize"
-        />
-        <IpcPanel
-          v-if="!isLocked('ipc')"
-          ref="ipcEl"
-          class="col-right__panel"
-          :style="!isMobile ? ipcStyle : undefined"
-        />
-        <LockedPanel
-          v-else
-          ref="ipcEl"
-          class="col-right__panel"
-          :style="!isMobile ? ipcStyle : undefined"
-        />
       </div>
     </main>
 
@@ -437,7 +450,8 @@ onUnmounted(() => {
          intentionally omitted because the IDT anchors live exclusively in
          the /interrupciones view. -->
     <ByteFlightNarrator />
-    <ModeFlipNarrator />
+    <ModeFlipNarrator :suppress-banner="activeMiddleTab === 'events'" />
+    <TrapFrameNarrator />
     <PCBCopyNarrator />
   </div>
 </template>
@@ -496,10 +510,25 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-/* Right column stacks three collapsible panels: Procesos, Colas, IPC. Width
-   is driven inline from useResizableColumn; the height is split equally
-   between expanded children, while collapsed children shrink to their header
-   row (flex: 0 0 auto, applied by CollapsiblePanel itself). */
+/* Left column now stacks CPU + IPC, mirroring the right column shape so the
+   simulator surfaces both "what is each core running" (top) and "how do
+   procs talk to each other" (bottom) on the same rail. */
+.col-left--stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.col-left--stack > .col-left__panel + .col-left__panel {
+  margin-top: 6px;
+}
+
+/* Right column stacks two collapsible panels: Procesos and Colas. IPC used
+   to live here too but moved to the left rail so the queues panel can grow
+   into the extra vertical real estate — animating wake/dispatch arrivals
+   needs room to breathe. */
 .col-right--stack {
   display: flex;
   flex-direction: column;
@@ -539,6 +568,7 @@ onUnmounted(() => {
     min-height: 0;
     flex: 1 1 auto;
   }
+  .col-left--stack > *,
   .col-right--stack > * { min-height: 160px; }
 }
 

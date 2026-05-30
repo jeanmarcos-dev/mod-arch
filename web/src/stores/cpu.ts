@@ -9,14 +9,14 @@ import { usePreferencesStore } from './preferences';
 // (regs, mode, halted, currentPID) cuando el evento viene del core que el
 // usuario eligió ver en la SimBar.
 export type CpuEvent =
-  | { type: 'instruction'; core_id: number; pid: number; eip: number; mnemonic: string; bytes: number[] }
-  | { type: 'reg_write'; core_id: number; reg: string; old: number; new: number }
-  | { type: 'mem_read'; core_id: number; addr: number; value: number; size: number }
-  | { type: 'mem_write'; core_id: number; addr: number; old: number; new: number; size: number }
-  | { type: 'mode_switch'; core_id: number; from: number; to: number; cause: string }
-  | { type: 'irq_fire'; core_id: number; vector: number; source: string; handler: number; from_mode: number; saved_eip?: number; saved_cs?: number; saved_eflags?: number }
-  | { type: 'page_fault'; core_id: number; addr: number; mode: number; perm_needed: string }
-  | { type: 'halt'; core_id: number; pid?: number }
+  | { type: 'instruction'; core_id: number; tick?: number; pid: number; eip: number; mnemonic: string; bytes: number[] }
+  | { type: 'reg_write'; core_id: number; tick?: number; reg: string; old: number; new: number }
+  | { type: 'mem_read'; core_id: number; tick?: number; addr: number; value: number; size: number }
+  | { type: 'mem_write'; core_id: number; tick?: number; addr: number; old: number; new: number; size: number }
+  | { type: 'mode_switch'; core_id: number; tick?: number; from: number; to: number; cause: string }
+  | { type: 'irq_fire'; core_id: number; tick?: number; vector: number; source: string; handler: number; from_mode: number; saved_eip?: number; saved_cs?: number; saved_eflags?: number }
+  | { type: 'page_fault'; core_id: number; tick?: number; addr: number; mode: number; perm_needed: string }
+  | { type: 'halt'; core_id: number; tick?: number; pid?: number }
   | { type: 'tick'; value: number }
   | { type: 'state'; halted?: boolean; running?: boolean; paused?: boolean; hz?: number; clockHz?: number; speedMul?: number; tickIntervalMs?: number }
   | { type: 'snapshot'; regs: Record<string, number>; segments: Record<string, number>; mode: number; halted: boolean; tick: number; timer_quantum?: number; current_pid?: number; ready_queue?: number[]; wait_queue?: WaitInfo[]; procs?: PCBInfo[]; sources?: Record<string, string>; source_maps?: Record<string, SourceLine[]>; cores?: CoreInfo[]; num_cores?: number; running?: boolean; paused?: boolean; hz?: number; clockHz?: number; speedMul?: number; tickIntervalMs?: number }
@@ -24,27 +24,27 @@ export type CpuEvent =
   | { type: 'loaded'; name: string; pids: number[]; procs: PCBInfo[]; sources: Record<string, string>; source_maps?: Record<string, SourceLine[]> }
   | { type: 'reset' }
   | { type: 'procs'; procs: PCBInfo[] }
-  | { type: 'pipe_create'; pipe_id: number; owner_pid: number; fd_r: number; fd_w: number; is_fifo: boolean; name?: string }
-  | { type: 'pipe_op'; pipe_id: number; pid: number; op: 'read' | 'write'; bytes?: number[]; buf_level: number; buf_cap: number }
-  | { type: 'fork'; parent_pid: number; child_pid: number; is_vfork: boolean }
-  | { type: 'reparent'; pid: number; old_parent: number; new_parent: number }
-  | { type: 'wait_op'; pid: number; child_pid: number; op: string; exit_code?: number }
-  | { type: 'thread_create'; tid: number; tgid: number; leader_pid: number; creator_pid: number; fn_eip: number; stack_top: number }
-  | { type: 'thread_exit'; tid: number; tgid: number; retval: number }
-  | { type: 'pcb_save'; core_id: number; pid: number; regs: Record<string, number> }
-  | { type: 'pcb_restore'; core_id: number; pid: number; regs: Record<string, number> }
-  | { type: 'sched_decision'; from_pid: number; to_pid: number; reason?: string; ready_queue: number[] }
-  | { type: 'wake'; pid: number; from_reason: string; ready_queue: number[] }
-  | { type: 'init_reap'; init_pid: number; reaps: { child_pid: number; exit_code: number; reparented: boolean }[]; ready_queue: number[] }
-  | { type: 'process_state'; pid: number; state: string; reason?: string; exit_code?: number }
-  | { type: 'syscall'; pid: number; num: number; name: string; args: number[]; result: number }
-  | { type: 'console_out'; core_id?: number; pid: number; kind?: 'in' | 'out'; bytes: number[]; text: string }
+  | { type: 'pipe_create'; core_id?: number; tick?: number; pipe_id: number; owner_pid: number; fd_r: number; fd_w: number; is_fifo: boolean; name?: string }
+  | { type: 'pipe_op'; core_id?: number; tick?: number; pipe_id: number; pid: number; op: 'read' | 'write'; bytes?: number[]; buf_level: number; buf_cap: number }
+  | { type: 'fork'; core_id?: number; tick?: number; parent_pid: number; child_pid: number; is_vfork: boolean }
+  | { type: 'reparent'; core_id?: number; tick?: number; pid: number; old_parent: number; new_parent: number }
+  | { type: 'wait_op'; core_id?: number; tick?: number; pid: number; child_pid: number; op: string; exit_code?: number }
+  | { type: 'thread_create'; core_id?: number; tick?: number; tid: number; tgid: number; leader_pid: number; creator_pid: number; fn_eip: number; stack_top: number }
+  | { type: 'thread_exit'; core_id?: number; tick?: number; tid: number; tgid: number; retval: number }
+  | { type: 'pcb_save'; core_id: number; tick?: number; pid: number; regs: Record<string, number> }
+  | { type: 'pcb_restore'; core_id: number; tick?: number; pid: number; regs: Record<string, number> }
+  | { type: 'sched_decision'; core_id?: number; tick?: number; from_pid: number; to_pid: number; reason?: string; ready_queue: number[] }
+  | { type: 'wake'; core_id?: number; tick?: number; pid: number; from_reason: string; ready_queue: number[] }
+  | { type: 'init_reap'; core_id?: number; tick?: number; init_pid: number; reaps: { child_pid: number; exit_code: number; reparented: boolean }[]; ready_queue: number[] }
+  | { type: 'process_state'; core_id?: number; tick?: number; pid: number; state: string; reason?: string; exit_code?: number }
+  | { type: 'syscall'; core_id?: number; tick?: number; pid: number; num: number; name: string; args: number[]; result: number }
+  | { type: 'console_out'; core_id?: number; tick?: number; pid: number; kind?: 'in' | 'out'; bytes: number[]; text: string }
   | { type: 'kbd_state'; buf_used: number; buf_cap: number; readers: { pid: number; prog: string }[] }
-  | { type: 'core_assign'; core_id: number; pid: number }
-  | { type: 'core_release'; core_id: number; pid: number; reason?: string }
+  | { type: 'core_assign'; core_id: number; tick?: number; pid: number }
+  | { type: 'core_release'; core_id: number; tick?: number; pid: number; reason?: string }
   | { type: 'core_idle'; core_id: number; tick: number }
-  | { type: 'mutex_op'; core_id: number; pid: number; mutex_id: number; op: 'create' | 'acquired' | 'waiting' | 'released' | 'handoff' | 'rejected'; next_pid?: number; waiters?: number[] }
-  | { type: 'sem_op'; core_id: number; pid: number; sem_id: number; op: 'create' | 'wait_immediate' | 'wait_blocked' | 'signal' | 'handoff'; count: number; next_pid?: number; waiters?: number[] }
+  | { type: 'mutex_op'; core_id: number; tick?: number; pid: number; mutex_id: number; op: 'create' | 'acquired' | 'waiting' | 'released' | 'handoff' | 'rejected'; next_pid?: number; waiters?: number[] }
+  | { type: 'sem_op'; core_id: number; tick?: number; pid: number; sem_id: number; op: 'create' | 'wait_immediate' | 'wait_blocked' | 'signal' | 'handoff'; count: number; next_pid?: number; waiters?: number[] }
   | { type: 'session_info'; id: string; mode: string; role: string; label: string; view_token: string; user_id?: string; user_name?: string; user_email?: string; presence?: { section: string; cores: number[]; mode?: string; narrators?: boolean; focus?: Focus } }
   | { type: 'presence'; section: string; cores: number[]; mode?: string; narrators?: boolean; focus?: Focus; at?: number }
   | { type: 'hand_raise'; label: string; at?: number }
@@ -64,6 +64,10 @@ export interface CoreInfo {
   // running_idle disambiguates current_pid===0: legacy "no proc" vs the
   // kernel swapper (PID 0) being bound. Drives the dedicated HLT badge.
   running_idle?: boolean;
+  // idle_ticks counts the cycles this core has spent in the swapper's HLT
+  // loop. Updates every tick while RunningIdle so the UI can show a live
+  // heartbeat without the event log being flooded.
+  idle_ticks?: number;
 }
 
 export interface MutexState {
@@ -147,6 +151,7 @@ export interface PCBInfo {
   name: string;
   state: string;
   blocked_on?: string;
+  blocked_since?: number;
   regs: Record<string, number>;
   saved_user_esp: number;
   code_base: number;
@@ -169,6 +174,10 @@ export interface PCBInfo {
   // is_idle flags the kernel swapper (PID 0). Pulled out of the regular
   // process tree and rendered as the compact kernel-idle band instead.
   is_idle?: boolean;
+  // is_kthread marks the kernel-thread hierarchy: kthreadd (PID 2) and the
+  // per-core kernel/N tasks that hang from it. These PCBs are never
+  // scheduled; their RUN/SLEEP appearance is derived from cores[N].mode.
+  is_kthread?: boolean;
 }
 
 // One IPC channel (pipe or FIFO) tracked in the store. Buffer is held
@@ -224,6 +233,11 @@ export interface WaitInfo {
   pid: number;
   name: string;
   reason: string;
+  // blocked_since carries the CPU tick at which the proc entered BLOCKED.
+  // Optional because EventProcessState doesn't transport it yet — only the
+  // snapshot path populates it; live wakes/blocks may leave it undefined
+  // until the next snapshot lands. Concurrency.vue degrades gracefully.
+  blocked_since?: number;
 }
 
 export interface LogEntry {
@@ -231,9 +245,29 @@ export interface LogEntry {
   text: string;
   color: string;
   // Optional core that produced the event. Undefined for global events
-  // (scheduler decisions, syscalls, sync ops) so they remain visible
-  // regardless of which cores the user has filtered in the SimBar.
+  // (loaded, reset, ws_*) so they remain visible regardless of which cores
+  // the user has filtered in the SimBar.
   coreId?: number;
+  // Optional simulator tick at which the event occurred. The multi-column
+  // log groups rows by this value so the user can read parallelism line by
+  // line. Undefined for genuinely global events that have no per-core tick.
+  tick?: number;
+  // 'global' marks events that span every core (loaded, reset, ws_*). The
+  // grid renders them as a full-width row separator instead of placing them
+  // in any single column.
+  scope?: 'global';
+  // True when the event executed in PL0 (kernel mode). The grid uses it to
+  // tint the cell so the student can see at a glance which slices of each
+  // core's timeline ran in supervisor mode — Silberschatz's "the kernel runs
+  // in the context of the trapped process on the trapping core" made
+  // concrete in the visual.
+  inKernel?: boolean;
+  // 'scheduler' tags events that are specifically the scheduler acting:
+  // sched_decision, wake, init_reap, pcb_save/restore. The grid uses this
+  // to surface a dedicated chip on those cells, so the alumno can tell
+  // "the kernel ran here" (inKernel) apart from "the scheduler ran here"
+  // (kind=='scheduler') — they are not the same thing.
+  kind?: 'scheduler';
 }
 
 const CORES_FILTER_KEY = 'modos-cpu:cores-filter:v1';
@@ -707,7 +741,27 @@ export const useCpuStore = defineStore('cpu', () => {
     }
   }
 
-  function connect() {
+  // bootstrapSession ensures the backend has created the mc_sid cookie before
+  // we open the WebSocket. In production the cookie is already set by the Go
+  // handler that served index.html, but during `make watch` the HTML comes
+  // from Vite and never touches that handler — so without this call the WS
+  // upgrade returns 401 and the client falls into the reconnect backoff.
+  let sessionBootstrapped = false;
+  async function bootstrapSession(): Promise<void> {
+    if (sessionBootstrapped) return;
+    try {
+      const r = await fetch('/api/session', { credentials: 'same-origin' });
+      if (r.ok) sessionBootstrapped = true;
+    } catch {
+      /* swallow: WS open will fail and trigger the normal reconnect backoff */
+    }
+  }
+
+  async function connect() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+    await bootstrapSession();
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
@@ -728,11 +782,11 @@ export const useCpuStore = defineStore('cpu', () => {
     ws.onclose = () => {
       connected.value = false;
       ws = null;
-      pushLog(formatLog.wsDisconnected(), 'red');
+      pushLog(formatLog.wsDisconnected(), 'red', undefined, undefined, 'global');
       scheduleReconnect();
     };
     ws.onerror = () => {
-      pushLog(formatLog.wsError(), 'red');
+      pushLog(formatLog.wsError(), 'red', undefined, undefined, 'global');
       // onerror precedes onclose in the WebSocket lifecycle; rely on onclose
       // to trigger the backoff so we do not double-schedule.
     };
@@ -741,7 +795,7 @@ export const useCpuStore = defineStore('cpu', () => {
         const ev = JSON.parse(e.data) as CpuEvent;
         applyEvent(ev);
       } catch (err) {
-        pushLog(formatLog.wsJsonErr(err), 'red');
+        pushLog(formatLog.wsJsonErr(err), 'red', undefined, undefined, 'global');
       }
     };
   }
@@ -838,17 +892,24 @@ export const useCpuStore = defineStore('cpu', () => {
         lastMnemonic[ev.core_id] = ev.mnemonic;
         // EventsLog renders the per-core chip from coreId so the text itself
         // stays clean and identical across single- and multi-core sessions.
-        pushLog(formatLog.instruction(ev.eip, ev.mnemonic), 'amber', ev.core_id);
+        pushLog(formatLog.instruction(ev.eip, ev.mnemonic), 'amber', ev.core_id, ev.tick);
         if (isSelected(ev.core_id)) regs.EIP = nextEIP;
         break;
       }
       case 'tick':
         tick.value = ev.value;
+        // Optimistically bump idle_ticks for every core currently bound to
+        // the swapper so the UI sees a live heartbeat without waiting for
+        // the next full snapshot. Snapshots from the server overwrite the
+        // value when they arrive, keeping the local counter in sync.
+        for (const c of cores.value) {
+          if (c.running_idle) c.idle_ticks = (c.idle_ticks ?? 0) + 1;
+        }
         break;
       case 'mode_switch': {
         const c = ensureCoreSlot(ev.core_id);
         c.mode = ev.to;
-        pushLog(formatLog.modeSwitch(ev.from, ev.to, ev.cause), 'red', ev.core_id);
+        pushLog(formatLog.modeSwitch(ev.from, ev.to, ev.cause), 'red', ev.core_id, ev.tick);
         if (isSelected(ev.core_id)) mode.value = ev.to;
         // IRET pops the interrupt frame; the panel needs to clear that core
         // so it goes back to "— sin handler activo —". Defer the mutation
@@ -866,7 +927,7 @@ export const useCpuStore = defineStore('cpu', () => {
         break;
       }
       case 'irq_fire': {
-        pushLog(formatLog.irq(ev.vector, ev.source), 'yellow', ev.core_id);
+        pushLog(formatLog.irq(ev.vector, ev.source), 'yellow', ev.core_id, ev.tick);
         lastFiredHandlerByVector.value = {
           ...lastFiredHandlerByVector.value,
           [ev.vector]: {
@@ -895,7 +956,7 @@ export const useCpuStore = defineStore('cpu', () => {
         break;
       }
       case 'page_fault': {
-        pushLog(formatLog.pageFault(ev.addr, ev.perm_needed, ev.mode), 'red', ev.core_id);
+        pushLog(formatLog.pageFault(ev.addr, ev.perm_needed, ev.mode), 'red', ev.core_id, ev.tick);
         faultShake.value = true;
         setTimeout(() => { faultShake.value = false; }, 500);
         break;
@@ -903,7 +964,7 @@ export const useCpuStore = defineStore('cpu', () => {
       case 'halt': {
         const c = ensureCoreSlot(ev.core_id);
         c.halted = true;
-        pushLog(formatLog.halt(), 'red', ev.core_id);
+        pushLog(formatLog.halt(), 'red', ev.core_id, ev.tick);
         if (isSelected(ev.core_id)) halted.value = true;
         break;
       }
@@ -915,7 +976,7 @@ export const useCpuStore = defineStore('cpu', () => {
         if (ev.speedMul !== undefined) speedMul.value = ev.speedMul;
         break;
       case 'loaded': {
-        pushLog(formatLog.loaded(ev.name, ev.pids.length, ev.pids), 'green');
+        pushLog(formatLog.loaded(ev.name, ev.pids.length, ev.pids), 'green', undefined, undefined, 'global');
         procs.value = ev.procs;
         // Pick a sensible default for the "Mostrar init" toggle based on how
         // many user-space procs the demo carries (init excluded). Single-proc
@@ -943,7 +1004,7 @@ export const useCpuStore = defineStore('cpu', () => {
         break;
       }
       case 'reset':
-        pushLog(formatLog.reset(), 'cyan');
+        pushLog(formatLog.reset(), 'cyan', undefined, undefined, 'global');
         changedRegs.clear();
         for (const k of Object.keys(changedRegsByCore)) delete changedRegsByCore[Number(k)];
         procs.value = [];
@@ -987,14 +1048,14 @@ export const useCpuStore = defineStore('cpu', () => {
         const p = procs.value.find(x => x.pid === ev.pid);
         if (p) p.regs = ev.regs;
         flashPID(ev.pid);
-        pushLog(formatLog.pcbSave(ev.pid, ev.regs.EIP || 0), 'red');
+        pushLog(formatLog.pcbSave(ev.pid, ev.regs.EIP || 0), 'red', ev.core_id, ev.tick, undefined, 'scheduler');
         break;
       }
       case 'pcb_restore': {
         const p = procs.value.find(x => x.pid === ev.pid);
         if (p) p.regs = ev.regs;
         flashPID(ev.pid);
-        pushLog(formatLog.pcbRestore(ev.pid, ev.regs.EIP || 0), 'green');
+        pushLog(formatLog.pcbRestore(ev.pid, ev.regs.EIP || 0), 'green', ev.core_id, ev.tick, undefined, 'scheduler');
         break;
       }
       case 'sched_decision': {
@@ -1006,7 +1067,7 @@ export const useCpuStore = defineStore('cpu', () => {
         // normalize so consumers see an empty array.
         const rq = ev.ready_queue ?? [];
         readyQueue.value = rq;
-        pushLog(formatLog.schedule(ev.from_pid, ev.to_pid, ev.reason, rq), 'yellow');
+        pushLog(formatLog.schedule(ev.from_pid, ev.to_pid, ev.reason, rq), 'yellow', ev.core_id, ev.tick, undefined, 'scheduler');
         break;
       }
       case 'wake': {
@@ -1017,7 +1078,7 @@ export const useCpuStore = defineStore('cpu', () => {
         // exists so wakes are not conflated with scheduling decisions.
         const rq = ev.ready_queue ?? [];
         readyQueue.value = rq;
-        pushLog(formatLog.wake(ev.pid, ev.from_reason, rq), 'yellow');
+        pushLog(formatLog.wake(ev.pid, ev.from_reason, rq), 'yellow', ev.core_id, ev.tick, undefined, 'scheduler');
         break;
       }
       case 'init_reap': {
@@ -1034,7 +1095,7 @@ export const useCpuStore = defineStore('cpu', () => {
           const idx = procs.value.findIndex(x => x.pid === r.child_pid);
           if (idx >= 0) procs.value.splice(idx, 1);
         }
-        pushLog(formatLog.initReap(ev.init_pid, ev.reaps), 'yellow');
+        pushLog(formatLog.initReap(ev.init_pid, ev.reaps), 'yellow', ev.core_id, ev.tick, undefined, 'scheduler');
         break;
       }
       case 'process_state': {
@@ -1045,11 +1106,24 @@ export const useCpuStore = defineStore('cpu', () => {
           // The kernel attaches exit_code on the ZOMBIE transition so the
           // panel does not need to wait for the next full procs snapshot.
           if (ev.exit_code !== undefined) p.exit_code = ev.exit_code;
+          // Stamp the local tick when entering BLOCKED so the Concurrency view
+          // can render "esperando hace N ticks" without waiting for the next
+          // snapshot. Clear on any other transition to avoid stale residue.
+          if (ev.state === 'BLOCKED') {
+            p.blocked_since = tick.value;
+          } else {
+            p.blocked_since = undefined;
+          }
         }
         // Mantener wait_queue sincronizada con BLOCKED ⇄ otros estados.
         if (ev.state === 'BLOCKED') {
           if (!waitQueue.value.find(w => w.pid === ev.pid)) {
-            waitQueue.value.push({ pid: ev.pid, name: p?.name ?? `P${ev.pid}`, reason: ev.reason ?? '' });
+            waitQueue.value.push({
+              pid: ev.pid,
+              name: p?.name ?? `P${ev.pid}`,
+              reason: ev.reason ?? '',
+              blocked_since: tick.value,
+            });
           }
         } else {
           waitQueue.value = waitQueue.value.filter(w => w.pid !== ev.pid);
@@ -1057,7 +1131,7 @@ export const useCpuStore = defineStore('cpu', () => {
         break;
       }
       case 'syscall':
-        pushLog(formatLog.syscall(ev.name, ev.args, ev.result, ev.pid), 'green');
+        pushLog(formatLog.syscall(ev.name, ev.args, ev.result, ev.pid), 'green', ev.core_id, ev.tick);
         break;
       case 'console_out':
         consoleChunks.value.push({
@@ -1095,7 +1169,7 @@ export const useCpuStore = defineStore('cpu', () => {
           };
         }
         if (ev.role === 'viewer') {
-          pushLog(formatLog.spectatorMode(ev.label || ev.id.slice(0, 6)), 'cyan');
+          pushLog(formatLog.spectatorMode(ev.label || ev.id.slice(0, 6)), 'cyan', undefined, undefined, 'global');
         }
         break;
       case 'presence':
@@ -1123,9 +1197,9 @@ export const useCpuStore = defineStore('cpu', () => {
       case 'error':
         lastError.value = ev.message;
         if (ev.code) {
-          pushLog(formatLog.backendError(ev.code, ev.params, ev.message), 'red');
+          pushLog(formatLog.backendError(ev.code, ev.params, ev.message), 'red', undefined, undefined, 'global');
         } else {
-          pushLog(formatLog.genericErr(ev.message), 'red');
+          pushLog(formatLog.genericErr(ev.message), 'red', undefined, undefined, 'global');
         }
         break;
       case 'mem_read':
@@ -1146,7 +1220,7 @@ export const useCpuStore = defineStore('cpu', () => {
         // the idle case; the dedicated core_idle event sets the flag back.
         if (ev.pid !== 0) c.running_idle = false;
         markCoreActive(c, ev.core_id);
-        pushLog(formatLog.coreAssign(ev.core_id, ev.pid), 'amber', ev.core_id);
+        pushLog(formatLog.coreAssign(ev.core_id, ev.pid), 'amber', ev.core_id, ev.tick);
         if (isSelected(ev.core_id)) currentPID.value = ev.pid;
         break;
       }
@@ -1154,7 +1228,7 @@ export const useCpuStore = defineStore('cpu', () => {
         const c = ensureCoreSlot(ev.core_id);
         c.current_pid = 0;
         c.running_idle = false;
-        pushLog(formatLog.coreRelease(ev.core_id, ev.pid, ev.reason), 'amber', ev.core_id);
+        pushLog(formatLog.coreRelease(ev.core_id, ev.pid, ev.reason), 'amber', ev.core_id, ev.tick);
         if (isSelected(ev.core_id)) currentPID.value = 0;
         break;
       }
@@ -1172,29 +1246,29 @@ export const useCpuStore = defineStore('cpu', () => {
         switch (ev.op) {
           case 'create':
             // Object already added above; nothing else to track.
-            pushLog(formatLog.mutexCreated(ev.mutex_id, ev.pid), 'green');
+            pushLog(formatLog.mutexCreated(ev.mutex_id, ev.pid), 'green', ev.core_id, ev.tick);
             break;
           case 'acquired':
             m.holder = ev.pid;
             m.waiters = ev.waiters ?? [];
-            pushLog(formatLog.mutexAcquired(ev.mutex_id, ev.pid), 'green');
+            pushLog(formatLog.mutexAcquired(ev.mutex_id, ev.pid), 'green', ev.core_id, ev.tick);
             break;
           case 'waiting':
             m.waiters = ev.waiters ?? [];
-            pushLog(formatLog.mutexWaiting(ev.mutex_id, ev.pid), 'yellow');
+            pushLog(formatLog.mutexWaiting(ev.mutex_id, ev.pid), 'yellow', ev.core_id, ev.tick);
             break;
           case 'released':
             m.holder = -1;
             m.waiters = ev.waiters ?? [];
-            pushLog(formatLog.mutexReleased(ev.mutex_id, ev.pid), 'cyan');
+            pushLog(formatLog.mutexReleased(ev.mutex_id, ev.pid), 'cyan', ev.core_id, ev.tick);
             break;
           case 'handoff':
             m.holder = ev.next_pid ?? -1;
             m.waiters = ev.waiters ?? [];
-            pushLog(formatLog.mutexHandoff(ev.mutex_id, ev.pid, ev.next_pid ?? -1), 'green');
+            pushLog(formatLog.mutexHandoff(ev.mutex_id, ev.pid, ev.next_pid ?? -1), 'green', ev.core_id, ev.tick);
             break;
           case 'rejected':
-            pushLog(formatLog.mutexRejected(ev.mutex_id, ev.pid), 'red');
+            pushLog(formatLog.mutexRejected(ev.mutex_id, ev.pid), 'red', ev.core_id, ev.tick);
             break;
         }
         break;
@@ -1236,7 +1310,7 @@ export const useCpuStore = defineStore('cpu', () => {
         // just flash both PCBs so the user notices the relationship.
         flashPID(ev.parent_pid);
         flashPID(ev.child_pid);
-        pushLog(formatLog.forkSpawn(ev.parent_pid, ev.child_pid, ev.is_vfork), 'cyan');
+        pushLog(formatLog.forkSpawn(ev.parent_pid, ev.child_pid, ev.is_vfork), 'cyan', ev.core_id, ev.tick);
         break;
       }
       case 'reparent': {
@@ -1247,7 +1321,7 @@ export const useCpuStore = defineStore('cpu', () => {
         // waiting for the next procs snapshot.
         const moved = procs.value.find(x => x.pid === ev.pid);
         if (moved) moved.parent_pid = ev.new_parent;
-        pushLog(formatLog.reparent(ev.pid, ev.old_parent, ev.new_parent), 'cyan');
+        pushLog(formatLog.reparent(ev.pid, ev.old_parent, ev.new_parent), 'cyan', ev.core_id, ev.tick);
         break;
       }
       case 'thread_create': {
@@ -1257,12 +1331,12 @@ export const useCpuStore = defineStore('cpu', () => {
         // the panel to fold the new TID under its leader.
         flashPID(ev.creator_pid);
         flashPID(ev.tid);
-        pushLog(formatLog.threadCreate(ev.tid, ev.tgid, ev.creator_pid), 'cyan');
+        pushLog(formatLog.threadCreate(ev.tid, ev.tgid, ev.creator_pid), 'cyan', ev.core_id, ev.tick);
         break;
       }
       case 'thread_exit': {
         flashPID(ev.tid);
-        pushLog(formatLog.threadExit(ev.tid, ev.tgid, ev.retval), 'yellow');
+        pushLog(formatLog.threadExit(ev.tid, ev.tgid, ev.retval), 'yellow', ev.core_id, ev.tick);
         break;
       }
       case 'wait_op': {
@@ -1282,9 +1356,9 @@ export const useCpuStore = defineStore('cpu', () => {
           // consolidated EventInitReap, formatted by formatLog.initReap.
           // So a wait_op event reaching here is always a regular parent
           // collecting through sys_waitpid.
-          pushLog(formatLog.waitReap(ev.pid, ev.child_pid, ev.exit_code ?? 0), 'yellow');
+          pushLog(formatLog.waitReap(ev.pid, ev.child_pid, ev.exit_code ?? 0), 'yellow', ev.core_id, ev.tick);
         } else if (ev.op === 'call') {
-          pushLog(formatLog.waitCall(ev.pid, ev.child_pid), 'cyan');
+          pushLog(formatLog.waitCall(ev.pid, ev.child_pid), 'cyan', ev.core_id, ev.tick);
         }
         break;
       }
@@ -1298,19 +1372,19 @@ export const useCpuStore = defineStore('cpu', () => {
         s.waiters = ev.waiters ?? [];
         switch (ev.op) {
           case 'create':
-            pushLog(formatLog.semCreated(ev.sem_id, ev.count), 'green');
+            pushLog(formatLog.semCreated(ev.sem_id, ev.count), 'green', ev.core_id, ev.tick);
             break;
           case 'wait_immediate':
-            pushLog(formatLog.semWait(ev.sem_id, ev.pid, ev.count), 'cyan');
+            pushLog(formatLog.semWait(ev.sem_id, ev.pid, ev.count), 'cyan', ev.core_id, ev.tick);
             break;
           case 'wait_blocked':
-            pushLog(formatLog.semBlocked(ev.sem_id, ev.pid), 'yellow');
+            pushLog(formatLog.semBlocked(ev.sem_id, ev.pid), 'yellow', ev.core_id, ev.tick);
             break;
           case 'signal':
-            pushLog(formatLog.semSignal(ev.sem_id, ev.pid, ev.count), 'green');
+            pushLog(formatLog.semSignal(ev.sem_id, ev.pid, ev.count), 'green', ev.core_id, ev.tick);
             break;
           case 'handoff':
-            pushLog(formatLog.semHandoff(ev.sem_id, ev.pid, ev.next_pid ?? -1), 'green');
+            pushLog(formatLog.semHandoff(ev.sem_id, ev.pid, ev.next_pid ?? -1), 'green', ev.core_id, ev.tick);
             break;
         }
         break;
@@ -1340,8 +1414,25 @@ export const useCpuStore = defineStore('cpu', () => {
     setTimeout(() => flashingPIDs.delete(pid), 800);
   }
 
-  function pushLog(text: string, color: string, coreId?: number) {
-    log.value.push({ ts: Date.now(), text, color, coreId });
+  function pushLog(
+    text: string,
+    color: string,
+    coreId?: number,
+    tick?: number,
+    scope?: 'global',
+    kind?: 'scheduler',
+  ) {
+    // Derive inKernel from the live per-core mode tracked in cores.value.
+    // mode_switch events update that value before subsequent pushLog calls
+    // (the WS handler dispatches events in arrival order), so a kernel-mode
+    // instruction that arrives right after mode_switch{to:0} is correctly
+    // tagged. Mode 0 = PL0 (kernel), 3 = PL3 (user).
+    let inKernel: boolean | undefined;
+    if (coreId !== undefined) {
+      const c = cores.value.find(x => x.id === coreId);
+      if (c) inKernel = c.mode === 0;
+    }
+    log.value.push({ ts: Date.now(), text, color, coreId, tick, scope, inKernel, kind });
     if (log.value.length > 500) log.value.splice(0, log.value.length - 500);
   }
 

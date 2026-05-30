@@ -42,9 +42,10 @@ export type ColumnSide = 'left' | 'right';
 // console below it via two extra weights. Drag of the horizontal handles
 // rewrites the weights so the user can rebalance any pair. Cores lives alone
 // in the left column, so no weight is tracked for it.
-export type StackPanelName = 'processes' | 'queues' | 'ipc' | 'middleTabs' | 'middleConsole';
+export type StackPanelName = 'cpu' | 'processes' | 'queues' | 'ipc' | 'middleTabs' | 'middleConsole';
 
 export interface PanelHeights {
+  cpu: number;
   processes: number;
   queues: number;
   ipc: number;
@@ -73,6 +74,12 @@ interface PrefsState {
   mode: PresentationMode;
   density: Density;
   narratorsEnabled: boolean;
+  // schedulerAnimationEnabled controls the QueuesPanel ready-queue micro
+  // animations: slide-in for arrivals (wake / new), slide-out for dispatches
+  // and a permanent pulse on the head. Independent from narratorsEnabled so
+  // a teacher can keep PCB-copy narration off but still surface the queue
+  // flow, or vice versa. Off by default in compact mode.
+  schedulerAnimationEnabled: boolean;
   // Below this tick interval (ms) narrators stop firing. Pedagogically:
   // visual narration of every event is meaningless once the CPU ticks faster
   // than the eye can resolve. Configurable so the teacher can widen or
@@ -112,6 +119,7 @@ const DEFAULTS: PrefsState = {
   mode: 'pedagogic',
   density: 'comfortable',
   narratorsEnabled: true,
+  schedulerAnimationEnabled: true,
   narratorMinTickMs: 200,
   theme: 'amber',
   locale: DEFAULT_LOCALE,
@@ -126,8 +134,9 @@ const DEFAULTS: PrefsState = {
     rightPx: 400,
   },
   panelHeights: {
+    cpu: 1.4,
     processes: 1,
-    queues: 1,
+    queues: 1.2,
     ipc: 1,
     // Console arranca un poco más alta que la pila de tabs para preservar la
     // sensación previa al resizer (cuando ConsolePanel crecía con el contenido).
@@ -213,7 +222,7 @@ export function readStoredTheme(): Theme {
 // fields on load and start fresh from the all-expanded defaults. Other prefs
 // (theme, locale, sidebar, mode, density, narrators) are kept regardless,
 // since their schemas have not changed.
-const PANELS_RESET_VERSION = 3;
+const PANELS_RESET_VERSION = 4;
 
 function loadFromStorage(): PrefsState {
   if (typeof window === 'undefined') return DEFAULTS;
@@ -256,6 +265,10 @@ export const usePreferencesStore = defineStore('preferences', () => {
   const mode = ref<PresentationMode>(initial.mode);
   const density = ref<Density>(initial.density);
   const narratorsEnabled = ref(initial.narratorsEnabled);
+  // sanitizePanelHeights et al. silently fall back to DEFAULTS on a missing
+  // field, but the legacy storage shape predates schedulerAnimationEnabled so
+  // a strict `?? DEFAULTS` keeps the new flag on for returning users.
+  const schedulerAnimationEnabled = ref(initial.schedulerAnimationEnabled ?? DEFAULTS.schedulerAnimationEnabled);
   const narratorMinTickMs = ref(initial.narratorMinTickMs);
   const theme = ref<Theme>(initial.theme);
   const locale = ref<Locale>(isLocale(initial.locale) ? initial.locale : DEFAULT_LOCALE);
@@ -283,6 +296,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
       mode: mode.value,
       density: density.value,
       narratorsEnabled: narratorsEnabled.value,
+      schedulerAnimationEnabled: schedulerAnimationEnabled.value,
       narratorMinTickMs: narratorMinTickMs.value,
       theme: theme.value,
       locale: locale.value,
@@ -293,7 +307,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
   }
 
   watch(
-    [sidebarCollapsed, showInit, showInitTouched, mode, density, narratorsEnabled, narratorMinTickMs, theme, locale, panelsCollapsed, columnWidths, panelHeights],
+    [sidebarCollapsed, showInit, showInitTouched, mode, density, narratorsEnabled, schedulerAnimationEnabled, narratorMinTickMs, theme, locale, panelsCollapsed, columnWidths, panelHeights],
     () => {
       try {
         window.localStorage.setItem(STORAGE_KEY, serialize());
@@ -405,8 +419,16 @@ export const usePreferencesStore = defineStore('preferences', () => {
   function setMode(m: PresentationMode) {
     mode.value = m;
     // Pedagogic / projector default to narrators on for first-time users; they
-    // can still toggle narrators off explicitly afterwards.
-    if (m !== 'compact') narratorsEnabled.value = true;
+    // can still toggle narrators off explicitly afterwards. Scheduler
+    // animation follows the same rule: in compact mode it goes off so the
+    // ready queue stops shuffling chips around; in the richer modes it goes
+    // back on to surface the wake/dispatch flow.
+    if (m !== 'compact') {
+      narratorsEnabled.value = true;
+      schedulerAnimationEnabled.value = true;
+    } else {
+      schedulerAnimationEnabled.value = false;
+    }
   }
 
   function setTheme(t: Theme) {
@@ -448,6 +470,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     mode,
     density,
     narratorsEnabled,
+    schedulerAnimationEnabled,
     narratorMinTickMs,
     theme,
     locale,

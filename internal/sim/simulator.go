@@ -133,8 +133,17 @@ func New(cfg Config) *Simulator {
 		progs[d.Name] = d
 	}
 	cores := max(cfg.NumCores, 1)
+	k := kernel.NewMulti(cpu.DefaultMemSize, cores)
+	// Default the swapper on so the simulator behaves like a real OS out of
+	// the box: every demo runs against a kernel that always has a process
+	// to schedule (PID 0 idle threads on otherwise-free cores), the run
+	// loop never auto-stops, and the student sees the classical "what does
+	// the CPU do with nothing to run?" answer — Silberschatz §5.5 calls
+	// this the "kernel idle task" on SMP. The toggle remains so a class
+	// can flip it off to compare against the legacy auto-stop model.
+	k.IdleTaskEnabled = true
 	return &Simulator{
-		kernel:   kernel.NewMulti(cpu.DefaultMemSize, cores),
+		kernel:   k,
 		programs: progs,
 		clients:  make(map[*Client]struct{}),
 		events:   NewEventRing(DefaultEventRingCapacity),
@@ -182,12 +191,19 @@ func (s *Simulator) LoadProgram(name string) error {
 		s.mu.Unlock()
 		return err
 	}
+	// kthreadd (PID 2) + one kernel/N task per core hang off swapper (PID 0)
+	// the same way Linux ships them. They are never scheduled — the frontend
+	// derives their RUN/SLEEP appearance from each core's live mode — but
+	// having them as real PCBs gives the process tree a single ancestor
+	// chain: swapper → {init → user procs, kthreadd → kernel/N}.
+	s.kernel.SpawnKThreadd()
+	s.kernel.SpawnKernelThreads()
 	// Swapper (PID 0) is spawned alongside init when the toggle is on so
 	// the very first DispatchIdleCores call can bind it to whatever cores
 	// remain idle. With the toggle off this is skipped, leaving the
 	// legacy auto-stop semantics untouched.
 	if s.kernel.IdleTaskEnabled {
-		if _, err := s.kernel.SpawnIdle(); err != nil {
+		if err := s.kernel.SpawnIdle(); err != nil {
 			s.mu.Unlock()
 			return err
 		}
@@ -652,7 +668,7 @@ func (s *Simulator) SetIdleTaskEnabled(enabled bool) error {
 		// and confuse the snapshot the next LoadProgram broadcasts.
 		// InitPID being non-zero is the proxy for "demo loaded".
 		if s.kernel.InitPID != 0 {
-			if _, err := s.kernel.SpawnIdle(); err != nil {
+			if err := s.kernel.SpawnIdle(); err != nil {
 				s.mu.Unlock()
 				return err
 			}
@@ -785,6 +801,11 @@ func coreSnapshot(core *kernel.Core) map[string]any {
 		// off this flag when the swapper is bound. Default false keeps
 		// older clients unaffected.
 		"running_idle": core.RunningIdle,
+		// idle_ticks counts cycles the per-core swapper has spent in HLT.
+		// The frontend renders this as the visible heartbeat of the
+		// idle thread so the student sees activity without the log
+		// drowning in repeated halt entries.
+		"idle_ticks": core.IdleTicks,
 	}
 }
 
@@ -797,25 +818,31 @@ func (s *Simulator) waitQueueLocked() []map[string]any {
 			continue
 		}
 		list = append(list, map[string]any{
-			"pid":    p.PID,
-			"name":   p.Name,
-			"reason": p.BlockedOn,
+			"pid":           p.PID,
+			"name":          p.Name,
+			"reason":        p.BlockedOn,
+			"blocked_since": p.BlockedSince,
 		})
 	}
 	return list
 }
 
 func (s *Simulator) processListLocked() []map[string]any {
-	list := make([]map[string]any, 0, len(s.kernel.Processes))
-	// Walk from PID 0 only when the swapper is wired up; otherwise stay at
-	// the legacy PID 1 starting point so existing demos keep their exact
-	// snapshot shape.
-	startPID := 1
-	if s.kernel.IdleTaskEnabled && s.kernel.Processes[0] != nil {
-		startPID = 0
+	list := make([]map[string]any, 0, len(s.kernel.Processes)+len(s.kernel.IdleByCore))
+	// Per-core swappers live in IdleByCore (one PCB per core, all sharing
+	// PID 0 with negative TIDs to disambiguate). Emit them first so the
+	// frontend can render the compact kernel-idle band above the regular
+	// process tree. Skipped entirely when the toggle is off so legacy
+	// snapshots keep their exact shape.
+	if s.kernel.IdleTaskEnabled {
+		for _, pcb := range s.kernel.IdleByCore {
+			if pcb != nil {
+				list = append(list, pcb.Snapshot())
+			}
+		}
 	}
 	maxPID := s.maxKnownPIDLocked()
-	for pid := startPID; pid <= maxPID; pid++ {
+	for pid := 1; pid <= maxPID; pid++ {
 		p, ok := s.kernel.Processes[pid]
 		if !ok {
 			continue

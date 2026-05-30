@@ -172,7 +172,7 @@ func (c *CPU) SetReg32(name string, val uint32) error {
 		return nil
 	}
 	*p = val
-	c.Emit(EventRegWrite{CoreID: c.CoreID, Reg: name, Old: old, New: val})
+	c.Emit(EventRegWrite{CoreID: c.CoreID, Tick: c.Tick, Reg: name, Old: old, New: val})
 	return nil
 }
 
@@ -223,7 +223,7 @@ func (c *CPU) FlagSet(flag uint32, on bool) {
 		c.R.EFLAGS &^= flag
 	}
 	if old != c.R.EFLAGS {
-		c.Emit(EventRegWrite{CoreID: c.CoreID, Reg: "EFLAGS", Old: old, New: c.R.EFLAGS})
+		c.Emit(EventRegWrite{CoreID: c.CoreID, Tick: c.Tick, Reg: "EFLAGS", Old: old, New: c.R.EFLAGS})
 	}
 }
 
@@ -275,6 +275,7 @@ func (c *CPU) Step() ([]Event, error) {
 			writeFaultMirror(c.Mem, mf.Addr, errorCode)
 			c.Emit(EventPageFault{
 				CoreID:     c.CoreID,
+				Tick:       c.Tick,
 				Addr:       mf.Addr,
 				Mode:       mf.Mode,
 				PermNeeded: mf.PermNeeded,

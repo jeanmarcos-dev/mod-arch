@@ -7,18 +7,12 @@ import (
 // TestSetIdleTaskEnabled_TogglesFlag is the primary contract: the WS command
 // flips a kernel-level switch, and any subsequent LoadProgram observes it.
 // The simulator must guard the kernel mutation with s.mu so concurrent
-// callers (the run-loop goroutine and the WS handler) cannot race.
+// callers (the run-loop goroutine and the WS handler) cannot race. Default
+// is ON to match the real-OS model (Silberschatz §5.5 SMP idle thread).
 func TestSetIdleTaskEnabled_TogglesFlag(t *testing.T) {
 	s := New(Config{NumCores: 1})
-	if s.kernel.IdleTaskEnabled {
-		t.Fatal("fresh simulator has IdleTaskEnabled=true; default must be false to keep legacy demos honest")
-	}
-
-	if err := s.SetIdleTaskEnabled(true); err != nil {
-		t.Fatalf("SetIdleTaskEnabled(true): %v", err)
-	}
 	if !s.kernel.IdleTaskEnabled {
-		t.Error("SetIdleTaskEnabled(true) left the kernel flag false")
+		t.Fatal("fresh simulator has IdleTaskEnabled=false; default must be true so the swapper is wired up out of the box")
 	}
 
 	if err := s.SetIdleTaskEnabled(false); err != nil {
@@ -26,6 +20,13 @@ func TestSetIdleTaskEnabled_TogglesFlag(t *testing.T) {
 	}
 	if s.kernel.IdleTaskEnabled {
 		t.Error("SetIdleTaskEnabled(false) left the kernel flag true")
+	}
+
+	if err := s.SetIdleTaskEnabled(true); err != nil {
+		t.Fatalf("SetIdleTaskEnabled(true): %v", err)
+	}
+	if !s.kernel.IdleTaskEnabled {
+		t.Error("SetIdleTaskEnabled(true) left the kernel flag false")
 	}
 }
 
@@ -41,19 +42,23 @@ func TestSetIdleTaskEnabled_SpawnsImmediatelyWhenLoaded(t *testing.T) {
 			Procs: []Proc{{Name: "p1", Bytes: []byte{0xF4}}},
 		}},
 	})
+	// Force OFF first so the test exercises the "flip ON mid-run" path.
+	if err := s.SetIdleTaskEnabled(false); err != nil {
+		t.Fatalf("SetIdleTaskEnabled(false): %v", err)
+	}
 	if err := s.LoadProgram("hlt"); err != nil {
 		t.Fatalf("LoadProgram: %v", err)
 	}
-	if _, exists := s.kernel.Processes[0]; exists {
-		t.Fatal("setup: Processes[0] already present before SetIdleTaskEnabled")
+	if len(s.kernel.IdleByCore) != 0 {
+		t.Fatal("setup: IdleByCore already populated before SetIdleTaskEnabled")
 	}
 
 	if err := s.SetIdleTaskEnabled(true); err != nil {
 		t.Fatalf("SetIdleTaskEnabled: %v", err)
 	}
 
-	if _, exists := s.kernel.Processes[0]; !exists {
-		t.Error("Processes[0] still nil after SetIdleTaskEnabled(true) on a loaded demo")
+	if len(s.kernel.IdleByCore) == 0 || s.kernel.IdleByCore[0] == nil {
+		t.Error("IdleByCore still empty after SetIdleTaskEnabled(true) on a loaded demo")
 	}
 }
 
@@ -87,8 +92,8 @@ func TestSetIdleTaskEnabled_EvictsButKeepsPCB(t *testing.T) {
 			t.Errorf("Core %d still RunningIdle after disabling the toggle", c.ID)
 		}
 	}
-	if _, exists := s.kernel.Processes[0]; !exists {
-		t.Error("Processes[0] cleared after SetIdleTaskEnabled(false); the PCB should stay dormant to avoid spawn thrash")
+	if len(s.kernel.IdleByCore) == 0 || s.kernel.IdleByCore[0] == nil {
+		t.Error("IdleByCore cleared after SetIdleTaskEnabled(false); per-core PCBs should stay dormant to avoid spawn thrash")
 	}
 }
 
@@ -110,8 +115,8 @@ func TestLoadProgram_SpawnsIdleWhenEnabled(t *testing.T) {
 		t.Fatalf("LoadProgram: %v", err)
 	}
 
-	if _, exists := s.kernel.Processes[0]; !exists {
-		t.Error("Processes[0] not spawned by LoadProgram when IdleTaskEnabled was true")
+	if len(s.kernel.IdleByCore) == 0 || s.kernel.IdleByCore[0] == nil {
+		t.Error("IdleByCore not populated by LoadProgram when IdleTaskEnabled was true")
 	}
 }
 
@@ -127,11 +132,15 @@ func TestLoadProgram_NoIdleWhenDisabled(t *testing.T) {
 			Procs: []Proc{{Name: "p1", Bytes: []byte{0xF4}}},
 		}},
 	})
+	// Default is ON; the test asserts the OFF branch, so flip first.
+	if err := s.SetIdleTaskEnabled(false); err != nil {
+		t.Fatalf("SetIdleTaskEnabled(false): %v", err)
+	}
 	if err := s.LoadProgram("hlt"); err != nil {
 		t.Fatalf("LoadProgram: %v", err)
 	}
-	if _, exists := s.kernel.Processes[0]; exists {
-		t.Error("Processes[0] present after LoadProgram with idle disabled")
+	if len(s.kernel.IdleByCore) != 0 {
+		t.Error("IdleByCore populated after LoadProgram with idle disabled")
 	}
 }
 
@@ -181,6 +190,9 @@ func TestProcessListLocked_OmitsPID0WhenDisabled(t *testing.T) {
 			Procs: []Proc{{Name: "p1", Bytes: []byte{0xF4}}},
 		}},
 	})
+	if err := s.SetIdleTaskEnabled(false); err != nil {
+		t.Fatalf("SetIdleTaskEnabled(false): %v", err)
+	}
 	if err := s.LoadProgram("hlt"); err != nil {
 		t.Fatalf("LoadProgram: %v", err)
 	}
@@ -242,7 +254,7 @@ func TestStepOnce_NoHaltedBroadcastWithIdle(t *testing.T) {
 // running the swapper apart from one with no proc at all.
 func TestCoreSnapshot_ExposesRunningIdle(t *testing.T) {
 	s := New(Config{NumCores: 1})
-	if _, err := s.kernel.SpawnIdle(); err != nil {
+	if err := s.kernel.SpawnIdle(); err != nil {
 		t.Fatalf("SpawnIdle: %v", err)
 	}
 	s.kernel.IdleTaskEnabled = true

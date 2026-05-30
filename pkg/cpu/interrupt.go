@@ -57,6 +57,7 @@ func (c *CPU) dispatchIRQ(vector uint8, source string) error {
 
 	fire := EventIRQFire{
 		CoreID:   c.CoreID,
+		Tick:     c.Tick,
 		Vector:   vector,
 		Source:   source,
 		Handler:  handler,
@@ -87,7 +88,7 @@ func (c *CPU) dispatchIRQ(vector uint8, source string) error {
 	c.Mode = ModeKernel
 	c.R.CS = SelKernelCode
 	if oldMode != ModeKernel {
-		c.Emit(EventModeSwitch{CoreID: c.CoreID, From: oldMode, To: ModeKernel, Cause: causeOf(source)})
+		c.Emit(EventModeSwitch{CoreID: c.CoreID, Tick: c.Tick, From: oldMode, To: ModeKernel, Cause: causeOf(source)})
 	}
 
 	// Push the interrupt frame now that we are on the kernel stack.
@@ -152,7 +153,7 @@ func (c *CPU) handleIRET() error {
 		c.Mode = ModeUser
 		c.R.ESP = c.SavedUserESP
 		c.R.SS = c.SavedUserSS
-		c.Emit(EventModeSwitch{CoreID: c.CoreID, From: oldMode, To: ModeUser, Cause: "IRET"})
+		c.Emit(EventModeSwitch{CoreID: c.CoreID, Tick: c.Tick, From: oldMode, To: ModeUser, Cause: "IRET"})
 	}
 
 	return nil

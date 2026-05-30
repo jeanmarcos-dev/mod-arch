@@ -28,7 +28,7 @@ func TestSpawnInit_PID1(t *testing.T) {
 		t.Errorf("init.Name = %q, want \"init\"", init.Name)
 	}
 	if init.ParentPID != 0 {
-		t.Errorf("init.ParentPID = %d, want 0 (no parent)", init.ParentPID)
+		t.Errorf("init.ParentPID = %d, want 0 (swapper/PID 0, Linux-style)", init.ParentPID)
 	}
 }
 

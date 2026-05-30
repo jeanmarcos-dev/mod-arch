@@ -29,10 +29,22 @@ ensure-air:
 	fi
 
 watch: ensure-air
-	@echo ">> watch: Go (air) :8080 + Vite :5173 — abrí http://localhost:5173"
-	@( "$(AIR_BIN)" -c .air.toml 2>&1 | sed -u 's/^/[go]  /' ) & go_pid=$$!; \
+	@echo ">> watch: levantando backend Go (air) en :8080..."
+	@set -e; \
+	( "$(AIR_BIN)" -c .air.toml 2>&1 | sed -u 's/^/[go]  /' ) & go_pid=$$!; \
+	trap 'kill 0 2>/dev/null; wait 2>/dev/null' INT TERM EXIT; \
+	echo ">> watch: esperando a que el backend responda en /api/health..."; \
+	tries=0; \
+	until curl -fsS -o /dev/null http://localhost:8080/api/health 2>/dev/null; do \
+		tries=$$((tries+1)); \
+		if [ $$tries -gt 60 ]; then \
+			echo ">> watch: el backend no respondió en 30s. Revise los logs [go] arriba." >&2; \
+			exit 1; \
+		fi; \
+		sleep 0.5; \
+	done; \
+	echo ">> watch: backend listo. Abra http://localhost:5173 cuando Vite termine de arrancar."; \
 	( cd web && npm run dev 2>&1 | sed -u 's/^/[web] /' ) & web_pid=$$!; \
-	trap 'kill $$go_pid $$web_pid 2>/dev/null; wait 2>/dev/null' INT TERM; \
 	wait $$go_pid $$web_pid
 
 test:

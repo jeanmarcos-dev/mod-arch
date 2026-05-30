@@ -21,6 +21,12 @@ const cpu = useCpuStore();
 const narrators = useNarrators();
 const animator = useNarratorAnimation();
 
+// suppressBanner hides the transient flip card without touching the ambient
+// tint. Callers that already show mode_switch events somewhere else (e.g. the
+// multi-column Event Log) pass true so the user does not see the same chip
+// twice. The tint stays on because it is context, not animation.
+const props = defineProps<{ suppressBanner?: boolean }>();
+
 interface BannerInfo {
   id: number;
   coreId: number;
@@ -103,7 +109,7 @@ function label(m: 'user' | 'kernel') {
 
     <Transition name="mf-banner">
       <div
-        v-if="banner"
+        v-if="banner && !props.suppressBanner"
         ref="bannerRef"
         :key="banner.id"
         class="mode-flip__banner"

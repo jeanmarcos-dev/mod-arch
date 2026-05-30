@@ -105,6 +105,7 @@ func New(cfg Config) *Server {
 // Routes registers the HTTP endpoints on a mux.
 func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/health", s.handleHealth)
+	mux.HandleFunc("GET /api/session", s.handleSession)
 	mux.HandleFunc("GET /api/programs", s.handlePrograms)
 	mux.HandleFunc("GET /api/categories", s.handleCategories)
 	mux.HandleFunc("GET /api/memory", s.handleMemory)
@@ -324,6 +325,34 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		"privileged": priv,
 		"max_public": s.manager.MaxPublic(),
 	})
+}
+
+// handleSession bootstraps the owner session for SPA clients that did not
+// receive the initial HTML from Go — most notably the Vite dev server, which
+// proxies /api and /ws to the backend but serves index.html itself, so
+// handleRoot (and the mc_sid cookie it sets) never runs. Calling /api/session
+// before opening the WebSocket guarantees the cookie exists; the endpoint is
+// idempotent in production (the cookie is already set by handleRoot).
+func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
+	sess, role := s.resolveSessionAndRole(r)
+	if sess == nil {
+		created, err := s.getOrCreateSession(w, r)
+		if err != nil {
+			switch {
+			case errors.Is(err, sessions.ErrCapReached):
+				writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "cap reached"})
+			case errors.Is(err, ErrAccessDenied):
+				writeJSON(w, http.StatusForbidden, map[string]any{"error": "access denied"})
+			default:
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			}
+			return
+		}
+		sess = created
+		role = sessions.RoleOwner
+	}
+	sess.Touch()
+	writeJSON(w, http.StatusOK, s.sessionInfoMessage(sess, role))
 }
 
 func (s *Server) handlePrograms(w http.ResponseWriter, _ *http.Request) {

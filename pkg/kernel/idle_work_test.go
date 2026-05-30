@@ -13,7 +13,7 @@ import (
 // run loop to a halted state every time a user proc blocks.
 func TestHasWork_IdleEnabled_ReturnsTrue(t *testing.T) {
 	k := New(cpu.DefaultMemSize)
-	if _, err := k.SpawnIdle(); err != nil {
+	if err := k.SpawnIdle(); err != nil {
 		t.Fatalf("SpawnIdle: %v", err)
 	}
 	k.IdleTaskEnabled = true
@@ -24,7 +24,7 @@ func TestHasWork_IdleEnabled_ReturnsTrue(t *testing.T) {
 		c.CPU.PendingIRQs = nil
 	}
 	if !k.HasWork() {
-		t.Error("HasWork() = false with IdleTaskEnabled and Processes[0] present; want true (swapper itself is work)")
+		t.Error("HasWork() = false with idle enabled and per-core swappers spawned; want true (the swappers themselves are work)")
 	}
 }
 
@@ -34,7 +34,7 @@ func TestHasWork_IdleEnabled_ReturnsTrue(t *testing.T) {
 // terminal-halted broadcast.
 func TestHasWork_IdleDisabled_MatchesLegacy(t *testing.T) {
 	k := New(cpu.DefaultMemSize)
-	if _, err := k.SpawnIdle(); err != nil {
+	if err := k.SpawnIdle(); err != nil {
 		t.Fatalf("SpawnIdle: %v", err)
 	}
 	// Flag stays false. Spawning the PCB alone must not lie about HasWork:
@@ -57,7 +57,7 @@ func TestHasWork_IdleDisabled_MatchesLegacy(t *testing.T) {
 func TestReset_PreservesIdleTaskEnabled(t *testing.T) {
 	k := New(cpu.DefaultMemSize)
 	k.IdleTaskEnabled = true
-	if _, err := k.SpawnIdle(); err != nil {
+	if err := k.SpawnIdle(); err != nil {
 		t.Fatalf("SpawnIdle: %v", err)
 	}
 
@@ -69,7 +69,7 @@ func TestReset_PreservesIdleTaskEnabled(t *testing.T) {
 	if k.IdlePID != 0 {
 		t.Errorf("Reset() left IdlePID=%d; want 0 (the swapper PCB was cleared)", k.IdlePID)
 	}
-	if _, exists := k.Processes[0]; exists {
-		t.Error("Reset() left Processes[0] in place; want it cleared so LoadProgram can re-spawn fresh")
+	if len(k.IdleByCore) != 0 {
+		t.Error("Reset() left IdleByCore populated; want it cleared so LoadProgram can re-spawn fresh per-core swappers")
 	}
 }

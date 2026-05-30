@@ -9,16 +9,23 @@ const cpu = useCpuStore();
 const mirror = useViewerMirrorStore();
 const { t } = useI18n();
 
-function tabTitle(p: PCBInfo): string {
-  const key = pinnedPID.value === p.pid
-    ? 'panels.codeAsm.tabTitlePinned'
-    : 'panels.codeAsm.tabTitleUnpinned';
-  return t(key, { pid: p.pid, name: p.name, state: p.state });
+// Each TGID renders as one tab. The leader owns the source/sourceMap; siblings
+// contribute their EIP as additional cursors so race conditions are visible
+// over the shared code instead of forcing the student to swap tabs.
+interface TGIDGroup {
+  leader: PCBInfo;
+  members: PCBInfo[]; // includes the leader; sorted by pid
 }
 
-// PID actually being displayed: follows the focused core's current_pid unless
-// the user pins another tab. When a viewer is autofollowing, the mirror takes
-// precedence so the audience sees the same pinned tab the host picked.
+interface ThreadCursor {
+  pid: number;
+  tid: number;
+  isLeader: boolean;
+  state: string;
+  coreId: number | null; // null when the thread is not currently RUN
+  offset: number; // EIP - code_base, can be negative for not-yet-loaded threads
+}
+
 const localPinnedPID = ref<number | null>(null);
 const isViewer = computed(() => cpu.sessionInfo.role === 'viewer');
 const pinnedPID = computed<number | null>(() => {
@@ -27,7 +34,6 @@ const pinnedPID = computed<number | null>(() => {
   }
   return localPinnedPID.value;
 });
-const viewingPID = computed(() => pinnedPID.value ?? cpu.currentPID);
 
 // Mirror-driven sync of the local copy so toggling autofollow off keeps the
 // last pinned PID instead of reverting to the auto follow.
@@ -37,36 +43,73 @@ watch(() => mirror.pinnedPID, (val) => {
   }
 });
 
+function tgidOf(p: PCBInfo): number {
+  return p.tgid ?? p.pid;
+}
+
+// Group every visible PCB by TGID. The leader is the member whose pid == tgid
+// (or is_leader true); when a snapshot arrives mid-clone and no leader is
+// present yet, the smallest-pid member acts as the temporary leader so the
+// tab still renders.
+const tgidGroups = computed<TGIDGroup[]>(() => {
+  const byTgid = new Map<number, PCBInfo[]>();
+  for (const p of cpu.procs) {
+    const key = tgidOf(p);
+    const bucket = byTgid.get(key);
+    if (bucket) bucket.push(p);
+    else byTgid.set(key, [p]);
+  }
+  const groups: TGIDGroup[] = [];
+  for (const [tgid, members] of byTgid) {
+    members.sort((a, b) => a.pid - b.pid);
+    const leader = members.find(m => m.is_leader || m.pid === tgid) ?? members[0];
+    groups.push({ leader, members });
+  }
+  groups.sort((a, b) => a.leader.pid - b.leader.pid);
+  return groups;
+});
+
+// The TGID actually being displayed: follows the focused core's current_pid
+// (resolved to its TGID) unless the user pins a leader. `pinnedPID` stores the
+// leader's pid, so an explicit pin always maps to exactly one group.
+const viewingTGID = computed<number | null>(() => {
+  if (pinnedPID.value) {
+    const group = tgidGroups.value.find(g => g.leader.pid === pinnedPID.value);
+    if (group) return tgidOf(group.leader);
+    return pinnedPID.value;
+  }
+  if (!cpu.currentPID) return null;
+  const proc = cpu.procs.find(p => p.pid === cpu.currentPID);
+  return proc ? tgidOf(proc) : cpu.currentPID;
+});
+
+const viewingGroup = computed<TGIDGroup | null>(() => {
+  const tgid = viewingTGID.value;
+  if (!tgid) return null;
+  return tgidGroups.value.find(g => tgidOf(g.leader) === tgid) ?? null;
+});
+
 const source = computed<string>(() => {
-  if (!viewingPID.value) return '';
-  return cpu.procSources[viewingPID.value] ?? '';
+  const tgid = viewingTGID.value;
+  if (!tgid) return '';
+  // Source lives on the leader's pid because that is the PID the backend
+  // populated procSources with on `loaded`. Threads created later via clone()
+  // share AddressSpace.CodeBase in the kernel but never get their own entry.
+  return cpu.procSources[tgid] ?? '';
 });
 
 const sourceMap = computed<SourceLine[]>(() => {
-  if (!viewingPID.value) return [];
-  return cpu.procSourceMaps[viewingPID.value] ?? [];
+  const tgid = viewingTGID.value;
+  if (!tgid) return [];
+  return cpu.procSourceMaps[tgid] ?? [];
 });
 
-// Split the C source by '\n' so we can annotate the active line. We keep the
-// numbering 1-based to match SourceLine.c_line.
 const sourceLines = computed<string[]>(() => source.value.split('\n'));
-
-const currentProc = computed(() =>
-  cpu.procs.find(p => p.pid === viewingPID.value),
-);
 
 const sortedProcs = computed(() => [...cpu.procs].sort((a, b) => a.pid - b.pid));
 
-// PIDs that are RUN on a visible core right now. Used to mark "live" tabs.
-const runningOnVisibleCores = computed(() => new Set(
-  cpu.cores.filter(c => cpu.isCoreVisible(c.id) && c.current_pid > 0).map(c => c.current_pid),
-));
-
-// Inverse mapping: which core currently holds each PID. The tabs render a
-// "C{n}" chip in the per-core tint so a student can see at a glance "P1 is
-// running on C0, P2 is on C1" without cross-referencing the SimStatusRow.
-// Returns undefined when the PID is not assigned to any core (e.g. it is
-// READY/BLOCKED), so v-if filters it out cleanly.
+// PIDs that are RUN on a visible core right now. Used to mark "live" tabs and
+// to colour the cursor chips with the owning core's tint.
 const coreOfPID = computed<Record<number, number>>(() => {
   const m: Record<number, number> = {};
   for (const c of cpu.cores) {
@@ -75,78 +118,194 @@ const coreOfPID = computed<Record<number, number>>(() => {
   return m;
 });
 
+const visibleCoreOfPID = computed<Record<number, number>>(() => {
+  const m: Record<number, number> = {};
+  for (const c of cpu.cores) {
+    if (c.current_pid > 0 && cpu.isCoreVisible(c.id)) m[c.current_pid] = c.id;
+  }
+  return m;
+});
+
 const multicore = computed(() => cpu.cores.length > 1);
 
-// The offset of the next instruction to execute for the viewing PID. We
-// prefer the EIP of the core currently running this PID; if no core has it,
-// we fall back to the PCB's saved registers (state captured at the last
-// context switch out).
-const currentOffset = computed<number | null>(() => {
-  const pid = viewingPID.value;
-  if (!pid) return null;
-  const base = currentProc.value?.code_base ?? 0;
-  const liveCore = cpu.cores.find(c => c.current_pid === pid);
-  if (liveCore) {
-    return (liveCore.regs.EIP ?? 0) - base;
+// Compute one cursor per group member. We prefer the live core's EIP when the
+// thread is currently scheduled; otherwise we use the PCB's saved EIP. Offset
+// is relative to the leader's code_base because source/sourceMap are indexed
+// by offset, and all threads of the group share that base.
+const threadCursors = computed<ThreadCursor[]>(() => {
+  const group = viewingGroup.value;
+  if (!group) return [];
+  const base = group.leader.code_base ?? 0;
+  const cursors: ThreadCursor[] = [];
+  for (const m of group.members) {
+    const coreId = visibleCoreOfPID.value[m.pid] ?? null;
+    let eip: number;
+    if (coreId !== null) {
+      const live = cpu.cores.find(c => c.id === coreId);
+      eip = live?.regs.EIP ?? 0;
+    } else {
+      eip = m.regs?.EIP ?? 0;
+    }
+    cursors.push({
+      pid: m.pid,
+      tid: m.tid ?? m.pid,
+      isLeader: m.is_leader === true || m.pid === tgidOf(m),
+      state: m.state,
+      coreId,
+      offset: eip - base,
+    });
   }
-  const saved = currentProc.value?.regs.EIP ?? 0;
-  return saved - base;
+  return cursors;
 });
 
-// Active SourceLine: the entry whose offset matches currentOffset exactly
-// (instructions only emit on boundaries). If no exact match, we fall back to
-// the largest entry with offset <= currentOffset so users still see SOMETHING
-// highlighted while debugging an out-of-bounds EIP.
-const activeSourceLine = computed<SourceLine | null>(() => {
-  const off = currentOffset.value;
+// Resolve each cursor to the C line / ASM offset it maps to. We accept any
+// cursor whose offset falls inside the source map (exact match preferred,
+// largest-prior offset as fallback) so out-of-bounds EIPs (e.g. a thread
+// still executing the leader-only prologue) still highlight something.
+function resolveCursor(c: ThreadCursor): { cLine: number | null; offset: number | null } {
   const map = sourceMap.value;
-  if (off === null || map.length === 0) return null;
-  const exact = map.find(l => l.offset === off);
-  if (exact) return exact;
+  if (map.length === 0) return { cLine: null, offset: null };
+  const exact = map.find(l => l.offset === c.offset);
+  if (exact) return { cLine: exact.c_line, offset: exact.offset };
   let best: SourceLine | null = null;
   for (const l of map) {
-    if (l.offset > off) break;
+    if (l.offset > c.offset) break;
     best = l;
   }
-  return best;
+  return best ? { cLine: best.c_line, offset: best.offset } : { cLine: null, offset: null };
+}
+
+interface ResolvedCursor extends ThreadCursor {
+  cLine: number | null;
+  asmOffset: number | null;
+}
+
+const resolvedCursors = computed<ResolvedCursor[]>(() =>
+  threadCursors.value.map(c => {
+    const r = resolveCursor(c);
+    return { ...c, cLine: r.cLine, asmOffset: r.offset };
+  }),
+);
+
+const cursorsByCLine = computed<Map<number, ResolvedCursor[]>>(() => {
+  const m = new Map<number, ResolvedCursor[]>();
+  for (const c of resolvedCursors.value) {
+    if (c.cLine === null) continue;
+    const bucket = m.get(c.cLine);
+    if (bucket) bucket.push(c);
+    else m.set(c.cLine, [c]);
+  }
+  return m;
 });
 
-const activeCLine = computed<number | null>(() => activeSourceLine.value?.c_line ?? null);
-const activeOffset = computed<number | null>(() => activeSourceLine.value?.offset ?? null);
+const cursorsByAsmOffset = computed<Map<number, ResolvedCursor[]>>(() => {
+  const m = new Map<number, ResolvedCursor[]>();
+  for (const c of resolvedCursors.value) {
+    if (c.asmOffset === null) continue;
+    const bucket = m.get(c.asmOffset);
+    if (bucket) bucket.push(c);
+    else m.set(c.asmOffset, [c]);
+  }
+  return m;
+});
 
-function isActiveLine(idx1: number): boolean {
-  return activeCLine.value === idx1;
+function cursorsAtCLine(line: number): ResolvedCursor[] {
+  return cursorsByCLine.value.get(line) ?? [];
 }
 
-function isActiveAsm(offset: number): boolean {
-  return activeOffset.value === offset;
+function cursorsAtAsmOffset(off: number): ResolvedCursor[] {
+  return cursorsByAsmOffset.value.get(off) ?? [];
 }
 
-function pickProc(pid: number) {
-  const next = localPinnedPID.value === pid ? null : pid;
+function isActiveLine(line: number): boolean {
+  return cursorsByCLine.value.has(line);
+}
+
+function isActiveAsm(off: number): boolean {
+  return cursorsByAsmOffset.value.has(off);
+}
+
+// Pick the cursor the auto-scroll should follow. Priority: first RUN cursor
+// (lowest coreId for determinism). When none is RUN, keep the current scroll
+// position by returning null.
+function pickScrollTarget(cursors: ResolvedCursor[]): ResolvedCursor | null {
+  const running = cursors.filter(c => c.state === 'RUN' && c.coreId !== null);
+  if (running.length === 0) return null;
+  running.sort((a, b) => (a.coreId ?? 0) - (b.coreId ?? 0));
+  return running[0];
+}
+
+const scrollTargetCLine = computed<number | null>(() =>
+  pickScrollTarget(resolvedCursors.value)?.cLine ?? null,
+);
+
+const scrollTargetOffset = computed<number | null>(() =>
+  pickScrollTarget(resolvedCursors.value)?.asmOffset ?? null,
+);
+
+function tabTitle(g: TGIDGroup): string {
+  const leader = g.leader;
+  if (g.members.length > 1) {
+    const tids = g.members.map(m => m.tid ?? m.pid).join(',');
+    return t('panels.codeAsm.tabTitleGroup', {
+      pid: leader.pid,
+      name: leader.name,
+      state: leader.state,
+      tids,
+    });
+  }
+  const key = pinnedPID.value === leader.pid
+    ? 'panels.codeAsm.tabTitlePinned'
+    : 'panels.codeAsm.tabTitleUnpinned';
+  return t(key, { pid: leader.pid, name: leader.name, state: leader.state });
+}
+
+function groupHasRunningMember(g: TGIDGroup): boolean {
+  for (const m of g.members) {
+    if (visibleCoreOfPID.value[m.pid] !== undefined) return true;
+  }
+  return false;
+}
+
+function siblingTids(g: TGIDGroup): string {
+  if (g.members.length <= 1) return '';
+  // Render every member's TID — including the leader's — so the chip reads
+  // "T2,T3,T4" rather than hiding the head of the group.
+  return g.members.map(m => m.tid ?? m.pid).join(',');
+}
+
+function pickGroup(g: TGIDGroup) {
+  const leaderPid = g.leader.pid;
+  const next = localPinnedPID.value === leaderPid ? null : leaderPid;
   localPinnedPID.value = next;
   if (!isViewer.value) {
-    // Encode "unpinned" as 0 on the wire because Focus.PinnedPID is a *int
-    // and 0 / no pinned PID are equivalent in practice.
     cpu.sendFocus({ pinned_pid: next ?? 0 });
   }
 }
 
-// Auto-scroll: every time the active C line or ASM offset changes, bring the
-// matching rows into view inside their own scroll containers. We use
-// `block: 'center'` so the highlighted row sits in the middle of the panel
-// instead of jumping to the edges on each step.
+function cursorTooltip(c: ResolvedCursor): string {
+  if (c.coreId !== null) {
+    return t('panels.codeAsm.threadCursorTitle', { tid: c.tid, core: c.coreId });
+  }
+  return t('panels.codeAsm.threadCursorIdleTitle', { tid: c.tid, state: c.state });
+}
+
+// Auto-scroll: every time the target C line or ASM offset changes, bring the
+// matching rows into view inside their own scroll containers. `block: center`
+// keeps the highlighted row centred instead of snapping to the edges.
 const cListRef = ref<HTMLElement | null>(null);
 const asmListRef = ref<HTMLElement | null>(null);
 
-watch(activeCLine, async () => {
+watch(scrollTargetCLine, async (line) => {
+  if (line === null) return;
   await nextTick();
   cListRef.value?.querySelector('.line--current')?.scrollIntoView({
     behavior: 'smooth', block: 'center',
   });
 });
 
-watch(activeOffset, async () => {
+watch(scrollTargetOffset, async (off) => {
+  if (off === null) return;
   await nextTick();
   asmListRef.value?.querySelector('.asm-line--current')?.scrollIntoView({
     behavior: 'smooth', block: 'center',
@@ -156,62 +315,89 @@ watch(activeOffset, async () => {
 function fmtHex(n: number): string {
   return '0x' + (n >>> 0).toString(16).toUpperCase().padStart(4, '0');
 }
+
+// Inline style for a cursor chip: tint by core when RUN, neutral surface
+// otherwise. Modulo by 4 mirrors how SimStatusRow assigns --core-N tokens.
+function chipStyle(c: ResolvedCursor): Record<string, string> {
+  if (c.coreId !== null) {
+    return {
+      background: `var(--core-${c.coreId % 4})`,
+      color: 'var(--core-fg)',
+    };
+  }
+  return {};
+}
 </script>
 
 <template>
   <div class="panel code-asm" data-pizarra-anchor="code-panel">
     <div class="panel-title">
       <span class="title-text">{{ t('panels.codeAsm.title') }}</span>
-      <span class="title-hint" v-if="cpu.procs.length > 1">
+      <span class="title-hint" v-if="sortedProcs.length > 1">
         <MousePointerClick :size="12" :stroke-width="2" />
         {{ t('panels.codeAsm.titleHint') }}
       </span>
     </div>
 
-    <div v-if="sortedProcs.length === 0" class="empty">
+    <div v-if="tgidGroups.length === 0" class="empty">
       {{ t('panels.codeAsm.empty') }}
     </div>
 
     <template v-else>
       <div class="proc-tabs">
         <button
-          v-for="p in sortedProcs"
-          :key="p.pid"
+          v-for="g in tgidGroups"
+          :key="g.leader.pid"
           class="proc-tab"
           :class="{
-            current: runningOnVisibleCores.has(p.pid),
-            pinned: pinnedPID === p.pid,
-            viewing: p.pid === viewingPID,
+            current: groupHasRunningMember(g),
+            pinned: pinnedPID === g.leader.pid,
+            viewing: tgidOf(g.leader) === viewingTGID,
           }"
-          @click="pickProc(p.pid)"
-          :title="tabTitle(p)"
+          @click="pickGroup(g)"
+          :title="tabTitle(g)"
         >
-          <span class="pt-pid">P{{ p.pid }}</span>
-          <span class="pt-name">{{ p.name }}</span>
+          <span class="pt-pid">P{{ g.leader.pid }}</span>
+          <span class="pt-name">{{ g.leader.name }}</span>
+          <span
+            v-if="g.members.length > 1"
+            class="pt-tids"
+            :title="t('panels.codeAsm.tabGroupTidsTitle', { count: g.members.length })"
+          >T{{ siblingTids(g) }}</span>
           <!-- Multicore identity: small chip with the core's color so the
                student maps PID → core at a glance. Hidden in single-core
-               sessions where the dot is enough. -->
+               sessions where the dot is enough. The leader's chip is shown
+               when the leader itself is running; otherwise we surface the
+               first member's core so the tab still signals "where is this
+               group". -->
           <span
-            v-if="multicore && coreOfPID[p.pid] !== undefined"
+            v-if="multicore && coreOfPID[g.leader.pid] !== undefined"
             class="pt-core"
-            :style="{ background: `var(--core-${coreOfPID[p.pid] % 4})`, color: `var(--core-fg)` }"
-            :title="t('panels.codeAsm.coreRunning', { core: coreOfPID[p.pid] })"
-          >C{{ coreOfPID[p.pid] }}</span>
-          <span v-if="runningOnVisibleCores.has(p.pid)" class="pt-current">●</span>
-          <span v-if="pinnedPID === p.pid" class="pt-pin">📌</span>
+            :style="{ background: `var(--core-${coreOfPID[g.leader.pid] % 4})`, color: `var(--core-fg)` }"
+            :title="t('panels.codeAsm.coreRunning', { core: coreOfPID[g.leader.pid] })"
+          >C{{ coreOfPID[g.leader.pid] }}</span>
+          <span v-if="groupHasRunningMember(g)" class="pt-current">●</span>
+          <span v-if="pinnedPID === g.leader.pid" class="pt-pin">📌</span>
         </button>
       </div>
 
-      <div class="code-meta" v-if="currentProc">
-        <span class="meta-tag" :title="t('panels.codeAsm.stateTitle')">{{ currentProc.state }}</span>
+      <div class="code-meta" v-if="viewingGroup">
+        <span class="meta-tag" :title="t('panels.codeAsm.stateTitle')">{{ viewingGroup.leader.state }}</span>
         <span class="meta-info">
-          {{ currentProc.name }} · {{ t('panels.codeAsm.loadedAt') }}
-          <span class="addr" :title="t('panels.codeAsm.codeBaseAddrTitle')">0x{{ (currentProc.code_base || 0).toString(16).toUpperCase() }}</span>
+          {{ viewingGroup.leader.name }} · {{ t('panels.codeAsm.loadedAt') }}
+          <span class="addr" :title="t('panels.codeAsm.codeBaseAddrTitle')">0x{{ (viewingGroup.leader.code_base || 0).toString(16).toUpperCase() }}</span>
           · {{ t('panels.codeAsm.stackTop') }}
-          <span class="addr">0x{{ (currentProc.stack_top || 0).toString(16).toUpperCase() }}</span>
-          <template v-if="activeOffset !== null">
-            · {{ t('panels.codeAsm.executing') }}
-            <span class="addr">{{ fmtHex(activeOffset) }}</span>
+          <span class="addr">0x{{ (viewingGroup.leader.stack_top || 0).toString(16).toUpperCase() }}</span>
+          <template v-if="resolvedCursors.length > 0">
+            ·
+            <span
+              v-for="(c, i) in resolvedCursors"
+              :key="c.pid"
+              class="meta-cursor"
+              :style="chipStyle(c)"
+            >
+              T{{ c.tid }}<template v-if="c.asmOffset !== null">@{{ fmtHex(c.asmOffset) }}</template><template v-else>·{{ c.state }}</template><span v-if="i < resolvedCursors.length - 1">, </span>
+            </span>
           </template>
         </span>
       </div>
@@ -229,7 +415,17 @@ function fmtHex(n: number): string {
               :class="['line', { 'line--current': isActiveLine(idx + 1) }]"
             >
               <span class="line-no">{{ idx + 1 }}</span>
-              <span class="line-text">{{ line || ' ' }}</span>
+              <span class="line-text">{{ line || ' ' }}</span>
+              <span v-if="isActiveLine(idx + 1)" class="line-cursors">
+                <span
+                  v-for="c in cursorsAtCLine(idx + 1)"
+                  :key="c.pid"
+                  class="thread-chip"
+                  :class="{ 'thread-chip--idle': c.coreId === null }"
+                  :style="chipStyle(c)"
+                  :title="cursorTooltip(c)"
+                >T{{ c.tid }}</span>
+              </span>
             </li>
           </ol>
           <div v-else class="pane-empty">{{ t('panels.codeAsm.emptyC') }}</div>
@@ -250,6 +446,16 @@ function fmtHex(n: number): string {
               <span class="asm-off">{{ fmtHex(sl.offset) }}</span>
               <span class="asm-mnem">{{ sl.mnemonic }}</span>
               <span class="asm-cline">L{{ sl.c_line }}</span>
+              <span v-if="isActiveAsm(sl.offset)" class="asm-cursors">
+                <span
+                  v-for="c in cursorsAtAsmOffset(sl.offset)"
+                  :key="c.pid"
+                  class="thread-chip"
+                  :class="{ 'thread-chip--idle': c.coreId === null }"
+                  :style="chipStyle(c)"
+                  :title="cursorTooltip(c)"
+                >T{{ c.tid }}</span>
+              </span>
             </li>
           </ol>
         </section>
@@ -352,6 +558,16 @@ function fmtHex(n: number): string {
 .pt-current { color: var(--green); font-size: 9px; }
 .pt-pin { font-size: 9px; }
 
+.pt-tids {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--cyan);
+  padding: 1px 5px;
+  border: 1px solid var(--cyan);
+  border-radius: var(--radius-sm);
+}
+
 /* Per-core ownership badge inside a proc tab. Background and fg are set
    inline via --core-${id}; this rule only owns geometry and typography so
    the chip lines up with the rest of the tab content. */
@@ -383,10 +599,16 @@ function fmtHex(n: number): string {
   letter-spacing: 1px;
   font-weight: 700;
 }
-.meta-info { color: var(--text-dim); }
+.meta-info { color: var(--text-dim); display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: baseline; }
 .addr {
   color: var(--cyan);
   font-family: 'JetBrains Mono', monospace;
+}
+.meta-cursor {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
 }
 
 /* Split layout: 2 equal columns when ASM is available, single column on
@@ -458,7 +680,7 @@ function fmtHex(n: number): string {
 }
 
 .line {
-  grid-template-columns: 28px 1fr;
+  grid-template-columns: 28px 1fr auto;
   gap: 10px;
   color: var(--text);
 }
@@ -479,7 +701,7 @@ function fmtHex(n: number): string {
 .line--current .line-text { color: var(--amber); }
 
 .asm-line {
-  grid-template-columns: 60px 1fr 32px;
+  grid-template-columns: 60px 1fr 32px auto;
   gap: 8px;
   color: var(--text-dim);
 }
@@ -499,6 +721,35 @@ function fmtHex(n: number): string {
 .asm-line--current .asm-off { color: var(--green); font-weight: 700; }
 .asm-line--current .asm-mnem { color: var(--green); font-weight: 700; }
 .asm-line--current .asm-cline { color: var(--green); }
+
+/* Cursor chips: one per thread sitting on the same line/offset. RUN chips
+   carry the core tint; idle ones get a neutral border so the student can
+   still tell who is parked where without stealing visual weight from the
+   live thread. */
+.line-cursors,
+.asm-cursors {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  padding-left: 6px;
+  flex-wrap: wrap;
+}
+
+.thread-chip {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-overlay);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.thread-chip--idle {
+  opacity: 0.6;
+  border-style: dashed;
+}
 
 .explain { margin-top: 8px; }
 .explain summary {

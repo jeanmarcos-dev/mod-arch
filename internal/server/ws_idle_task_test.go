@@ -26,8 +26,12 @@ func TestWS_SetIdleTask_FlipsToggleAndAnnouncesProcs(t *testing.T) {
 
 	drainN(t, ctx, conn, initialMessages)
 
-	// Load any demo first — SetIdleTaskEnabled only spawns PID 0 on a
-	// kernel that already has init wired up.
+	// Default is ON; flip OFF first so the SetIdleTaskEnabled(true) below
+	// exercises an actual state change and emits a fresh procs broadcast
+	// for the test to observe. Otherwise the call short-circuits as a
+	// no-op and nothing reaches the wire.
+	off := false
+	send(t, ctx, conn, Command{Cmd: "set_idle_task", IdleTask: &off})
 	send(t, ctx, conn, Command{Cmd: "load", Program: "add"})
 	enabled := true
 	send(t, ctx, conn, Command{Cmd: "set_idle_task", IdleTask: &enabled})

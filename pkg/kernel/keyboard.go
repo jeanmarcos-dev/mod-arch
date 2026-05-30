@@ -68,6 +68,7 @@ func (k *Kernel) blockCurrent(core *Core, reason string) []cpu.Event {
 	}
 	pcb.State = StateBlocked
 	pcb.BlockedOn = reason
+	pcb.BlockedSince = core.CPU.Tick
 	pcb.Core = -1
 
 	out := []cpu.Event{
@@ -137,6 +138,7 @@ func (k *Kernel) handleKeyboard(core *Core) []cpu.Event {
 
 	pcb.State = StateReady
 	pcb.BlockedOn = ""
+	pcb.BlockedSince = 0
 
 	out := []cpu.Event{
 		cpu.EventProcessState{PID: req.PID, State: string(StateReady), Reason: "keyboard delivered"},

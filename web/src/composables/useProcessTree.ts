@@ -16,10 +16,10 @@ export interface UseProcessTreeOptions {
 export interface UseProcessTreeResult {
   treeNodes: ComputedRef<ProcTreeNode[]>;
   initPID: ComputedRef<number>;
-  // idleProc is the kernel idle task (PID 0, swapper) when present —
-  // pulled out of the regular tree so the panel can render it as a
-  // dedicated compact band instead of a top-level node.
-  idleProc: ComputedRef<PCBInfo | null>;
+  // idleProcs are the per-core swappers (PID 0, one task per core in our
+  // Linux-style model). Pulled out of the regular tree so the panel can
+  // render them in a dedicated compact band instead of N top-level nodes.
+  idleProcs: ComputedRef<PCBInfo[]>;
   treeParentOf: (p: PCBInfo) => number;
   isThreadOf: (p: PCBInfo) => boolean;
 }
@@ -48,19 +48,26 @@ export function useProcessTree(opts: UseProcessTreeOptions = {}): UseProcessTree
     return p?.pid ?? 0;
   });
 
-  const idleProc = computed<PCBInfo | null>(() => {
-    return cpu.procs.find(p => p.is_idle === true) ?? null;
+  const idleProcs = computed<PCBInfo[]>(() => {
+    return cpu.procs.filter(p => p.is_idle === true);
   });
 
   const treeNodes = computed<ProcTreeNode[]>(() => {
     const hideInit = !prefs.showInit && initPID.value > 0;
-    // PID 0 is always excluded from the tree: it has no parent, no
-    // children, and the panel renders it as a dedicated band. Filtering
-    // here keeps the rest of the tree logic oblivious to the swapper.
-    const filtered = cpu.procs.filter(p => p.is_idle !== true);
+    // Visibility model:
+    //   showInit ON  → render swapper (PID 0, one task per core), kthreadd
+    //                  (PID 2), the kernel/N siblings, init (PID 1) and
+    //                  every user proc as a single hierarchical tree.
+    //   showInit OFF → strip kernel-side machinery (idle + init + kthreads),
+    //                  leaving only the user-proc subtree as standalone
+    //                  roots — matches the introductory demo experience.
     const visibleProcs = hideInit
-      ? filtered.filter(p => p.pid !== initPID.value)
-      : filtered;
+      ? cpu.procs.filter(p =>
+          p.is_idle !== true &&
+          p.pid !== initPID.value &&
+          p.is_kthread !== true,
+        )
+      : cpu.procs.slice();
     const byParent = new Map<number, PCBInfo[]>();
     for (const p of visibleProcs) {
       let pp = treeParentOf(p);
@@ -70,8 +77,22 @@ export function useProcessTree(opts: UseProcessTreeOptions = {}): UseProcessTree
       if (!byParent.has(pp)) byParent.set(pp, []);
       byParent.get(pp)!.push(p);
     }
-    for (const list of byParent.values()) list.sort((a, b) => a.pid - b.pid);
+    // Within each bucket: swappers (is_idle, all share PID 0) sort by tid so
+    // swapper/0 always comes before swapper/1. Everyone else sorts by PID.
+    for (const list of byParent.values()) {
+      list.sort((a, b) => {
+        if (a.pid !== b.pid) return a.pid - b.pid;
+        return (a.tid ?? 0) - (b.tid ?? 0);
+      });
+    }
+    // Identity key: swappers all share PID 0, so we key them by TID (each
+    // swapper carries a unique negative TID assigned by the backend). Every
+    // other PCB uses its PID directly.
+    const keyOf = (p: PCBInfo) => p.is_idle === true ? `t${p.tid ?? 0}` : `p${p.pid}`;
     const out: ProcTreeNode[] = [];
+    // Guard against revisiting PID 0: the swapper's PID would otherwise loop
+    // the recursion back to the root bucket. Swappers are leaves anyway.
+    const visited = new Set<number>([0]);
     const visit = (parent: number, depth: number) => {
       const kids = byParent.get(parent);
       if (!kids) return;
@@ -82,6 +103,9 @@ export function useProcessTree(opts: UseProcessTreeOptions = {}): UseProcessTree
           realDepth: depth,
           isThread: isThreadOf(k),
         });
+        if (k.is_idle === true) continue;
+        if (visited.has(k.pid)) continue;
+        visited.add(k.pid);
         visit(k.pid, depth + 1);
       }
     };
@@ -89,9 +113,9 @@ export function useProcessTree(opts: UseProcessTreeOptions = {}): UseProcessTree
     // Fallback for snapshots arriving mid-reload where some proc may lack a
     // resolvable parent — append them so they remain visible.
     if (out.length < visibleProcs.length) {
-      const seen = new Set(out.map(n => n.proc.pid));
+      const seen = new Set(out.map(n => keyOf(n.proc)));
       for (const p of visibleProcs) {
-        if (!seen.has(p.pid)) {
+        if (!seen.has(keyOf(p))) {
           out.push({ proc: p, depth: 0, realDepth: 0, isThread: isThreadOf(p) });
         }
       }
@@ -99,5 +123,5 @@ export function useProcessTree(opts: UseProcessTreeOptions = {}): UseProcessTree
     return out;
   });
 
-  return { treeNodes, initPID, idleProc, treeParentOf, isThreadOf };
+  return { treeNodes, initPID, idleProcs, treeParentOf, isThreadOf };
 }

@@ -43,6 +43,12 @@ type PCB struct {
 	State     State
 	BlockedOn string // description while State == BLOCKED ("keyboard", etc.)
 
+	// BlockedSince records the CPU tick at which the PCB last entered the
+	// BLOCKED state. Zero means "not currently blocked" (or freshly spawned
+	// init at boot). The frontend subtracts this from the live tick to show
+	// how long a waiter has been parked on its resource.
+	BlockedSince uint64
+
 	// Regs is a snapshot of the user-visible register file.
 	// While the process is RUN these values are stale: the live regs are in
 	// cpu.CPU.R.
@@ -90,6 +96,13 @@ type PCB struct {
 	// parent's TGID so getpid()-style lookups can group threads under their
 	// process.
 	TGID int
+
+	// TID is the per-task identity inside a thread group. For regular procs
+	// this equals PID, which is the default and what the snapshot exposes
+	// when this field is zero. The swappers (PID 0, one per core) override
+	// it with the core index so the snapshot can disambiguate "swapper/0"
+	// from "swapper/1" even though their PIDs collide.
+	TID int
 
 	// Core is the ID of the core that currently owns this PCB (RUN), or -1
 	// when the process is READY/BLOCKED/ZOMBIE and no core holds it.
@@ -142,6 +155,16 @@ type PCB struct {
 	// this to tell "init reaped orphan P{n}" apart from "init reaped child
 	// P{n}" without having to replay the EventReparent history.
 	WasReparentedToInit bool
+
+	// IsKThread marks PCBs that represent the kernel-thread side of the
+	// Linux-style hierarchy: kthreadd (PID 2) and the per-core kernel/N
+	// tasks that hang from it. These PCBs are never scheduled onto a core
+	// — the scheduler skips them — and their RUN/SLEEP appearance is
+	// derived in the frontend from the live mode of the bound core, not
+	// from State (which stays BLOCKED). They exist so the process tree
+	// can show "who executes the kernel on each core" with a real PID
+	// rather than a synthetic visual band.
+	IsKThread bool
 }
 
 // FD describes one entry of the per-process file-descriptor table.
@@ -160,6 +183,21 @@ type FD struct {
 // Linux-style swapper). Callers use it to special-case the swapper without
 // having to thread the IdlePID through every helper.
 func (p *PCB) IsIdle() bool { return p.PID == 0 }
+
+// IsKernelThread reports whether this PCB belongs to the kthread hierarchy
+// (kthreadd or kernel/N). Method form mirrors IsIdle/IsInit so callers can
+// branch on a single predicate without poking at the underlying flag.
+func (p *PCB) IsKernelThread() bool { return p.IsKThread }
+
+// tidOrPID returns the explicit TID when set, falling back to PID for the
+// majority of procs where TID is left at the zero value. The swappers use
+// the explicit TID slot because they all share PID 0.
+func (p *PCB) tidOrPID() int {
+	if p.TID != 0 {
+		return p.TID
+	}
+	return p.PID
+}
 
 // MemSpace returns the AddressSpace this PCB is bound to. Nil means the
 // PCB has not been initialised yet (only the init PCB before SpawnInit
@@ -181,10 +219,11 @@ func (p *PCB) Snapshot() map[string]any {
 		codeSize = p.memSpace.CodeSize
 	}
 	return map[string]any{
-		"pid":        p.PID,
-		"name":       p.Name,
-		"state":      string(p.State),
-		"blocked_on": p.BlockedOn,
+		"pid":           p.PID,
+		"name":          p.Name,
+		"state":         string(p.State),
+		"blocked_on":    p.BlockedOn,
+		"blocked_since": p.BlockedSince,
 		"regs": map[string]uint32{
 			"EAX": p.Regs.EAX, "EBX": p.Regs.EBX, "ECX": p.Regs.ECX, "EDX": p.Regs.EDX,
 			"ESI": p.Regs.ESI, "EDI": p.Regs.EDI, "EBP": p.Regs.EBP,
@@ -204,11 +243,15 @@ func (p *PCB) Snapshot() map[string]any {
 		// one that should render the "process" card with threads nested
 		// under it.
 		"tgid":      p.TGID,
-		"tid":       p.PID,
+		"tid":       p.tidOrPID(),
 		"is_leader": p.TGID == p.PID,
 		// is_idle flags the swapper (PID 0) so the frontend can pull it
 		// out of the regular process tree and render it as the compact
 		// kernel-idle band instead of a user-proc row.
 		"is_idle": p.IsIdle(),
+		// is_kthread tags kthreadd and the kernel/N tasks so the tree can
+		// nest them under kthreadd instead of mixing them with user procs,
+		// and the renderer can derive RUN/SLEEP from cores[N].mode.
+		"is_kthread": p.IsKThread,
 	}
 }

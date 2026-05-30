@@ -5,6 +5,8 @@ package cpu
 // The frontend uses it to fold the new TID into the leader's subtree of the
 // process panel instead of rendering it as a new fork branch.
 type EventThreadCreate struct {
+	CoreID    int    `json:"core_id"`
+	Tick      uint64 `json:"tick"`
 	TID       int    `json:"tid"`
 	TGID      int    `json:"tgid"`
 	LeaderPID int    `json:"leader_pid"`
@@ -22,6 +24,8 @@ func (EventThreadCreate) Tag() string { return "thread_create" }
 // dedicated event lets the UI distinguish a thread terminating from a
 // full process exiting.
 type EventThreadExit struct {
+	CoreID int    `json:"core_id"`
+	Tick   uint64 `json:"tick"`
 	TID    int    `json:"tid"`
 	TGID   int    `json:"tgid"`
 	Retval uint32 `json:"retval"`

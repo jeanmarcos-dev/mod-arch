@@ -31,10 +31,17 @@ type Core struct {
 	userInstructionsSinceFire uint64
 
 	// RunningIdle disambiguates the overloaded CurrentPID==0 sentinel when
-	// the kernel idle task (PID 0) is enabled. True means the swapper is
-	// bound to this core and the next Step will execute its HLT byte;
-	// false means CurrentPID==0 has its legacy meaning, "no proc". Kept
-	// here (per-core) rather than on the shared PCB so the same PCB can be
-	// simultaneously bound to several cores in multi-core demos.
+	// the kernel idle task (PID 0) is enabled. True means this core's
+	// dedicated swapper task is bound; false means CurrentPID==0 has its
+	// legacy meaning, "no proc". Each core has its own swapper PCB (see
+	// Kernel.IdleByCore), so this flag is per-core state on top of that.
 	RunningIdle bool
+
+	// IdleTicks counts how many simulator ticks this core has spent in the
+	// swapper's HLT loop. Incremented whenever stepCore is called on a
+	// core that is RunningIdle. Pure observability: the frontend renders
+	// this as a counter on the idle band and per-core badge so the student
+	// sees the loop is alive without the event stream filling up with
+	// repeated HLT entries.
+	IdleTicks uint64
 }

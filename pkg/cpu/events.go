@@ -9,8 +9,11 @@ type Event interface {
 }
 
 // EventInstruction is emitted at the start of each step, before any mutation.
+// Tick is the per-core cycle counter at the moment of emission; the frontend
+// uses it to align events from different cores onto a shared timeline grid.
 type EventInstruction struct {
 	CoreID   int    `json:"core_id"`
+	Tick     uint64 `json:"tick"`
 	PID      int    `json:"pid"`
 	EIP      uint32 `json:"eip"`
 	Mnemonic string `json:"mnemonic"`
@@ -25,6 +28,7 @@ func (EventInstruction) Tag() string { return "instruction" }
 // write; multicore demos rely on it to keep per-core state separated.
 type EventRegWrite struct {
 	CoreID int    `json:"core_id"`
+	Tick   uint64 `json:"tick"`
 	Reg    string `json:"reg"`
 	Old    uint32 `json:"old"`
 	New    uint32 `json:"new"`
@@ -37,6 +41,7 @@ func (EventRegWrite) Tag() string { return "reg_write" }
 // the address.
 type EventMemRead struct {
 	CoreID int    `json:"core_id"`
+	Tick   uint64 `json:"tick"`
 	Addr   uint32 `json:"addr"`
 	Value  uint32 `json:"value"`
 	Size   int    `json:"size"` // 1, 2 or 4 bytes
@@ -48,6 +53,7 @@ func (EventMemRead) Tag() string { return "mem_read" }
 // EventMemWrite is emitted when the CPU writes memory.
 type EventMemWrite struct {
 	CoreID int    `json:"core_id"`
+	Tick   uint64 `json:"tick"`
 	Addr   uint32 `json:"addr"`
 	Old    uint32 `json:"old"`
 	New    uint32 `json:"new"`
@@ -68,6 +74,7 @@ func (EventMemWrite) Tag() string { return "mem_write" }
 // Software only decides what to do AFTER the change; it never flips the bit.
 type EventModeSwitch struct {
 	CoreID int    `json:"core_id"`
+	Tick   uint64 `json:"tick"`
 	From   uint8  `json:"from"`  // 3 or 0
 	To     uint8  `json:"to"`    // 3 or 0
 	Cause  string `json:"cause"` // "INT" | "IRET" | "fault"
@@ -93,6 +100,7 @@ func (EventModeSwitch) Tag() string { return "mode_switch" }
 // push a frame when there is no privilege transition).
 type EventIRQFire struct {
 	CoreID      int    `json:"core_id"`
+	Tick        uint64 `json:"tick"`
 	Vector      uint8  `json:"vector"`
 	Source      string `json:"source"` // "HW" | "SW"
 	Handler     uint32 `json:"handler"`
@@ -123,6 +131,7 @@ func (EventIRQFire) Tag() string { return "irq_fire" }
 // `mov eax, [AddrErrCodeMirror]`. CR2 (faulting address) goes to AddrCR2Mirror.
 type EventPageFault struct {
 	CoreID     int    `json:"core_id"`
+	Tick       uint64 `json:"tick"`
 	Addr       uint32 `json:"addr"`
 	Mode       uint8  `json:"mode"`
 	PermNeeded string `json:"perm_needed"` // "R", "W", "X"
@@ -135,8 +144,9 @@ func (EventPageFault) Tag() string { return "page_fault" }
 // EventHalt indicates the CPU executed HLT. On a real OS the CPU sleeps until
 // the next IRQ; in the simulator, if no process is READY, execution stops.
 type EventHalt struct {
-	CoreID int `json:"core_id"`
-	PID    int `json:"pid"`
+	CoreID int    `json:"core_id"`
+	Tick   uint64 `json:"tick"`
+	PID    int    `json:"pid"`
 }
 
 // Tag returns the event tag.
@@ -147,6 +157,7 @@ func (EventHalt) Tag() string { return "halt" }
 // narrators use it to anchor the save animation at the right core panel.
 type EventPCBSave struct {
 	CoreID int               `json:"core_id"`
+	Tick   uint64            `json:"tick"`
 	PID    int               `json:"pid"`
 	Regs   map[string]uint32 `json:"regs"`
 }
@@ -158,6 +169,7 @@ func (EventPCBSave) Tag() string { return "pcb_save" }
 // CPU so execution can resume.
 type EventPCBRestore struct {
 	CoreID int               `json:"core_id"`
+	Tick   uint64            `json:"tick"`
 	PID    int               `json:"pid"`
 	Regs   map[string]uint32 `json:"regs"`
 }
@@ -169,7 +181,12 @@ func (EventPCBRestore) Tag() string { return "pcb_restore" }
 // to evict FromPID and run ToPID. ReadyQueue shows the queue state after the
 // decision. Reason names the trigger ("timer", "block", "exit", ...) so the
 // frontend can colour the entry differently in the context-switch feed.
+// CoreID identifies the core whose scheduler ran the decision (the kernel is
+// not a free-floating process — it executes on the core that trapped into
+// supervisor mode).
 type EventSchedDecision struct {
+	CoreID     int    `json:"core_id"`
+	Tick       uint64 `json:"tick"`
 	FromPID    int    `json:"from_pid"`
 	ToPID      int    `json:"to_pid"`
 	Reason     string `json:"reason,omitempty"`
@@ -184,6 +201,8 @@ func (EventSchedDecision) Tag() string { return "sched_decision" }
 // ZOMBIE transition so the frontend can show the value sys_exit stored in
 // the PCB without waiting for the next full procs snapshot.
 type EventProcessState struct {
+	CoreID   int     `json:"core_id"`
+	Tick     uint64  `json:"tick"`
 	PID      int     `json:"pid"`
 	State    string  `json:"state"`
 	Reason   string  `json:"reason,omitempty"`
@@ -196,6 +215,8 @@ func (EventProcessState) Tag() string { return "process_state" }
 // EventSyscall describes a syscall: number, name, args, and result. It is
 // emitted by the kernel after the dispatch completes but before IRET.
 type EventSyscall struct {
+	CoreID int      `json:"core_id"`
+	Tick   uint64   `json:"tick"`
 	PID    int      `json:"pid"`
 	Num    uint32   `json:"num"`
 	Name   string   `json:"name"`
@@ -215,6 +236,7 @@ func (EventSyscall) Tag() string { return "syscall" }
 // process ("out", the default).
 type EventConsoleOut struct {
 	CoreID int    `json:"core_id"`
+	Tick   uint64 `json:"tick"`
 	PID    int    `json:"pid"`
 	Kind   string `json:"kind,omitempty"`
 	Bytes  []byte `json:"bytes"`
@@ -228,8 +250,9 @@ func (EventConsoleOut) Tag() string { return "console_out" }
 // bootstrap or after a scheduling decision. The frontend can use it to draw
 // which PID lives on which core in multicore demos.
 type EventCoreAssign struct {
-	CoreID int `json:"core_id"`
-	PID    int `json:"pid"`
+	CoreID int    `json:"core_id"`
+	Tick   uint64 `json:"tick"`
+	PID    int    `json:"pid"`
 }
 
 // Tag returns the event tag.
@@ -240,6 +263,7 @@ func (EventCoreAssign) Tag() string { return "core_assign" }
 // available.
 type EventCoreRelease struct {
 	CoreID int    `json:"core_id"`
+	Tick   uint64 `json:"tick"`
 	PID    int    `json:"pid"`
 	Reason string `json:"reason,omitempty"`
 }
@@ -274,6 +298,7 @@ func (EventCoreIdle) Tag() string { return "core_idle" }
 //     kernel rejects the call and leaves the mutex state unchanged.
 type EventMutexOp struct {
 	CoreID  int    `json:"core_id"`
+	Tick    uint64 `json:"tick"`
 	PID     int    `json:"pid"`
 	MutexID int    `json:"mutex_id"`
 	Op      string `json:"op"`
@@ -289,9 +314,11 @@ func (EventMutexOp) Tag() string { return "mutex_op" }
 // and blocks the parent until the child exits, whereas fork gives the child
 // its own copy of the parent's address space.
 type EventFork struct {
-	ParentPID int  `json:"parent_pid"`
-	ChildPID  int  `json:"child_pid"`
-	IsVfork   bool `json:"is_vfork"`
+	CoreID    int    `json:"core_id"`
+	Tick      uint64 `json:"tick"`
+	ParentPID int    `json:"parent_pid"`
+	ChildPID  int    `json:"child_pid"`
+	IsVfork   bool   `json:"is_vfork"`
 }
 
 // Tag returns the event tag.
@@ -303,6 +330,8 @@ func (EventFork) Tag() string { return "fork" }
 //   - Op "reap"  — a zombie child was harvested. ChildPID identifies it and
 //     ExitCode carries the value returned to sys_waitpid.
 type EventWaitOp struct {
+	CoreID   int    `json:"core_id"`
+	Tick     uint64 `json:"tick"`
 	PID      int    `json:"pid"`
 	ChildPID int    `json:"child_pid"`
 	Op       string `json:"op"`
@@ -317,9 +346,11 @@ func (EventWaitOp) Tag() string { return "wait_op" }
 // uses it to slide the affected nodes under the new parent in the process
 // tree without rebuilding the whole panel.
 type EventReparent struct {
-	PID       int `json:"pid"`
-	OldParent int `json:"old_parent"`
-	NewParent int `json:"new_parent"`
+	CoreID    int    `json:"core_id"`
+	Tick      uint64 `json:"tick"`
+	PID       int    `json:"pid"`
+	OldParent int    `json:"old_parent"`
+	NewParent int    `json:"new_parent"`
 }
 
 // Tag returns the event tag.
@@ -329,12 +360,14 @@ func (EventReparent) Tag() string { return "reparent" }
 // the two: anonymous pipes are paired with their creator alone, FIFOs are
 // registered by Name in a tiny VFS so unrelated processes can open them.
 type EventPipeCreate struct {
-	PipeID    int    `json:"pipe_id"`
-	OwnerPID  int    `json:"owner_pid"`
-	FdR       uint32 `json:"fd_r"`
-	FdW       uint32 `json:"fd_w"`
-	IsFifo    bool   `json:"is_fifo"`
-	Name      string `json:"name,omitempty"`
+	CoreID   int    `json:"core_id"`
+	Tick     uint64 `json:"tick"`
+	PipeID   int    `json:"pipe_id"`
+	OwnerPID int    `json:"owner_pid"`
+	FdR      uint32 `json:"fd_r"`
+	FdW      uint32 `json:"fd_w"`
+	IsFifo   bool   `json:"is_fifo"`
+	Name     string `json:"name,omitempty"`
 }
 
 // Tag returns the event tag.
@@ -344,6 +377,8 @@ func (EventPipeCreate) Tag() string { return "pipe_create" }
 // describe the buffer fill state after the op, so the IPC panel can render
 // the buffer bar without re-querying the kernel.
 type EventPipeOp struct {
+	CoreID   int    `json:"core_id"`
+	Tick     uint64 `json:"tick"`
 	PipeID   int    `json:"pipe_id"`
 	PID      int    `json:"pid"`
 	Op       string `json:"op"` // "read" | "write"
@@ -383,6 +418,7 @@ func (EventKbdState) Tag() string { return "kbd_state" }
 //   - "handoff"         — pid signaled and the first waiter was unblocked.
 type EventSemOp struct {
 	CoreID  int    `json:"core_id"`
+	Tick    uint64 `json:"tick"`
 	PID     int    `json:"pid"`
 	SemID   int    `json:"sem_id"`
 	Op      string `json:"op"`
@@ -405,6 +441,8 @@ func (EventSemOp) Tag() string { return "sem_op" }
 // init, the consolidated EventInitReap. Splitting wake from schedule is what
 // lets the log differentiate state transitions from runqueue activity.
 type EventWake struct {
+	CoreID     int    `json:"core_id"`
+	Tick       uint64 `json:"tick"`
 	PID        int    `json:"pid"`
 	FromReason string `json:"from_reason"`
 	ReadyQueue []int  `json:"ready_queue"`
@@ -436,6 +474,8 @@ type ReapDetail struct {
 // Regular (non-init) parents still cosechan vía EventWaitOp; the new event
 // only fires for init's emulated reaper.
 type EventInitReap struct {
+	CoreID     int          `json:"core_id"`
+	Tick       uint64       `json:"tick"`
 	InitPID    int          `json:"init_pid"`
 	Reaps      []ReapDetail `json:"reaps"`
 	ReadyQueue []int        `json:"ready_queue"`

@@ -80,10 +80,11 @@ func TestLoadProgram_DemoCoresSwitchesLayout(t *testing.T) {
 	if got := s.kernel.NumCores(); got != 4 {
 		t.Errorf("after LoadProgram NumCores = %d, want 4", got)
 	}
-	// LoadProgram now spawns init (PID 1) unconditionally on top of the
-	// demo's own processes, so we expect 2 procs (init + tiny_quad's p1).
-	if got := len(s.kernel.Processes); got != 2 {
-		t.Errorf("Processes after load = %d, want 2 (init + 1 demo proc)", got)
+	// LoadProgram spawns init (PID 1), kthreadd (PID 2) and one kernel/N PCB
+	// per core (4 here) on top of the demo's procs. That's 1 init + 1 kthreadd
+	// + 4 kernel threads + 1 demo proc = 7 entries in the process table.
+	if got := len(s.kernel.Processes); got != 7 {
+		t.Errorf("Processes after load = %d, want 7 (init + kthreadd + 4 kernel/N + 1 demo proc)", got)
 	}
 }
 

@@ -103,7 +103,8 @@ func (k *Kernel) handleSyscall(core *Core) []cpu.Event {
 			Args:   syscallArgs(num, arg1, arg2, arg3),
 			Result: 0,
 		}}
-		return append(out, k.sysExit(core, arg1)...)
+		out = append(out, k.sysExit(core, arg1)...)
+		return stampKernelContext(out, core.ID, core.CPU.Tick)
 	}
 
 	var out []cpu.Event
@@ -127,7 +128,7 @@ func (k *Kernel) handleSyscall(core *Core) []cpu.Event {
 				PID: callerPID, Num: num, Name: name,
 				Args: syscallArgs(num, arg1, arg2, arg3), Result: result,
 			}
-			return append([]cpu.Event{syscallEv}, out...)
+			return stampKernelContext(append([]cpu.Event{syscallEv}, out...), core.ID, core.CPU.Tick)
 		}
 	case SysClone:
 		name = "clone"
@@ -163,7 +164,7 @@ func (k *Kernel) handleSyscall(core *Core) []cpu.Event {
 				PID: callerPID, Num: num, Name: name,
 				Args: syscallArgs(num, arg1, arg2, arg3), Result: 0,
 			}
-			return append([]cpu.Event{syscallEv}, out...)
+			return stampKernelContext(append([]cpu.Event{syscallEv}, out...), core.ID, core.CPU.Tick)
 		}
 	case SysWrite:
 		name = "write"
@@ -192,7 +193,7 @@ func (k *Kernel) handleSyscall(core *Core) []cpu.Event {
 		Result: result,
 	}
 	out = append([]cpu.Event{syscallEv}, out...)
-	return out
+	return stampKernelContext(out, core.ID, core.CPU.Tick)
 }
 
 // userBufferFault returns the first offending byte and false if the range

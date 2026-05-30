@@ -110,7 +110,7 @@ func (k *Kernel) handleSync(core *Core) []cpu.Event {
 	}
 
 	core.CPU.R.EAX = result
-	return out
+	return stampKernelContext(out, core.ID, core.CPU.Tick)
 }
 
 // mutexCreate allocates a fresh mutex and returns its ID (1-indexed).
@@ -175,7 +175,7 @@ func (k *Kernel) mutexUnlock(core *Core, id int) ([]cpu.Event, bool) {
 	next := m.Waiters[0]
 	m.Waiters = m.Waiters[1:]
 	m.Holder = next
-	wakeEvs := k.wakeWaiter(next, mutexBlockedReason(id))
+	wakeEvs := k.wakeWaiter(core, next, mutexBlockedReason(id))
 	out := []cpu.Event{cpu.EventMutexOp{
 		CoreID: core.ID, PID: pid, MutexID: id, Op: "handoff",
 		NextPID: next, Waiters: append([]int(nil), m.Waiters...),
@@ -235,7 +235,7 @@ func (k *Kernel) semSignal(core *Core, id int) ([]cpu.Event, bool) {
 
 	next := s.Waiters[0]
 	s.Waiters = s.Waiters[1:]
-	wakeEvs := k.wakeWaiter(next, semBlockedReason(id))
+	wakeEvs := k.wakeWaiter(core, next, semBlockedReason(id))
 	out := []cpu.Event{cpu.EventSemOp{
 		CoreID: core.ID, PID: pid, SemID: id, Op: "handoff",
 		Count: s.Count, NextPID: next, Waiters: append([]int(nil), s.Waiters...),
@@ -299,6 +299,7 @@ func (k *Kernel) blockOnSync(core *Core, reason string) []cpu.Event {
 	}
 	pcb.State = StateBlocked
 	pcb.BlockedOn = reason
+	pcb.BlockedSince = core.CPU.Tick
 	pcb.Core = -1
 
 	out := []cpu.Event{
@@ -317,16 +318,16 @@ func (k *Kernel) blockOnSync(core *Core, reason string) []cpu.Event {
 			cpu.EventCoreRelease{CoreID: core.ID, PID: curPID, Reason: reason},
 		)
 		out = append(out, k.switchTo(core, nextPID)...)
-		return out
+		return stampKernelContext(out, core.ID, core.CPU.Tick)
 	}
 
 	core.CPU.Halted = true
 	core.CurrentPID = 0
 	out = append(out,
 		cpu.EventCoreRelease{CoreID: core.ID, PID: curPID, Reason: reason},
-		cpu.EventHalt{CoreID: core.ID, PID: curPID},
+		cpu.EventHalt{CoreID: core.ID, Tick: core.CPU.Tick, PID: curPID},
 	)
-	return out
+	return stampKernelContext(out, core.ID, core.CPU.Tick)
 }
 
 // evictFromAllQueues removes pid from every place where it might still be
@@ -368,13 +369,19 @@ func removeInt(xs []int, target int) []int {
 // announcement the frontend's haltedDead heuristic (cpu.halted && readyQueue
 // empty) wrongly disables the STEP button after a sync wake hands a process
 // to a busy core.
-func (k *Kernel) wakeWaiter(pid int, reason string) []cpu.Event {
+//
+// caller is the core executing the unlock/signal that triggered the wake; its
+// CoreID/Tick are used to stamp the emitted events so the frontend can place
+// them in the right column even when the woken PID is dispatched to a
+// different core (idle).
+func (k *Kernel) wakeWaiter(caller *Core, pid int, reason string) []cpu.Event {
 	pcb := k.Processes[pid]
 	if pcb == nil {
 		return nil
 	}
 	pcb.State = StateReady
 	pcb.BlockedOn = ""
+	pcb.BlockedSince = 0
 
 	out := []cpu.Event{
 		cpu.EventProcessState{PID: pid, State: string(StateReady), Reason: "woken from " + reason},
@@ -390,7 +397,7 @@ func (k *Kernel) wakeWaiter(pid int, reason string) []cpu.Event {
 			cpu.EventCoreAssign{CoreID: idle.ID, PID: pid},
 			cpu.EventProcessState{PID: pid, State: string(StateRun)},
 		)
-		return out
+		return stampKernelContext(out, caller.ID, caller.CPU.Tick)
 	}
 	k.Ready.Push(pid)
 	out = append(out, cpu.EventSchedDecision{
@@ -399,5 +406,5 @@ func (k *Kernel) wakeWaiter(pid int, reason string) []cpu.Event {
 		Reason:     "wake",
 		ReadyQueue: k.Ready.Snapshot(),
 	})
-	return out
+	return stampKernelContext(out, caller.ID, caller.CPU.Tick)
 }

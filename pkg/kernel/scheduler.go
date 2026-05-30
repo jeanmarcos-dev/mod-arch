@@ -136,7 +136,7 @@ func (k *Kernel) scheduleNext(core *Core) []cpu.Event {
 		cpu.EventProcessState{PID: nextPID, State: string(StateRun)},
 	)
 
-	return out
+	return stampKernelContext(out, core.ID, core.CPU.Tick)
 }
 
 // loadCPUFromPCB initializes a core from the state stored in a PCB. Only used
@@ -184,11 +184,11 @@ func (k *Kernel) switchTo(core *Core, pid int) []cpu.Event {
 	pcb.State = StateRun
 	pcb.Core = core.ID
 	core.CurrentPID = pid
-	return []cpu.Event{
+	return stampKernelContext([]cpu.Event{
 		cpu.EventPCBRestore{CoreID: core.ID, PID: pid, Regs: pcbRegsSnapshot(pcb)},
 		cpu.EventCoreAssign{CoreID: core.ID, PID: pid},
 		cpu.EventProcessState{PID: pid, State: string(StateRun)},
-	}
+	}, core.ID, core.CPU.Tick)
 }
 
 func readKernelDWORD(c *cpu.CPU, addr uint32) uint32 {
@@ -240,9 +240,11 @@ func (k *Kernel) DispatchIdleCores() []cpu.Event {
 	if k.IdleTaskEnabled && k.hasNonInitReady() {
 		for _, c := range k.Cores {
 			if c.RunningIdle {
+				n := len(out)
 				out = append(out, cpu.EventCoreRelease{
 					CoreID: c.ID, PID: 0, Reason: "idle preempted",
 				})
+				stampKernelContext(out[n:], c.ID, c.CPU.Tick)
 				c.RunningIdle = false
 				// Park the core in the legacy "no proc" sentinel so the
 				// assignment loop below treats it as a fresh idle slot.
@@ -266,6 +268,13 @@ func (k *Kernel) DispatchIdleCores() []cpu.Event {
 			continue
 		}
 
+		if pcb.IsKThread {
+			// Defensive: kthreads must never reach the ready queue. If one
+			// did due to a future bug, drop it rather than binding it to a
+			// core (their PCB has no memSpace and would crash loadCPUFromPCB).
+			continue
+		}
+
 		if k.InitPID != 0 && pid == k.InitPID {
 			out = append(out, k.runInitReapCycle(idle, pcb)...)
 			// Try to fill this core with the next ready PID; init does
@@ -273,6 +282,7 @@ func (k *Kernel) DispatchIdleCores() []cpu.Event {
 			continue
 		}
 
+		n := len(out)
 		out = append(out,
 			cpu.EventSchedDecision{FromPID: 0, ToPID: pid, Reason: "dispatch", ReadyQueue: k.Ready.Snapshot()},
 		)
@@ -287,13 +297,14 @@ func (k *Kernel) DispatchIdleCores() []cpu.Event {
 			cpu.EventCoreAssign{CoreID: idle.ID, PID: pid},
 			cpu.EventProcessState{PID: pid, State: string(StateRun)},
 		)
+		stampKernelContext(out[n:], idle.ID, idle.CPU.Tick)
 	}
 
 	// Idle fallback pass: every core that still has no work gets the
 	// swapper. Guarded by RunningIdle so successive Step calls do not
 	// re-emit EventCoreIdle or replay loadCPUFromPCB — the swapper that is
 	// already halted waiting for an IRQ must stay there.
-	if k.IdleTaskEnabled && k.Processes[0] != nil {
+	if k.IdleTaskEnabled && k.idleSpawned() {
 		for _, c := range k.Cores {
 			if c.CurrentPID == 0 && !c.RunningIdle {
 				out = append(out, k.bindIdleToCore(c)...)
@@ -362,12 +373,12 @@ func (k *Kernel) runInitReapCycle(idle *Core, init *PCB) []cpu.Event {
 
 	init.State = StateBlocked
 	init.BlockedOn = initBlockedReason
+	init.BlockedSince = idle.CPU.Tick
 	init.Core = -1
 	out = append(out, cpu.EventProcessState{
 		PID: init.PID, State: string(StateBlocked), Reason: initBlockedReason,
 	})
 	// Idle core stays idle — the outer loop in DispatchIdleCores will
 	// reuse it for the next ready PID, if any.
-	_ = idle
-	return out
+	return stampKernelContext(out, idle.ID, idle.CPU.Tick)
 }

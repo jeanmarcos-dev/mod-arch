@@ -75,7 +75,17 @@ md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
   return defaultLinkRender(tokens, idx, options, env, self);
 };
 
+function sanitize(text: string): string {
+  // Drop empty fence pairs the LLM sometimes emits before a real code block.
+  let s = text.replace(/^\s*```\s*\n\s*```\s*(?:\n|$)/gm, '');
+  // During streaming a chunk may end mid-fence; close it so md-it doesn't
+  // render an empty <pre> while the next chunk is in flight.
+  const fences = (s.match(/^```/gm) || []).length;
+  if (fences % 2 === 1) s += '\n```';
+  return s;
+}
+
 export function renderMarkdown(text: string): string {
   if (!text) return '';
-  return md.render(text);
+  return md.render(sanitize(text));
 }

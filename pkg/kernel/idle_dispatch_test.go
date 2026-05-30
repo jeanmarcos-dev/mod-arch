@@ -13,7 +13,7 @@ import (
 // activate idle for existing demos.
 func TestDispatchIdleCores_NoFallbackWhenDisabled(t *testing.T) {
 	k := New(cpu.DefaultMemSize)
-	if _, err := k.SpawnIdle(); err != nil {
+	if err := k.SpawnIdle(); err != nil {
 		t.Fatalf("SpawnIdle: %v", err)
 	}
 	// Flag remains false.
@@ -37,7 +37,7 @@ func TestDispatchIdleCores_NoFallbackWhenDisabled(t *testing.T) {
 // all blocked or done.
 func TestDispatchIdleCores_BindsIdleWhenNoReady(t *testing.T) {
 	k := NewMulti(cpu.DefaultMemSize, 2)
-	if _, err := k.SpawnIdle(); err != nil {
+	if err := k.SpawnIdle(); err != nil {
 		t.Fatalf("SpawnIdle: %v", err)
 	}
 	k.IdleTaskEnabled = true
@@ -72,7 +72,7 @@ func TestDispatchIdleCores_BindsIdleWhenNoReady(t *testing.T) {
 // semantics of the swapper.
 func TestDispatchIdleCores_Idempotent(t *testing.T) {
 	k := New(cpu.DefaultMemSize)
-	if _, err := k.SpawnIdle(); err != nil {
+	if err := k.SpawnIdle(); err != nil {
 		t.Fatalf("SpawnIdle: %v", err)
 	}
 	k.IdleTaskEnabled = true
@@ -96,7 +96,7 @@ func TestDispatchIdleCores_Idempotent(t *testing.T) {
 // binds the new proc on the same tick.
 func TestDispatchIdleCores_EvictsIdleForRealProc(t *testing.T) {
 	k := New(cpu.DefaultMemSize)
-	if _, err := k.SpawnIdle(); err != nil {
+	if err := k.SpawnIdle(); err != nil {
 		t.Fatalf("SpawnIdle: %v", err)
 	}
 	k.IdleTaskEnabled = true

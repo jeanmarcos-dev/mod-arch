@@ -26,6 +26,10 @@ function toggleNarrators() {
   prefs.narratorsEnabled = !prefs.narratorsEnabled;
 }
 
+function toggleSchedulerAnimation() {
+  prefs.schedulerAnimationEnabled = !prefs.schedulerAnimationEnabled;
+}
+
 function onToggleIdleTask() {
   const next = !settings.cpu.idleTaskEnabled;
   settings.cpu.setIdleTaskEnabled(next);
@@ -184,6 +188,17 @@ watch(() => bar.toolsDrawerOpen, (open) => {
             <span>{{ prefs.narratorsEnabled ? t('simtools.narratorsToggleOn') : t('simtools.narratorsToggleOff') }}</span>
           </button>
           <span class="tools-dock__field-help">{{ t('simtools.narratorsHint') }}</span>
+
+          <button
+            type="button"
+            :class="['tools-dock__btn', { 'tools-dock__btn--on': prefs.schedulerAnimationEnabled }]"
+            :title="prefs.schedulerAnimationEnabled ? t('simtools.schedulerAnimToggleOnHint') : t('simtools.schedulerAnimToggleOffHint')"
+            @click="toggleSchedulerAnimation"
+          >
+            <Sparkles :size="14" :stroke-width="2" />
+            <span>{{ prefs.schedulerAnimationEnabled ? t('simtools.schedulerAnimToggleOn') : t('simtools.schedulerAnimToggleOff') }}</span>
+          </button>
+          <span class="tools-dock__field-help">{{ t('simtools.schedulerAnimHint') }}</span>
         </section>
       </div>
 

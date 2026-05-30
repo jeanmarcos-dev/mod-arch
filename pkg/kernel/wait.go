@@ -211,6 +211,7 @@ func (k *Kernel) wakeToQueue(pid int, reason string) []cpu.Event {
 	}
 	pcb.State = StateReady
 	pcb.BlockedOn = ""
+	pcb.BlockedSince = 0
 	k.Ready.Push(pid)
 	return []cpu.Event{
 		cpu.EventProcessState{PID: pid, State: string(StateReady), Reason: "woken from " + reason},

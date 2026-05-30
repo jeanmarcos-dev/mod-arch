@@ -233,6 +233,27 @@ const followedAddr = computed(() => {
 
 const followedRegLabel = computed(() => (view.value === 'esp' ? 'ESP' : 'EIP'));
 
+// Trap frame readout: when the followed core is parked in PL0, the HW just
+// pushed EFLAGS/CS/EIP from the trapped process onto the kernel stack. ESP
+// points at EIP, so the three dwords at [+0/+4/+8] are the live "where the
+// process will resume on IRET". Decoded from the ESP dump bytes the panel
+// already fetched (little-endian uint32 each).
+const trapFrame = computed(() => {
+  if (view.value !== 'esp') return null;
+  const c = followedCore.value;
+  if (!c || c.mode !== 0) return null;
+  const bytes = followed.value.bytes;
+  if (bytes.length < 12) return null;
+  const u32 = (off: number) =>
+    ((bytes[off] | (bytes[off + 1] << 8) | (bytes[off + 2] << 16) | (bytes[off + 3] << 24)) >>> 0);
+  return {
+    eip: u32(0),
+    cs: u32(4) & 0xffff, // CS is zero-extended to 32 bits on push, low 16 are the selector
+    eflags: u32(8),
+    espBase: followed.value.baseAddr,
+  };
+});
+
 // Switch to Custom and jump the dump to the start of a memory region. Used by
 // the clickable legend chips below the dump — EIP/ESP would snap back to the
 // live pointers on the next tick so Custom is the only honest target.
@@ -243,7 +264,7 @@ function jumpToRegion(addr: number) {
 </script>
 
 <template>
-  <div class="panel mem" data-pizarra-anchor="memory-panel">
+  <div class="panel mem" data-pizarra-anchor="memory-panel" data-narrator-anchor="memory-panel">
     <div class="panel-title">{{ t('panels.memory.title') }}</div>
 
     <div class="controls">
@@ -306,6 +327,29 @@ function jumpToRegion(addr: number) {
         · {{ t('panels.memory.followingPid', { pid: followedCore.current_pid, name: pidNameFor(followedCore.id) || '—' }) }}
       </span>
       <span class="following-line__region">{{ regionLabel(followedAddr) }}</span>
+    </div>
+
+    <!-- Trap frame readout: visible only on the ESP tab when the followed
+         core is in PL0. Decodes the three dwords the HW pushed at IRQ entry
+         (EIP / CS / EFLAGS of the trapped process) into a labeled strip so
+         the alumno can see "this is where P5 will resume on IRET". -->
+    <div v-if="trapFrame" class="trap-frame" :title="t('panels.memory.trapFrameTitle')">
+      <div class="trap-frame__title">{{ t('panels.memory.trapFrameTitleLabel') }}</div>
+      <div class="trap-frame__row">
+        <span class="trap-frame__off">[ESP+0]</span>
+        <span class="trap-frame__label">{{ t('panels.memory.trapFrameSavedEip') }}</span>
+        <span class="trap-frame__val">0x{{ trapFrame.eip.toString(16).toUpperCase().padStart(8, '0') }}</span>
+      </div>
+      <div class="trap-frame__row">
+        <span class="trap-frame__off">[ESP+4]</span>
+        <span class="trap-frame__label">{{ t('panels.memory.trapFrameSavedCs') }}</span>
+        <span class="trap-frame__val">0x{{ trapFrame.cs.toString(16).toUpperCase().padStart(4, '0') }}</span>
+      </div>
+      <div class="trap-frame__row">
+        <span class="trap-frame__off">[ESP+8]</span>
+        <span class="trap-frame__label">{{ t('panels.memory.trapFrameSavedEflags') }}</span>
+        <span class="trap-frame__val">0x{{ trapFrame.eflags.toString(16).toUpperCase().padStart(8, '0') }}</span>
+      </div>
     </div>
     <div v-else-if="view !== 'custom'" class="following-line following-line--empty">
       {{ t('panels.memory.followingNoCore') }}
@@ -440,6 +484,49 @@ function jumpToRegion(addr: number) {
   background: rgba(var(--accent-rgb), 0.18);
   color: var(--amber);
   border-color: var(--amber);
+}
+
+/* Trap frame readout. Sits between the "following" line and the hex dump
+ * when the followed core is in PL0, so the eye reads top-to-bottom:
+ *   "following C0:ESP @ 0x..."
+ *   "TRAP FRAME pushed by HW"          ← new strip
+ *   [hex dump showing those same bytes]
+ * The amber accent reuses the kernel-mode hue from the Event Log so the
+ * three panels speak the same visual language. */
+.trap-frame {
+  margin: 4px 0 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--amber);
+  border-radius: 3px;
+  background: rgba(var(--accent-rgb), 0.06);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+.trap-frame__title {
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+  color: var(--amber);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+.trap-frame__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.trap-frame__off {
+  color: var(--text-muted);
+  font-size: 10px;
+  min-width: 56px;
+}
+.trap-frame__label {
+  color: var(--text);
+  min-width: 110px;
+}
+.trap-frame__val {
+  color: var(--amber);
+  font-variant-numeric: tabular-nums;
 }
 
 .core-selector {

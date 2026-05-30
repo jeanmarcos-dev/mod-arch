@@ -39,13 +39,67 @@ const sortedProcs = computed(() => [...cpu.procs].sort((a, b) => a.pid - b.pid))
 // subtrees still render but stop accumulating horizontal offset and surface
 // a ↳ dN chip via realDepth.
 const TREE_DEPTH_CAP = 4;
-const { treeNodes, initPID, idleProc } = useProcessTree({ depthCap: TREE_DEPTH_CAP });
+const { treeNodes, initPID } = useProcessTree({ depthCap: TREE_DEPTH_CAP });
 
-// The swapper (PID 0) gets a compact band when the user has chosen to see
-// the kernel side of the process table. Coupled to showInit so toggling
-// "see the kernel" reveals init + idle together, which matches the
-// pedagogical pair (both are kernel artifacts the student usually ignores).
-const showIdleBand = computed(() => prefs.showInit && idleProc.value !== null);
+// swapperCoreOf parses the "swapper/N" name the backend assigns to per-core
+// idle PCBs (one task per core, all sharing PID 0 with a unique negative
+// TID). The core ID drives the live state read from cpu.cores and the
+// border tint of the proc-card.
+function swapperCoreOf(p: PCBInfo): number | null {
+  if (p.is_idle !== true) return null;
+  const m = /^swapper\/(\d+)$/.exec(p.name);
+  if (!m) return null;
+  return parseInt(m[1], 10);
+}
+
+// HLT cycles read live from the matching core. Falls back to zero while
+// the snapshot is still warming up.
+function swapperHltCycles(p: PCBInfo): number {
+  const id = swapperCoreOf(p);
+  if (id === null) return 0;
+  const c = cpu.cores.find(x => x.id === id);
+  return c?.idle_ticks ?? 0;
+}
+
+// IDLE while parked, HLT while actively executing the HLT loop. running_idle
+// disambiguates "no proc assigned" from "swapper bound and ticking".
+function swapperStateLabel(p: PCBInfo): string {
+  const id = swapperCoreOf(p);
+  if (id === null) return 'IDLE';
+  const c = cpu.cores.find(x => x.id === id);
+  return c?.running_idle ? 'HLT' : 'IDLE';
+}
+
+// True when the proc is bound to a core that is currently sitting in PL0,
+// i.e. the hardware trapped on its behalf and the kernel is running in its
+// context. The PCB in memory is stale at this point — the live state lives
+// in the CPU registers + the kernel-stack interrupt frame.
+function isKernelTrapped(p: PCBInfo): boolean {
+  if (p.is_kthread || p.is_idle) return false;
+  const coreId = coreOfPid(p.pid);
+  if (coreId === null) return false;
+  const c = cpu.cores.find(x => x.id === coreId);
+  return !!c && c.mode === 0;
+}
+
+// kthreadIsRunning derives the live RUN/SLEEP appearance of a kernel/N PCB
+// from the mode of the core it is bound to. Backend stores them as BLOCKED
+// forever (they are never scheduled); the frontend lights them up while
+// their core sits in PL0 to make "the kernel is executing here right now"
+// observable in the process tree.
+function kthreadIsRunning(p: PCBInfo): boolean {
+  if (!p.is_kthread || p.name === 'kthreadd') return false;
+  const m = /^kernel\/(\d+)$/.exec(p.name);
+  if (!m) return false;
+  const coreId = parseInt(m[1], 10);
+  const core = cpu.cores.find(c => c.id === coreId);
+  return !!core && core.mode === 0 && core.running_idle !== true;
+}
+
+function kthreadStateLabel(p: PCBInfo): string {
+  if (p.name === 'kthreadd') return 'BLOCKED';
+  return kthreadIsRunning(p) ? 'RUN' : 'SLEEP';
+}
 
 const EXPANDED_KEY = 'modos.procs.expandedPids';
 
@@ -252,28 +306,24 @@ function regsSrcTitle(p: PCBInfo): string {
       {{ t('panels.processes.emptyDemo') }}
     </div>
 
-    <div
-      v-if="showIdleBand"
-      class="proc-idle-band"
-      :title="t('panels.processes.idleBandTitle')"
-    >
-      <span class="proc-idle-band__badge">PID 0</span>
-      <span class="proc-idle-band__name">{{ idleProc!.name }}</span>
-      <span class="proc-idle-band__hint">{{ t('panels.processes.idleBandHint') }}</span>
-    </div>
-
     <div v-if="treeNodes.length > 0" class="proc-list">
       <section
         v-for="node in treeNodes"
-        :key="node.proc.pid"
+        :key="node.proc.is_idle ? `swapper-${node.proc.tid ?? 0}` : `pid-${node.proc.pid}`"
         class="proc-card"
         :class="[
-          stateClass(node.proc.state),
+          stateClass(
+            node.proc.is_kthread ? kthreadStateLabel(node.proc)
+            : node.proc.is_idle ? swapperStateLabel(node.proc)
+            : node.proc.state,
+          ),
           {
             'proc-card--running': coreOfPid(node.proc.pid) !== null,
             'proc-card--expanded': isExpanded(node.proc.pid),
             'proc-card--flash': cpu.flashingPIDs.has(node.proc.pid),
             'proc-card--child': node.depth > 0,
+            'proc-card--kthread': node.proc.is_kthread === true,
+            'proc-card--swapper': node.proc.is_idle === true,
           },
         ]"
         :style="node.depth > 0 ? { marginLeft: (node.depth * 14) + 'px', borderLeft: '1px solid var(--border)' } : undefined"
@@ -284,12 +334,15 @@ function regsSrcTitle(p: PCBInfo): string {
           role="button"
           tabindex="0"
           :aria-expanded="isExpanded(node.proc.pid)"
-          :title="stateTitle(node.proc)"
-          @click="toggleExpanded(node.proc)"
-          @keydown.enter.prevent="toggleExpanded(node.proc)"
-          @keydown.space.prevent="toggleExpanded(node.proc)"
+          :title="node.proc.is_kthread ? t('panels.processes.kthreadCardTitle', { name: node.proc.name })
+            : node.proc.is_idle ? t('panels.processes.swapperCardTitle', { name: node.proc.name })
+            : stateTitle(node.proc)"
+          @click="!node.proc.is_kthread && !node.proc.is_idle && toggleExpanded(node.proc)"
+          @keydown.enter.prevent="!node.proc.is_kthread && !node.proc.is_idle && toggleExpanded(node.proc)"
+          @keydown.space.prevent="!node.proc.is_kthread && !node.proc.is_idle && toggleExpanded(node.proc)"
         >
           <component
+            v-if="!node.proc.is_kthread && !node.proc.is_idle"
             :is="isExpanded(node.proc.pid) ? ChevronDown : ChevronRight"
             :size="12"
             :stroke-width="2"
@@ -299,12 +352,36 @@ function regsSrcTitle(p: PCBInfo): string {
           <span class="proc-card__name" :title="t('panels.processes.nameTooltip', { name: node.proc.name, eip: hex(pcbEIP(node.proc), 8) })">{{ node.proc.name }}</span>
           <span class="proc-card__head-spacer" />
           <span
-            v-if="coreOfPid(node.proc.pid) !== null"
+            v-if="!node.proc.is_kthread && !node.proc.is_idle && coreOfPid(node.proc.pid) !== null"
             class="proc-card__core"
             :style="{ color: `var(--core-${(coreOfPid(node.proc.pid) as number) % 4})` }"
             :title="t('panels.processes.coreRunning', { core: coreOfPid(node.proc.pid) ?? 0 })"
           >C{{ coreOfPid(node.proc.pid) }}</span>
-          <span class="proc-card__state" :class="stateClass(node.proc.state)">{{ node.proc.state }}</span>
+          <span
+            v-if="node.proc.is_idle && swapperCoreOf(node.proc) !== null"
+            class="proc-card__core"
+            :style="{ color: `var(--core-${(swapperCoreOf(node.proc) as number) % 4})` }"
+            :title="t('panels.processes.coreRunning', { core: swapperCoreOf(node.proc) ?? 0 })"
+          >C{{ swapperCoreOf(node.proc) }}</span>
+          <span
+            v-if="node.proc.is_idle"
+            class="proc-card__swapper-ticks"
+            :title="t('panels.processes.idleBandTicks', { ticks: swapperHltCycles(node.proc) })"
+          >{{ swapperHltCycles(node.proc) }} HLT</span>
+          <span class="proc-card__state" :class="stateClass(
+            node.proc.is_kthread ? kthreadStateLabel(node.proc)
+            : node.proc.is_idle ? swapperStateLabel(node.proc)
+            : node.proc.state,
+          )">{{
+            node.proc.is_kthread ? kthreadStateLabel(node.proc)
+            : node.proc.is_idle ? swapperStateLabel(node.proc)
+            : node.proc.state
+          }}</span>
+          <span
+            v-if="isKernelTrapped(node.proc)"
+            class="proc-card__trap-chip"
+            :title="t('panels.processes.kernelTrappedChipTitle', { core: coreOfPid(node.proc.pid) ?? 0 })"
+          >K · live in C{{ coreOfPid(node.proc.pid) }}</span>
           <span
             v-if="node.isThread"
             class="proc-card__thread-chip"
@@ -322,7 +399,7 @@ function regsSrcTitle(p: PCBInfo): string {
           >↳ d{{ node.realDepth }}</span>
         </header>
 
-        <div v-if="isExpanded(node.proc.pid)" class="proc-card__body">
+        <div v-if="isExpanded(node.proc.pid) && !node.proc.is_kthread && !node.proc.is_idle" class="proc-card__body">
           <div class="proc-card__meta">
             <span class="proc-card__addr" :title="t('panels.processes.addrHint')">
               @ {{ hex(node.proc.code_base, 8) }}
@@ -459,35 +536,59 @@ function regsSrcTitle(p: PCBInfo): string {
   }
 }
 
-/* Compact band for the kernel idle task (PID 0). Slim header above the
- * tree so the swapper is visible without occupying a full proc row. */
-.proc-idle-band {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
-  margin-bottom: 6px;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--cyan, #6cf);
+/* swapper proc-card: one per core (Linux-style swapper/N). Compact look
+ * matches the kthread cards, but uses cyan to set the idle-task family
+ * apart from the amber kernel-thread cards. */
+.proc-card--swapper {
+  border-left: 2px solid var(--cyan, #6cf);
   background: rgba(102, 204, 255, 0.06);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+}
+.proc-card--swapper .proc-card__head {
+  cursor: default;
+}
+.proc-card--swapper.state-hlt {
+  background: rgba(102, 204, 255, 0.14);
+}
+.proc-card__swapper-ticks {
+  margin-right: 6px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
   color: var(--text-muted);
+  opacity: 0.85;
+}
+
+/* "K · live in CN" chip: surfaces the stale-PCB invariant when a user proc
+ * is trapped in the kernel. The label spells it out so the alumno does not
+ * have to know the convention to read the panel: "this PCB's regs are stale
+ * right now; the live state lives in the CPU + kernel-stack frame of CN." */
+.proc-card__trap-chip {
+  display: inline-flex;
+  align-items: baseline;
+  margin-left: 6px;
+  padding: 1px 6px;
   border-radius: 3px;
-  user-select: none;
-}
-.proc-idle-band__badge {
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--amber);
+  font-size: 9px;
   font-weight: 600;
-  color: var(--cyan, #6cf);
-  letter-spacing: 0.4px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
 }
-.proc-idle-band__name {
-  color: var(--text);
+
+/* kthread proc-card: compact rendering for kthreadd + kernel/N nodes.
+ * They have no register file to expand into, so we suppress the body and
+ * let the header live as a single dense row inside the tree. The amber
+ * accent reuses the existing kernel-mode hue from the Event Log so
+ * visualizations match across panels. */
+.proc-card--kthread {
+  border-left: 2px solid var(--amber);
+  background: rgba(var(--accent-rgb), 0.04);
 }
-.proc-idle-band__hint {
-  margin-left: auto;
-  opacity: 0.75;
-  font-style: italic;
+.proc-card--kthread .proc-card__head {
+  cursor: default;
+}
+.proc-card--kthread.state-run {
+  background: rgba(var(--accent-rgb), 0.12);
 }
 
 .proc-list {

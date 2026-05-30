@@ -82,6 +82,12 @@ func TestPause_DuringIdleAutostopStillBroadcasts(t *testing.T) {
 		Name:  "readkey_idle",
 		Procs: []Proc{{Name: "p1", Bytes: readkey}},
 	}}})
+	// This test exercises the legacy auto-stop path that triggers when no
+	// process is runnable. The new default (idle ON) keeps the sim alive
+	// forever, so disable the swapper to assert the legacy semantics.
+	if err := s.SetIdleTaskEnabled(false); err != nil {
+		t.Fatalf("SetIdleTaskEnabled(false): %v", err)
+	}
 	if err := s.LoadProgram("readkey_idle"); err != nil {
 		t.Fatalf("LoadProgram: %v", err)
 	}
@@ -137,6 +143,11 @@ func TestPushKey_ResumesAfterIdleAutostop(t *testing.T) {
 		Name:  "readkey_test",
 		Procs: []Proc{{Name: "p1", Bytes: readkey}},
 	}}})
+	// This test exercises the legacy auto-stop path. Disable the swapper so
+	// the run loop actually parks when sys_read blocks.
+	if err := s.SetIdleTaskEnabled(false); err != nil {
+		t.Fatalf("SetIdleTaskEnabled(false): %v", err)
+	}
 	if err := s.LoadProgram("readkey_test"); err != nil {
 		t.Fatalf("LoadProgram: %v", err)
 	}
@@ -215,6 +226,11 @@ func TestStopRun_IdleAutostopMarksPausedFalse(t *testing.T) {
 		Name:  "halt_now",
 		Procs: []Proc{{Name: "p1", Bytes: []byte{0xF4}}}, // HLT
 	}}})
+	// Legacy autostop test: disable the swapper so HasWork can actually
+	// return false when the lone user proc dies.
+	if err := s.SetIdleTaskEnabled(false); err != nil {
+		t.Fatalf("SetIdleTaskEnabled(false): %v", err)
+	}
 	if err := s.LoadProgram("halt_now"); err != nil {
 		t.Fatalf("LoadProgram: %v", err)
 	}
