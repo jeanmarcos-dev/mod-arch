@@ -33,6 +33,16 @@ coverage.out
 # Personal defense notes (kept out of the public repo).
 /docs/reporte-defensa.md
 
+# Branding drafts (LLM prompts, internal aesthetic notes). Final SVG/assets
+# under docs/branding/ can still be tracked.
+/docs/branding/*.md
+
+# Planning specs and design docs produced during internal brainstorming.
+/docs/superpowers/
+
+# Claude Code local skills and project artifacts.
+/.claude/
+
 # Source material indexed by the tutor (copyrighted books, etc.). The
 # embeddings live in the SQLite under ~/.local/state, not in the repo.
 /books/
