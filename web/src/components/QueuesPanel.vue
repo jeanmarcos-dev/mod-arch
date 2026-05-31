@@ -18,9 +18,21 @@ const hideInit = computed(() => !prefs.showInit && initPID.value > 0);
 const readyQueue = computed(() =>
   hideInit.value ? cpu.readyQueue.filter(pid => pid !== initPID.value) : cpu.readyQueue,
 );
-const waitQueue = computed(() =>
+const baseWaitQueue = computed(() =>
   hideInit.value ? cpu.waitQueue.filter(w => w.pid !== initPID.value) : cpu.waitQueue,
 );
+
+// kthreads (kthreadd + kernel/N) are always parked daemons, not tasks
+// waiting on observable events. They live in their own row so the WAIT
+// QUEUE stays focused on user-meaningful blocks (P1 wait(any), I/O, …)
+// and does not get drowned out on demos with several cores.
+const kthreadPIDs = computed(() => {
+  const set = new Set<number>();
+  for (const p of cpu.procs) if (p.is_kthread) set.add(p.pid);
+  return set;
+});
+const waitQueue = computed(() => baseWaitQueue.value.filter(w => !kthreadPIDs.value.has(w.pid)));
+const kthreadQueue = computed(() => baseWaitQueue.value.filter(w => kthreadPIDs.value.has(w.pid)));
 
 // TransitionGroup applies enter/leave classes only when its `name` prop is
 // truthy. Swapping the name to a sentinel ("rq-off"/"wq-off") with no
@@ -86,6 +98,26 @@ const wqTransitionName = computed(() => prefs.schedulerAnimationEnabled ? 'wq' :
         </span>
       </TransitionGroup>
     </div>
+
+    <div v-if="kthreadQueue.length > 0" class="kthread-queue">
+      <div
+        class="rq-label"
+        :title="t('panels.processes.kthreadQueueHint')"
+      >{{ t('panels.processes.kthreadQueue') }}
+        <span class="wq-hint">{{ t('panels.processes.kthreadQueueHelp') }}</span>
+      </div>
+      <div class="rq-pills rq-pills--kthread">
+        <span
+          v-for="w in kthreadQueue"
+          :key="w.pid"
+          class="kt-pill"
+          :title="t('panels.processes.waitTooltip', { pid: w.pid, reason: w.reason })"
+        >
+          P{{ w.pid }}
+          <span class="wq-reason">{{ w.reason }}</span>
+        </span>
+      </div>
+    </div>
   </CollapsiblePanel>
 </template>
 
@@ -105,6 +137,12 @@ const wqTransitionName = computed(() => prefs.schedulerAnimationEnabled ? 'wq' :
 }
 
 .wait-queue {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.kthread-queue {
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px dashed var(--border);
@@ -266,5 +304,21 @@ const wqTransitionName = computed(() => prefs.schedulerAnimationEnabled ? 'wq' :
 @keyframes wait-pulse {
   0%, 100% { opacity: 1; box-shadow: none; }
   50%      { opacity: 0.7; box-shadow: 0 0 6px color-mix(in oklab, var(--red) 30%, transparent); }
+}
+
+/* kthread pills mirror the wq layout but use a muted gray to telegraph
+   "permanently parked daemon" instead of the urgent red of an actual
+   blocked task. No pulse: nothing is going to change here. */
+.kt-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  background: color-mix(in oklab, var(--text-dim) 6%, transparent);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.75;
 }
 </style>
