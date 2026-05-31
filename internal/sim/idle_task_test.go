@@ -120,6 +120,59 @@ func TestLoadProgram_SpawnsIdleWhenEnabled(t *testing.T) {
 	}
 }
 
+// TestLoadProgram_BindsSwapperToEveryCore covers the boot-bind contract: with
+// the default-on toggle, every core must already have the swapper bound after
+// LoadProgram returns — without the user having pressed RUN or stepped once.
+// The student sees swappers occupying the cores at load time instead of empty
+// slots that only fill on the first tick; the swapper→user transition that
+// follows is then observable in the event log when RUN dispatches.
+func TestLoadProgram_BindsSwapperToEveryCore(t *testing.T) {
+	s := New(Config{
+		NumCores: 2,
+		Demos: []Demo{{
+			Name:  "hlt",
+			Procs: []Proc{{Name: "p1", Bytes: []byte{0xF4}}},
+		}},
+	})
+	if err := s.LoadProgram("hlt"); err != nil {
+		t.Fatalf("LoadProgram: %v", err)
+	}
+
+	for _, c := range s.kernel.Cores {
+		if c.CurrentPID != 0 {
+			t.Errorf("core %d CurrentPID = %d, want 0 (swapper) after LoadProgram", c.ID, c.CurrentPID)
+		}
+		if !c.RunningIdle {
+			t.Errorf("core %d RunningIdle = false, want true after LoadProgram", c.ID)
+		}
+	}
+}
+
+// TestLoadProgram_NoBootBindWhenIdleDisabled is the regression guard for the
+// legacy path: with the toggle off, LoadProgram must not bind anything to the
+// cores — they stay in the "no proc" sentinel so the first Step/StartRun
+// dispatches the demo's procs directly into freshly empty cores.
+func TestLoadProgram_NoBootBindWhenIdleDisabled(t *testing.T) {
+	s := New(Config{
+		NumCores: 2,
+		Demos: []Demo{{
+			Name:  "hlt",
+			Procs: []Proc{{Name: "p1", Bytes: []byte{0xF4}}},
+		}},
+	})
+	if err := s.SetIdleTaskEnabled(false); err != nil {
+		t.Fatalf("SetIdleTaskEnabled(false): %v", err)
+	}
+	if err := s.LoadProgram("hlt"); err != nil {
+		t.Fatalf("LoadProgram: %v", err)
+	}
+	for _, c := range s.kernel.Cores {
+		if c.RunningIdle {
+			t.Errorf("core %d RunningIdle = true with idle disabled; the legacy path must leave cores unbound", c.ID)
+		}
+	}
+}
+
 // TestLoadProgram_NoIdleWhenDisabled guards the default-off regression: every
 // existing demo's process table size must stay unchanged when the toggle is
 // not flipped. Adding PID 0 unconditionally would break demos that count

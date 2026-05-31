@@ -226,6 +226,11 @@ func (s *Simulator) LoadProgram(name string) error {
 	}
 	s.procSources = sources
 	s.procSourceMaps = sourceMaps
+	// Boot bind: park every core on its swapper before any user proc takes a
+	// slot. The first RUN/Step then surfaces the swapper→user proc transition
+	// in the event log instead of hiding it inside a single "loaded" snapshot.
+	bootEvs := s.kernel.BindIdleCores()
+	bootTick := s.kernel.BootCPU().Tick
 	snap := s.snapshotLocked()
 	procs := s.processListLocked()
 	s.mu.Unlock()
@@ -238,6 +243,7 @@ func (s *Simulator) LoadProgram(name string) error {
 		"sources":     sources,
 		"source_maps": sourceMaps,
 	})
+	s.broadcastTickEvents(bootTick, bootEvs)
 	s.Broadcast(snap)
 	return nil
 }
@@ -248,9 +254,14 @@ func (s *Simulator) StepOnce() error {
 	// Boot dispatch covers the case where the user steps without having
 	// pressed RUN first: idle cores pull from the ready queue before the
 	// kernel ticks. Idempotent when every core already has a CurrentPID.
+	// Capture the tick BEFORE Step so the value we report matches the tick
+	// the just-executed events were stamped with (CPU.Step emits its events
+	// against the current Tick value and then increments at the end). Reading
+	// after Step would surface "next tick to execute", which made the header
+	// pill in the UI run one ahead of the last row in the event log.
+	tick := s.kernel.BootCPU().Tick
 	bootEvs := s.kernel.DispatchIdleCores()
 	evs, err := s.kernel.Step()
-	tick := s.kernel.BootCPU().Tick
 	halted := s.kernel.AllHalted()
 	idleEnabled := s.kernel.IdleTaskEnabled
 	// Process-table mutations (fork, clone-thread, exit, reparent, reap) only
@@ -267,14 +278,13 @@ func (s *Simulator) StepOnce() error {
 		s.Broadcast(map[string]any{"type": "error", "message": err.Error()})
 		return err
 	}
-	for _, e := range bootEvs {
-		s.events.push(e, tick)
-		s.Broadcast(EventToWire(e))
+	// Fuse boot dispatch and the tick's actual events into one batch so the
+	// client gets a single reactive update with the full picture of the tick.
+	tickEvs := bootEvs
+	if len(evs) > 0 {
+		tickEvs = append(tickEvs, evs...)
 	}
-	for _, e := range evs {
-		s.events.push(e, tick)
-		s.Broadcast(EventToWire(e))
-	}
+	s.broadcastTickEvents(tick, tickEvs)
 	if procsSnap != nil {
 		s.Broadcast(map[string]any{"type": "procs", "procs": procsSnap})
 	}
@@ -289,6 +299,27 @@ func (s *Simulator) StepOnce() error {
 		s.Broadcast(map[string]any{"type": "state", "halted": true})
 	}
 	return nil
+}
+
+// broadcastTickEvents bundles every cpu.Event produced in the same tick into
+// a single WS frame. Emitting events one-by-one used to make the frontend
+// re-render each row twice — once with only the first core filled in and
+// again once the rest of the tick arrived — so we batch them here so the
+// client can apply them atomically (one reactive update per tick).
+func (s *Simulator) broadcastTickEvents(tick uint64, evs []cpu.Event) {
+	if len(evs) == 0 {
+		return
+	}
+	wire := make([]map[string]any, 0, len(evs))
+	for _, e := range evs {
+		s.events.push(e, tick)
+		wire = append(wire, EventToWire(e))
+	}
+	s.Broadcast(map[string]any{
+		"type":   "tick_events",
+		"tick":   tick,
+		"events": wire,
+	})
 }
 
 // procTableMutated reports whether any event in the slice changed the set of
@@ -340,10 +371,7 @@ func (s *Simulator) StartRun(hz int) {
 	speedMul := s.speedMul
 	s.mu.Unlock()
 
-	for _, e := range bootEvs {
-		s.events.push(e, tick)
-		s.Broadcast(EventToWire(e))
-	}
+	s.broadcastTickEvents(tick, bootEvs)
 	s.broadcastSpeedState(true, false, clockHz, speedMul, interval)
 
 	go func() {
@@ -559,10 +587,7 @@ func (s *Simulator) PushKey(key string) {
 	userPaused := s.userPaused
 	exitDraining := len(s.kernel.PendingKernelWork) > 0
 	s.mu.Unlock()
-	for _, e := range evs {
-		s.events.push(e, tick)
-		s.Broadcast(EventToWire(e))
-	}
+	s.broadcastTickEvents(tick, evs)
 	if running || userPaused {
 		return
 	}
