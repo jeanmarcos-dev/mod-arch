@@ -228,6 +228,8 @@ func (p *PCB) Snapshot() map[string]any {
 			"EAX": p.Regs.EAX, "EBX": p.Regs.EBX, "ECX": p.Regs.ECX, "EDX": p.Regs.EDX,
 			"ESI": p.Regs.ESI, "EDI": p.Regs.EDI, "EBP": p.Regs.EBP,
 			"EIP": p.Regs.EIP, "EFLAGS": p.Regs.EFLAGS,
+			// PCB's ESP lives in SavedUserESP, not in Regs.
+			"ESP": p.SavedUserESP,
 		},
 		"saved_user_esp": p.SavedUserESP,
 		"code_base":      codeBase,

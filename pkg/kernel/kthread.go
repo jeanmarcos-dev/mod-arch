@@ -79,6 +79,9 @@ func (k *Kernel) SpawnKernelThreads() {
 			Mode:      cpu.ModeKernel,
 			Slot:      -1,
 			Core:      core.ID,
+			// TGID = pid: kthreads in Linux are NOT in kthreadd's thread
+			// group (kernel_clone() without CLONE_THREAD); they share the
+			// kernel address space (mm == NULL), not the thread group.
 			TGID:      pid,
 			ParentPID: KThreaddPID,
 			IsKThread: true,

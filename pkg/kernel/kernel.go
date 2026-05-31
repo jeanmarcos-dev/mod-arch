@@ -475,12 +475,20 @@ func (k *Kernel) Step() ([]cpu.Event, error) {
 // scheduler assigns it work or routes an interrupt its way.
 func (k *Kernel) stepCore(core *Core) ([]cpu.Event, error) {
 	if core.CurrentPID == 0 && len(core.CPU.PendingIRQs) == 0 {
-		// Count idle ticks even though we skip the rest of the work:
-		// the swapper is "executing" HLT every cycle, the only honest
-		// way to surface that to the UI without spamming the event
-		// stream is a per-core counter.
+		// Swapper parked on HLT: advance the CPU tick (the real x86 keeps
+		// counting cycles while halted), bump the idle counter, and surface
+		// the activity as an EventHalt so the event log stays visibly alive
+		// instead of going silent the moment the user proc blocks. One entry
+		// per tick per swapper-bound core is honest — the simulator IS
+		// advancing, the CPU IS in HLT, and the cadence is the lesson.
 		if core.RunningIdle {
+			core.CPU.Tick++
 			core.IdleTicks++
+			return []cpu.Event{cpu.EventHalt{
+				CoreID: core.ID,
+				Tick:   core.CPU.Tick,
+				PID:    0,
+			}}, nil
 		}
 		return nil, nil
 	}

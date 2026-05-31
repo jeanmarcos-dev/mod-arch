@@ -206,6 +206,9 @@ func pcbRegsSnapshot(p *PCB) map[string]uint32 {
 		"ESI": p.Regs.ESI, "EDI": p.Regs.EDI, "EBP": p.Regs.EBP,
 		"EIP": p.Regs.EIP, "EFLAGS": p.Regs.EFLAGS,
 		"ESP": p.SavedUserESP,
+		"CS":  uint32(p.Regs.CS),
+		"DS":  uint32(p.Regs.DS),
+		"SS":  uint32(p.Regs.SS),
 	}
 }
 
@@ -301,17 +304,37 @@ func (k *Kernel) DispatchIdleCores() []cpu.Event {
 	}
 
 	// Idle fallback pass: every core that still has no work gets the
-	// swapper. Guarded by RunningIdle so successive Step calls do not
-	// re-emit EventCoreIdle or replay loadCPUFromPCB — the swapper that is
-	// already halted waiting for an IRQ must stay there.
-	if k.IdleTaskEnabled && k.idleSpawned() {
-		for _, c := range k.Cores {
-			if c.CurrentPID == 0 && !c.RunningIdle {
-				out = append(out, k.bindIdleToCore(c)...)
-			}
+	// swapper. Delegated to BindIdleCores so the same code path covers the
+	// boot-time bind (before any user proc runs) and the post-eviction bind
+	// inside the scheduler. Guarded by RunningIdle so successive Step calls
+	// do not re-emit EventCoreIdle or replay loadCPUFromPCB — the swapper
+	// that is already halted waiting for an IRQ must stay there.
+	out = append(out, k.BindIdleCores()...)
+
+	return out
+}
+
+// BindIdleCores binds the per-core swapper to every core that currently has
+// no proc assigned. Idempotent: cores already running the swapper are
+// skipped, so it is safe to call this from LoadProgram (where it boot-binds
+// every core to its swapper before the user presses RUN) and from inside
+// DispatchIdleCores (where it fills cores left vacant by the eviction pass).
+//
+// Unlike DispatchIdleCores it does NOT pull from the ready queue: callers
+// that want a full scheduler tick must call DispatchIdleCores. Pedagogically,
+// keeping the two passes split lets the alumno observe "swapper bound at
+// boot" and "scheduler evicts swapper, dispatches user proc" as separate
+// transitions instead of a single hidden one.
+func (k *Kernel) BindIdleCores() []cpu.Event {
+	if !k.IdleTaskEnabled || !k.idleSpawned() {
+		return nil
+	}
+	var out []cpu.Event
+	for _, c := range k.Cores {
+		if c.CurrentPID == 0 && !c.RunningIdle {
+			out = append(out, k.bindIdleToCore(c)...)
 		}
 	}
-
 	return out
 }
 
