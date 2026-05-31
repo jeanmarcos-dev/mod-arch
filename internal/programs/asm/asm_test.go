@@ -204,3 +204,93 @@ func TestLabelOffsetEmbedded(t *testing.T) {
 		t.Errorf("LabelOffset = %d, want 5", got)
 	}
 }
+
+// TestGlobalsAndFuncsPropagated covers the var-metadata path end-to-end:
+// declaring a Global, opening two Funcs at different offsets, attaching a
+// LocalReg / LocalStack / LocalMem to each, and verifying Build() copies the
+// slices with EndOffset closed by the next Func() or by Build() itself.
+func TestGlobalsAndFuncsPropagated(t *testing.T) {
+	b := NewProc("vars").Source("// vars\n")
+	b.Global("counter", VarInt, 0x3F0000, 4)
+	b.Global("flag", VarUint, 0x3F0004, 4)
+
+	b.Func("main").At(1)
+	b.LocalReg("t1", VarInt, EAX) // alias of EAX after clone
+	b.MovImm(EAX, 1)              // 5 bytes → offset 0..4
+
+	b.Func("thread_fn").At(2) // opens at offset 5
+	b.LocalReg("v", VarInt, EAX)
+	b.LocalReg("i", VarInt, EBX)
+	b.LocalStack("scratch", VarInt, -4)
+	b.LocalMem("static_buf", VarChar, 0x3F0010)
+	b.MovImm(EAX, 2) // 5 bytes → offset 5..9
+
+	p := b.Build()
+
+	if len(p.Globals) != 2 || p.Globals[0].Name != "counter" || p.Globals[1].Name != "flag" {
+		t.Fatalf("Globals = %+v", p.Globals)
+	}
+	if p.Globals[0].Addr != 0x3F0000 || p.Globals[0].Len != 4 {
+		t.Errorf("counter global = %+v", p.Globals[0])
+	}
+
+	if len(p.Funcs) != 2 {
+		t.Fatalf("Funcs len = %d, want 2", len(p.Funcs))
+	}
+	if p.Funcs[0] != (Func{Name: "main", StartOffset: 0, EndOffset: 5}) {
+		t.Errorf("main = %+v", p.Funcs[0])
+	}
+	if p.Funcs[1] != (Func{Name: "thread_fn", StartOffset: 5, EndOffset: 10}) {
+		t.Errorf("thread_fn = %+v", p.Funcs[1])
+	}
+
+	if len(p.Locals) != 5 {
+		t.Fatalf("Locals len = %d, want 5", len(p.Locals))
+	}
+	wantLocal := func(idx int, name, fn string, kind VarLocKind) {
+		got := p.Locals[idx]
+		if got.Name != name || got.Func != fn || got.Loc.Kind != kind {
+			t.Errorf("locals[%d] = %+v", idx, got)
+		}
+	}
+	wantLocal(0, "t1", "main", VarLocReg)
+	wantLocal(1, "v", "thread_fn", VarLocReg)
+	wantLocal(2, "i", "thread_fn", VarLocReg)
+	wantLocal(3, "scratch", "thread_fn", VarLocStack)
+	wantLocal(4, "static_buf", "thread_fn", VarLocMem)
+
+	if p.Locals[3].Loc.Offset != -4 {
+		t.Errorf("scratch offset = %d, want -4", p.Locals[3].Loc.Offset)
+	}
+	if p.Locals[4].Loc.Addr != 0x3F0010 {
+		t.Errorf("static_buf addr = 0x%X, want 0x3F0010", p.Locals[4].Loc.Addr)
+	}
+	if p.Locals[1].Loc.Reg != "EAX" {
+		t.Errorf("v reg = %q, want EAX", p.Locals[1].Loc.Reg)
+	}
+}
+
+// TestLocalWithoutFuncPanics — declaring a Local before any Func() open is
+// always a demo bug; surface it loudly at catalogue construction.
+func TestLocalWithoutFuncPanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic, got none")
+		}
+	}()
+	b := NewProc("nofun").Source("// nofun\n").At(1)
+	b.LocalReg("v", VarInt, EAX)
+}
+
+// TestDuplicateGlobalPanics — same reasoning as duplicate labels: catch the
+// mistake at catalogue build, not in the UI.
+func TestDuplicateGlobalPanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic, got none")
+		}
+	}()
+	b := NewProc("dupg").Source("// dupg\n")
+	b.Global("x", VarInt, 0x100, 4)
+	b.Global("x", VarInt, 0x200, 4)
+}

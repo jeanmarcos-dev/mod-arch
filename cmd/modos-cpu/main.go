@@ -84,8 +84,40 @@ func runServer(args []string) {
 					smap[i] = sim.SourceLine{Offset: sl.Offset, Mnemonic: sl.Mnemonic, CLine: sl.CLine}
 				}
 			}
+			var globals []sim.Global
+			if len(p.Globals) > 0 {
+				globals = make([]sim.Global, len(p.Globals))
+				for i, g := range p.Globals {
+					globals[i] = sim.Global{Name: g.Name, Type: sim.VarType(g.Type), Addr: g.Addr, Len: g.Len}
+				}
+			}
+			var locals []sim.Local
+			if len(p.Locals) > 0 {
+				locals = make([]sim.Local, len(p.Locals))
+				for i, l := range p.Locals {
+					locals[i] = sim.Local{
+						Name: l.Name,
+						Type: sim.VarType(l.Type),
+						Loc: sim.VarLoc{
+							Kind:   sim.VarLocKind(l.Loc.Kind),
+							Addr:   l.Loc.Addr,
+							Reg:    l.Loc.Reg,
+							Offset: l.Loc.Offset,
+						},
+						Func: l.Func,
+					}
+				}
+			}
+			var funcs []sim.Func
+			if len(p.Funcs) > 0 {
+				funcs = make([]sim.Func, len(p.Funcs))
+				for i, f := range p.Funcs {
+					funcs[i] = sim.Func{Name: f.Name, StartOffset: f.StartOffset, EndOffset: f.EndOffset}
+				}
+			}
 			procs = append(procs, sim.Proc{
 				Name: p.Name, Bytes: p.Bytes, Source: p.Source, SourceMap: smap,
+				Globals: globals, Locals: locals, Funcs: funcs,
 			})
 		}
 		demos = append(demos, sim.Demo{

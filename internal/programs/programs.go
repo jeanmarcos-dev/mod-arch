@@ -52,11 +52,18 @@ type Demo struct {
 // line and offers a human-readable mnemonic for the side-by-side panel
 // that the UI renders. An empty SourceMap means "no bridge available" —
 // the UI falls back to showing Source as plain text without highlighting.
+//
+// Globals, Locals and Funcs are optional variable metadata that the VARS
+// panel uses to display live values for each declared C variable. Empty
+// slices mean "no variables declared" and the panel renders nothing.
 type Proc struct {
 	Name      string
 	Bytes     []byte
 	Source    string
 	SourceMap []SourceLine
+	Globals   []Global
+	Locals    []Local
+	Funcs     []Func
 }
 
 // SourceLine pins one machine instruction to its C line of origin.
@@ -74,6 +81,54 @@ type SourceLine struct {
 	Offset   uint32
 	Mnemonic string
 	CLine    int
+}
+
+// VarType, VarLocKind, VarLoc, Global, Local and Func mirror the types in
+// internal/programs/asm. We redeclare them so this package — which the
+// simulator and snapshot builders depend on — does not need to import the
+// asm DSL package. dslProc() copies the values across the boundary.
+type VarType string
+
+const (
+	VarInt  VarType = "int"
+	VarUint VarType = "uint"
+	VarPtr  VarType = "ptr"
+	VarChar VarType = "char"
+)
+
+type VarLocKind string
+
+const (
+	VarLocMem   VarLocKind = "mem"
+	VarLocReg   VarLocKind = "reg"
+	VarLocStack VarLocKind = "stack"
+)
+
+type VarLoc struct {
+	Kind   VarLocKind
+	Addr   uint32
+	Reg    string
+	Offset int32
+}
+
+type Global struct {
+	Name string
+	Type VarType
+	Addr uint32
+	Len  uint32
+}
+
+type Local struct {
+	Name string
+	Type VarType
+	Loc  VarLoc
+	Func string
+}
+
+type Func struct {
+	Name        string
+	StartOffset uint32
+	EndOffset   uint32
 }
 
 // Demos returns the embedded demo scenarios.

@@ -39,6 +39,9 @@ type Proc struct {
 	Bytes     []byte
 	Source    string
 	SourceMap []SourceLine
+	Globals   []Global
+	Locals    []Local
+	Funcs     []Func
 }
 
 // SourceLine pins one machine instruction to the C line that motivated it.
@@ -48,6 +51,54 @@ type SourceLine struct {
 	Offset   uint32 `json:"offset"`
 	Mnemonic string `json:"mnemonic"`
 	CLine    int    `json:"c_line"`
+}
+
+// VarType, VarLocKind, VarLoc, Global, Local, Func mirror the same-named
+// types in internal/programs. The sim layer keeps its own copy so its public
+// API stays independent of the programs package; main.go translates across
+// the boundary when registering demos.
+type VarType string
+
+const (
+	VarInt  VarType = "int"
+	VarUint VarType = "uint"
+	VarPtr  VarType = "ptr"
+	VarChar VarType = "char"
+)
+
+type VarLocKind string
+
+const (
+	VarLocMem   VarLocKind = "mem"
+	VarLocReg   VarLocKind = "reg"
+	VarLocStack VarLocKind = "stack"
+)
+
+type VarLoc struct {
+	Kind   VarLocKind
+	Addr   uint32
+	Reg    string
+	Offset int32
+}
+
+type Global struct {
+	Name string
+	Type VarType
+	Addr uint32
+	Len  uint32
+}
+
+type Local struct {
+	Name string
+	Type VarType
+	Loc  VarLoc
+	Func string
+}
+
+type Func struct {
+	Name        string
+	StartOffset uint32
+	EndOffset   uint32
 }
 
 // SendBufferSize is the buffer size of each client channel. If it fills up
@@ -92,6 +143,15 @@ type Simulator struct {
 	programs       map[string]Demo
 	procSources    map[int]string
 	procSourceMaps map[int][]SourceLine
+
+	// procGlobals/procLocals/procFuncs hold variable metadata declared by
+	// each demo's Proc, keyed by the leader PID of the loaded program. Live
+	// values are resolved in snapshotLocked() against the current kernel
+	// state; threads of the same process inherit their leader's metadata
+	// because clone(CLONE_VM|CLONE_THREAD) shares the address space.
+	procGlobals map[int][]Global
+	procLocals  map[int][]Local
+	procFuncs   map[int][]Func
 
 	clients  map[*Client]struct{}
 	clientMu sync.RWMutex
@@ -211,6 +271,9 @@ func (s *Simulator) LoadProgram(name string) error {
 	pids := make([]int, 0, len(demo.Procs))
 	sources := make(map[int]string)
 	sourceMaps := make(map[int][]SourceLine)
+	globalsByPID := make(map[int][]Global)
+	localsByPID := make(map[int][]Local)
+	funcsByPID := make(map[int][]Func)
 	for i, p := range demo.Procs {
 		pid, err := s.kernel.AddProcess(p.Name, p.Bytes)
 		if err != nil {
@@ -223,9 +286,21 @@ func (s *Simulator) LoadProgram(name string) error {
 		if len(demo.Procs[i].SourceMap) > 0 {
 			sourceMaps[pid] = demo.Procs[i].SourceMap
 		}
+		if len(demo.Procs[i].Globals) > 0 {
+			globalsByPID[pid] = demo.Procs[i].Globals
+		}
+		if len(demo.Procs[i].Locals) > 0 {
+			localsByPID[pid] = demo.Procs[i].Locals
+		}
+		if len(demo.Procs[i].Funcs) > 0 {
+			funcsByPID[pid] = demo.Procs[i].Funcs
+		}
 	}
 	s.procSources = sources
 	s.procSourceMaps = sourceMaps
+	s.procGlobals = globalsByPID
+	s.procLocals = localsByPID
+	s.procFuncs = funcsByPID
 	// Boot bind: park every core on its swapper before any user proc takes a
 	// slot. The first RUN/Step then surfaces the swapper→user proc transition
 	// in the event log instead of hiding it inside a single "loaded" snapshot.
@@ -242,6 +317,7 @@ func (s *Simulator) LoadProgram(name string) error {
 		"procs":       procs,
 		"sources":     sources,
 		"source_maps": sourceMaps,
+		"var_meta":    varMetaPayload(globalsByPID, localsByPID, funcsByPID),
 	})
 	s.broadcastTickEvents(bootTick, bootEvs)
 	s.Broadcast(snap)
@@ -273,6 +349,12 @@ func (s *Simulator) StepOnce() error {
 	if procTableMutated(bootEvs) || procTableMutated(evs) {
 		procsSnap = s.processListLocked()
 	}
+	// Compute vars under the same lock as Step() so the snapshot captured
+	// matches exactly the post-step register file and memory. Bundling vars
+	// into the tick_events frame below also makes delivery atomic: a slow
+	// WS consumer either gets the new events AND the new vars or drops
+	// both, which prevents the cursor from running ahead of the VARS panel.
+	varsPayload := s.varsLocked()
 	s.mu.Unlock()
 	if err != nil {
 		s.Broadcast(map[string]any{"type": "error", "message": err.Error()})
@@ -284,7 +366,7 @@ func (s *Simulator) StepOnce() error {
 	if len(evs) > 0 {
 		tickEvs = append(tickEvs, evs...)
 	}
-	s.broadcastTickEvents(tick, tickEvs)
+	s.broadcastTickFrame(tick, tickEvs, varsPayload)
 	if procsSnap != nil {
 		s.Broadcast(map[string]any{"type": "procs", "procs": procsSnap})
 	}
@@ -307,7 +389,20 @@ func (s *Simulator) StepOnce() error {
 // again once the rest of the tick arrived — so we batch them here so the
 // client can apply them atomically (one reactive update per tick).
 func (s *Simulator) broadcastTickEvents(tick uint64, evs []cpu.Event) {
-	if len(evs) == 0 {
+	s.broadcastTickFrame(tick, evs, nil)
+}
+
+// broadcastTickFrame is the version of broadcastTickEvents that also carries
+// the per-program variable payload. We bundle vars into the SAME frame as the
+// tick's events so the WS layer either delivers both or drops both — never
+// half. Without this, a saturated Send buffer can drop vars_update while
+// keeping the instruction event, leaving the VARS panel one or more steps
+// behind the assembler cursor.
+//
+// vars may be nil for ticks unrelated to user-instruction execution (boot
+// dispatch, run-loop spin-up). evs may be empty when only vars are due.
+func (s *Simulator) broadcastTickFrame(tick uint64, evs []cpu.Event, vars map[string]any) {
+	if len(evs) == 0 && vars == nil {
 		return
 	}
 	wire := make([]map[string]any, 0, len(evs))
@@ -315,11 +410,15 @@ func (s *Simulator) broadcastTickEvents(tick uint64, evs []cpu.Event) {
 		s.events.push(e, tick)
 		wire = append(wire, EventToWire(e))
 	}
-	s.Broadcast(map[string]any{
+	msg := map[string]any{
 		"type":   "tick_events",
 		"tick":   tick,
 		"events": wire,
-	})
+	}
+	if vars != nil {
+		msg["vars"] = vars
+	}
+	s.Broadcast(msg)
 }
 
 // procTableMutated reports whether any event in the slice changed the set of
@@ -662,6 +761,10 @@ func (s *Simulator) SetNumCores(n int) error {
 	s.kernel = kernel.NewMulti(cpu.DefaultMemSize, n)
 	s.kernel.IdleTaskEnabled = wasIdleEnabled
 	s.procSources = nil
+	s.procSourceMaps = nil
+	s.procGlobals = nil
+	s.procLocals = nil
+	s.procFuncs = nil
 	snap := s.snapshotLocked()
 	procs := s.processListLocked()
 	s.mu.Unlock()
@@ -787,6 +890,7 @@ func (s *Simulator) snapshotLocked() map[string]any {
 		"procs":         s.processListLocked(),
 		"sources":       s.procSources,
 		"source_maps":   s.procSourceMaps,
+		"vars":          s.varsLocked(),
 		"cores":            cores,
 		"num_cores":        s.kernel.NumCores(),
 		"running":          s.running,
