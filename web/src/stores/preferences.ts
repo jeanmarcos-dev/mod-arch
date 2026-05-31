@@ -36,6 +36,14 @@ export interface ColumnWidths {
 
 export type ColumnSide = 'left' | 'right';
 
+// AsidesCollapsed tracks whether the entire side column (CPU+IPC on the left,
+// Procesos+Colas on the right) is folded into a 28px vertical handle. Distinct
+// from panelsCollapsed, which collapses individual panels to their headers.
+export interface AsidesCollapsed {
+  left: boolean;
+  right: boolean;
+}
+
 // PanelHeights stores a flex-grow weight per resizable row. The right column
 // stack (Procesos/Colas/IPC) uses three weights, and the center column splits
 // vertical space between the tab pile (Código/Bitácora/Memoria) and the
@@ -55,6 +63,7 @@ export interface PanelHeights {
 
 export interface LayoutSnapshot {
   panelsCollapsed: PanelsCollapsed;
+  asidesCollapsed: AsidesCollapsed;
   columnWidths: ColumnWidths;
   panelHeights: PanelHeights;
 }
@@ -88,6 +97,7 @@ interface PrefsState {
   theme: Theme;
   locale: Locale;
   panelsCollapsed: PanelsCollapsed;
+  asidesCollapsed: AsidesCollapsed;
   columnWidths: ColumnWidths;
   panelHeights: PanelHeights;
 }
@@ -129,6 +139,10 @@ const DEFAULTS: PrefsState = {
     queues: false,
     ipc: false,
   },
+  asidesCollapsed: {
+    left: false,
+    right: false,
+  },
   columnWidths: {
     leftPx: 280,
     rightPx: 400,
@@ -152,6 +166,15 @@ function sanitizePanelsCollapsed(input: unknown): PanelsCollapsed {
   for (const k of Object.keys(base) as PanelName[]) {
     if (typeof src[k] === 'boolean') base[k] = src[k] as boolean;
   }
+  return base;
+}
+
+function sanitizeAsidesCollapsed(input: unknown): AsidesCollapsed {
+  const base: AsidesCollapsed = { ...DEFAULTS.asidesCollapsed };
+  if (!input || typeof input !== 'object') return base;
+  const src = input as Record<string, unknown>;
+  if (typeof src.left === 'boolean') base.left = src.left;
+  if (typeof src.right === 'boolean') base.right = src.right;
   return base;
 }
 
@@ -247,6 +270,9 @@ function loadFromStorage(): PrefsState {
       panelsCollapsed: upToDate
         ? sanitizePanelsCollapsed(parsed.panelsCollapsed)
         : { ...DEFAULTS.panelsCollapsed },
+      asidesCollapsed: upToDate
+        ? sanitizeAsidesCollapsed(parsed.asidesCollapsed)
+        : { ...DEFAULTS.asidesCollapsed },
       panelHeights: upToDate
         ? sanitizePanelHeights(parsed.panelHeights)
         : { ...DEFAULTS.panelHeights },
@@ -273,6 +299,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
   const theme = ref<Theme>(initial.theme);
   const locale = ref<Locale>(isLocale(initial.locale) ? initial.locale : DEFAULT_LOCALE);
   const panelsCollapsed = ref<PanelsCollapsed>({ ...initial.panelsCollapsed });
+  const asidesCollapsed = ref<AsidesCollapsed>({ ...initial.asidesCollapsed });
   const columnWidths = ref<ColumnWidths>({ ...initial.columnWidths });
   const panelHeights = ref<PanelHeights>({ ...initial.panelHeights });
 
@@ -301,13 +328,14 @@ export const usePreferencesStore = defineStore('preferences', () => {
       theme: theme.value,
       locale: locale.value,
       panelsCollapsed: panelsCollapsed.value,
+      asidesCollapsed: asidesCollapsed.value,
       columnWidths: columnWidths.value,
       panelHeights: panelHeights.value,
     });
   }
 
   watch(
-    [sidebarCollapsed, showInit, showInitTouched, mode, density, narratorsEnabled, schedulerAnimationEnabled, narratorMinTickMs, theme, locale, panelsCollapsed, columnWidths, panelHeights],
+    [sidebarCollapsed, showInit, showInitTouched, mode, density, narratorsEnabled, schedulerAnimationEnabled, narratorMinTickMs, theme, locale, panelsCollapsed, asidesCollapsed, columnWidths, panelHeights],
     () => {
       try {
         window.localStorage.setItem(STORAGE_KEY, serialize());
@@ -356,6 +384,11 @@ export const usePreferencesStore = defineStore('preferences', () => {
     panelsCollapsed.value = { ...panelsCollapsed.value, [name]: next };
   }
 
+  function toggleAside(side: ColumnSide, value?: boolean) {
+    const next = typeof value === 'boolean' ? value : !asidesCollapsed.value[side];
+    asidesCollapsed.value = { ...asidesCollapsed.value, [side]: next };
+  }
+
   function setColumnWidth(side: ColumnSide, px: number) {
     // Clamp at the lower bound here; the upper bound depends on the current
     // viewport width and is enforced by useResizableColumn during drag and
@@ -385,6 +418,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
   function getLayoutSnapshot(): LayoutSnapshot {
     return {
       panelsCollapsed: { ...panelsCollapsed.value },
+      asidesCollapsed: { ...asidesCollapsed.value },
       columnWidths: { ...columnWidths.value },
       panelHeights: { ...panelHeights.value },
     };
@@ -392,6 +426,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
 
   function applyLayoutSnapshot(snap: LayoutSnapshot) {
     panelsCollapsed.value = { ...snap.panelsCollapsed };
+    asidesCollapsed.value = { ...snap.asidesCollapsed };
     columnWidths.value = { ...snap.columnWidths };
     panelHeights.value = { ...snap.panelHeights };
   }
@@ -399,6 +434,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
   function resetLayout() {
     applyLayoutSnapshot({
       panelsCollapsed: { ...DEFAULTS.panelsCollapsed },
+      asidesCollapsed: { ...DEFAULTS.asidesCollapsed },
       columnWidths: { ...DEFAULTS.columnWidths },
       panelHeights: { ...DEFAULTS.panelHeights },
     });
@@ -475,6 +511,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     theme,
     locale,
     panelsCollapsed,
+    asidesCollapsed,
     columnWidths,
     panelHeights,
     rowDensity,
@@ -488,6 +525,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     setTheme,
     setLocale,
     togglePanel,
+    toggleAside,
     setColumnWidth,
     setPanelHeight,
     getLayoutSnapshot,

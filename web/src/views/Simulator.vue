@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch, type ComponentPublicInstance } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Cpu, Code2, ListTree, MemoryStick, Boxes, Terminal, Lock } from '@lucide/vue';
+import { Cpu, Code2, ListTree, MemoryStick, Boxes, Terminal, Lock, ChevronsLeft, ChevronsRight } from '@lucide/vue';
 import { useCpuStore } from '../stores/cpu';
 import { useViewerMirrorStore } from '../stores/viewerMirror';
 import { useAppConfigStore } from '../stores/appConfig';
@@ -145,6 +145,9 @@ const showProcessesQueuesResizer = computed(() =>
   !prefs.panelsCollapsed.processes && !prefs.panelsCollapsed.queues,
 );
 
+function toggleLeftAside() { prefs.toggleAside('left'); }
+function toggleRightAside() { prefs.toggleAside('right'); }
+
 // Panel IDs disabled by the admin, scoped to students. Privileged users
 // (admin / moderator) always see every panel — the simulator must remain a
 // debugging surface for the people configuring the experience.
@@ -242,6 +245,13 @@ function checkMobile() {
   isMobile.value = window.matchMedia('(max-width: 768px)').matches;
 }
 
+// Whole-column collapse. When a side aside is folded, render a 28px vertical
+// handle in its place and skip the ColumnResizer on that edge — there is no
+// width to drag once the column is reduced to a fixed-width handle. Mobile
+// already pages between panels via tabs, so the collapse is desktop-only.
+const leftAsideCollapsed = computed(() => !isMobile.value && prefs.asidesCollapsed.left);
+const rightAsideCollapsed = computed(() => !isMobile.value && prefs.asidesCollapsed.right);
+
 // Visibilidad de cada panel resuelta en un solo lugar. En desktop, CPU/Procs/Console
 // siempre visibles + middleTab para code/events/memory. En mobile, mobileTab decide todo.
 const visible = computed(() => {
@@ -309,8 +319,21 @@ onUnmounted(() => {
     </nav>
 
     <main class="layout">
+      <aside
+        v-if="leftAsideCollapsed && visible.cpu"
+        class="aside-handle aside-handle--left"
+        role="button"
+        tabindex="0"
+        :title="t('panels.aside.expandLeft')"
+        :aria-label="t('panels.aside.expandLeft')"
+        @click="toggleLeftAside"
+        @keydown.enter.prevent="toggleLeftAside"
+        @keydown.space.prevent="toggleLeftAside"
+      >
+        <span class="aside-handle-title">{{ t('panels.aside.leftTitle') }}</span>
+      </aside>
       <div
-        v-show="visible.cpu"
+        v-show="visible.cpu && !leftAsideCollapsed"
         class="col-left col-left--stack"
         :style="!isMobile ? leftStyle : undefined"
       >
@@ -345,13 +368,21 @@ onUnmounted(() => {
         />
       </div>
       <ColumnResizer
-        v-if="!isMobile && visible.cpu"
+        v-if="!isMobile && visible.cpu && !leftAsideCollapsed"
         side="left"
         :active="leftResizing"
         @pointerdown="startLeftResize"
       />
       <div v-show="visible.middle" class="middle col-center">
         <div class="middle-tabs desktop-only">
+          <button
+            v-if="!leftAsideCollapsed"
+            type="button"
+            class="aside-toggle aside-toggle--left"
+            :title="t('panels.aside.collapseLeft')"
+            :aria-label="t('panels.aside.collapseLeft')"
+            @click="toggleLeftAside"
+          ><ChevronsLeft :size="14" :stroke-width="2.25" /></button>
           <button
             class="tab"
             :class="{ active: activeMiddleTab === 'code', locked: isLocked('code') }"
@@ -373,6 +404,14 @@ onUnmounted(() => {
             @click="setMiddleTab('memory')"
             :title="isLocked('memory') ? t('simulator.lockedPanel.title') : t('tabs.memoryLong')"
           ><MemoryStick :size="14" :stroke-width="2" /><span>{{ t('tabs.memory') }}</span><Lock v-if="isLocked('memory')" class="tab-lock" :size="10" :stroke-width="2" /></button>
+          <button
+            v-if="!rightAsideCollapsed"
+            type="button"
+            class="aside-toggle aside-toggle--right"
+            :title="t('panels.aside.collapseRight')"
+            :aria-label="t('panels.aside.collapseRight')"
+            @click="toggleRightAside"
+          ><ChevronsRight :size="14" :stroke-width="2.25" /></button>
         </div>
         <div
           ref="middleTabsEl"
@@ -407,13 +446,13 @@ onUnmounted(() => {
         />
       </div>
       <ColumnResizer
-        v-if="!isMobile && visible.procs"
+        v-if="!isMobile && visible.procs && !rightAsideCollapsed"
         side="right"
         :active="rightResizing"
         @pointerdown="startRightResize"
       />
       <div
-        v-show="visible.procs"
+        v-show="visible.procs && !rightAsideCollapsed"
         class="col-right col-right--stack"
         :style="!isMobile ? rightStyle : undefined"
       >
@@ -440,6 +479,19 @@ onUnmounted(() => {
           :style="!isMobile ? queuesStyle : undefined"
         />
       </div>
+      <aside
+        v-if="rightAsideCollapsed && visible.procs"
+        class="aside-handle aside-handle--right"
+        role="button"
+        tabindex="0"
+        :title="t('panels.aside.expandRight')"
+        :aria-label="t('panels.aside.expandRight')"
+        @click="toggleRightAside"
+        @keydown.enter.prevent="toggleRightAside"
+        @keydown.space.prevent="toggleRightAside"
+      >
+        <span class="aside-handle-title">{{ t('panels.aside.rightTitle') }}</span>
+      </aside>
     </main>
 
     <!-- Narrators are mounted at the Overview root so byte-flight, PCB-copy
@@ -510,6 +562,41 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
+/* Whole-column fold target. Replaces the col-left/col-right stack when the
+   aside is collapsed. 28px matches the in-pane handle width in CodeAsmSplit
+   so the shell stays visually consistent. */
+.aside-handle {
+  flex: 0 0 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  transition: background 120ms ease;
+}
+.aside-handle:hover {
+  background: rgba(var(--accent-rgb), 0.08);
+  border-color: var(--amber);
+}
+.aside-handle:focus-visible {
+  background: rgba(var(--accent-rgb), 0.08);
+  border-color: var(--amber);
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+}
+.aside-handle-title {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+
 /* Left column now stacks CPU + IPC, mirroring the right column shape so the
    simulator surfaces both "what is each core running" (top) and "how do
    procs talk to each other" (bottom) on the same rail. */
@@ -570,6 +657,9 @@ onUnmounted(() => {
   }
   .col-left--stack > *,
   .col-right--stack > * { min-height: 160px; }
+  /* Mobile pages between panels via the tab bar; the whole-column fold
+     handle has no place in that flow. */
+  .aside-handle { display: none; }
 }
 
 .middle-tabs {
@@ -578,6 +668,32 @@ onUnmounted(() => {
   /* Container query anchor so the tabs collapse to icon-only when their own
      width gets cramped — without introducing a new viewport breakpoint. */
   container-type: inline-size;
+}
+
+/* Mini chevron buttons sitting at the two ends of the middle tab bar — collapse
+   the side asides. flex: 0 0 auto so they don't compete with the actual tabs
+   for horizontal space; the chevron stays icon-only regardless of container
+   width. Mounted inside .middle-tabs (already desktop-only) so mobile inherits
+   the hide automatically. */
+.aside-toggle {
+  flex: 0 0 auto;
+  width: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  background: var(--panel-soft);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.aside-toggle:hover,
+.aside-toggle:focus-visible {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: color-mix(in oklab, var(--accent) 10%, var(--panel-soft));
+  outline: none;
 }
 
 .tab {

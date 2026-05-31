@@ -51,13 +51,16 @@ const { t } = useI18n();
   transform: translate(-50%, -50%);
   background: var(--border-strong);
   border-radius: 1px;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, width 0.15s ease;
   pointer-events: none;
 }
 
+/* Mirror the in-pane divider: the grip stretches on hover/active so the
+   draggable area is more discoverable. */
 .row-resizer:hover .row-resizer__grip,
 .row-resizer--active .row-resizer__grip {
   background: var(--amber);
+  width: 56px;
   box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.4);
 }
 
