@@ -1,9 +1,20 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch, type Ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { MousePointerClick } from '@lucide/vue';
-import { useCpuStore, type SourceLine, type PCBInfo } from '../stores/cpu';
+import {
+  useCpuStore,
+  type SourceLine,
+  type PCBInfo,
+  type VarSnapshot,
+  type VarMeta,
+  type LocalSnapshot,
+  type GlobalSnapshot,
+  type ThreadVarSnapshot,
+} from '../stores/cpu';
 import { useViewerMirrorStore } from '../stores/viewerMirror';
+import VarPopover from './VarPopover.vue';
+import ColumnResizer from './shell/ColumnResizer.vue';
 
 const cpu = useCpuStore();
 const mirror = useViewerMirrorStore();
@@ -144,6 +155,16 @@ const visibleCoreOfPID = computed<Record<number, number>>(() => {
 });
 
 const multicore = computed(() => cpu.cores.length > 1);
+
+// A "thread group" is two or more PCBs sharing the same TGID. Single-PCB
+// groups (the common case for one-off demos like ADD) are plain processes
+// and their cursor chips should read "P4" instead of "T4" so the panel
+// doesn't claim a thread group exists where there is none.
+const isThreadGroup = computed<boolean>(() => (viewingGroup.value?.members.length ?? 0) > 1);
+
+function chipLabelPrefix(): string {
+  return isThreadGroup.value ? 'T' : 'P';
+}
 
 // Compute one cursor per group member. We prefer the live core's EIP when the
 // thread is currently scheduled; otherwise we use the PCB's saved EIP. Offset
@@ -344,6 +365,381 @@ function chipStyle(c: ResolvedCursor): Record<string, string> {
   }
   return {};
 }
+
+// ─── Column collapse state ─────────────────────────────────────────────────
+// Each of the three panels (C, ASM, VARS) can be collapsed independently and
+// the state survives reloads. VARS starts collapsed since it's the new panel
+// and users with no declared variables get nothing useful from it open.
+const STORAGE_KEYS = {
+  c: 'cpu.codeAsm.cCollapsed',
+  asm: 'cpu.codeAsm.asmCollapsed',
+  vars: 'cpu.codeAsm.varsCollapsed',
+} as const;
+
+function loadCollapse(key: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return fallback;
+    return raw === '1';
+  } catch {
+    return fallback;
+  }
+}
+
+const cCollapsed = ref<boolean>(loadCollapse(STORAGE_KEYS.c, false));
+const asmCollapsed = ref<boolean>(loadCollapse(STORAGE_KEYS.asm, false));
+const varsCollapsed = ref<boolean>(loadCollapse(STORAGE_KEYS.vars, true));
+
+function persistCollapse(key: string, val: boolean) {
+  try { localStorage.setItem(key, val ? '1' : '0'); } catch { /* private mode */ }
+}
+
+watch(cCollapsed, (v) => persistCollapse(STORAGE_KEYS.c, v));
+watch(asmCollapsed, (v) => persistCollapse(STORAGE_KEYS.asm, v));
+watch(varsCollapsed, (v) => persistCollapse(STORAGE_KEYS.vars, v));
+
+function toggleC() {
+  // Refuse to collapse the last visible panel — at least one must stay open
+  // or the layout becomes meaningless and the toggles are unreachable.
+  if (!cCollapsed.value && asmCollapsed.value && varsCollapsed.value) return;
+  cCollapsed.value = !cCollapsed.value;
+}
+function toggleAsm() {
+  if (!asmCollapsed.value && cCollapsed.value && varsCollapsed.value) return;
+  asmCollapsed.value = !asmCollapsed.value;
+}
+function toggleVars() {
+  if (!varsCollapsed.value && cCollapsed.value && asmCollapsed.value) return;
+  varsCollapsed.value = !varsCollapsed.value;
+}
+
+// ─── Column widths ─────────────────────────────────────────────────────────
+// Each open pane occupies a share of the row, persisted across reloads so a
+// user who carved the layout once does not have to redo it every time. We
+// store flex-grow units (so the math is independent of viewport width) and
+// reseat them when the user drags a divider.
+const WIDTH_KEYS = {
+  c: 'cpu.codeAsm.cWeight',
+  asm: 'cpu.codeAsm.asmWeight',
+  vars: 'cpu.codeAsm.varsWeight',
+} as const;
+const MIN_PANE_WEIGHT = 0.2;
+
+function loadWeight(key: string, fallback: number): number {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return fallback;
+    const n = Number.parseFloat(raw);
+    return Number.isFinite(n) && n >= MIN_PANE_WEIGHT ? n : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+const cWeight = ref<number>(loadWeight(WIDTH_KEYS.c, 1));
+const asmWeight = ref<number>(loadWeight(WIDTH_KEYS.asm, 1));
+const varsWeight = ref<number>(loadWeight(WIDTH_KEYS.vars, 0.7));
+
+function persistWeight(key: string, val: number) {
+  try { localStorage.setItem(key, String(val)); } catch { /* private mode */ }
+}
+
+watch(cWeight, (v) => persistWeight(WIDTH_KEYS.c, v));
+watch(asmWeight, (v) => persistWeight(WIDTH_KEYS.asm, v));
+watch(varsWeight, (v) => persistWeight(WIDTH_KEYS.vars, v));
+
+interface DragState {
+  // Which pair of panes the divider sits between. We need both weights to
+  // be live for the drag math to feel natural — when you pull right, the
+  // left pane grows by the same amount the right pane shrinks.
+  leftRef: Ref<number>;
+  rightRef: Ref<number>;
+  startX: number;
+  startLeftWeight: number;
+  startRightWeight: number;
+  containerWidth: number;
+}
+// Plain mutable variable (not ref) so Vue does not auto-unwrap the nested
+// Ref<number> fields. We still need reactivity for the divider highlight,
+// which we drive through a separate identifier (one divider at a time).
+let dragState: DragState | null = null;
+type DividerKey = 'c-asm' | 'asm-vars';
+const activeDivider = ref<DividerKey | null>(null);
+const splitRef = ref<HTMLElement | null>(null);
+
+function startDrag(
+  which: DividerKey,
+  event: PointerEvent,
+) {
+  const container = splitRef.value;
+  if (!container) return;
+  const containerWidth = container.getBoundingClientRect().width;
+  if (containerWidth <= 0) return;
+
+  let leftRef: Ref<number>;
+  let rightRef: Ref<number>;
+  if (which === 'c-asm') {
+    leftRef = cWeight;
+    rightRef = asmWeight;
+  } else {
+    leftRef = asmWeight;
+    rightRef = varsWeight;
+  }
+
+  dragState = {
+    leftRef,
+    rightRef,
+    startX: event.clientX,
+    startLeftWeight: leftRef.value,
+    startRightWeight: rightRef.value,
+    containerWidth,
+  };
+  activeDivider.value = which;
+  // Window listeners + capture phase so the drag survives the cursor leaving
+  // the divider element. Same pattern Simulator.vue uses with ColumnResizer.
+  window.addEventListener('pointermove', onDrag);
+  window.addEventListener('pointerup', endDrag);
+  window.addEventListener('pointercancel', endDrag);
+  event.preventDefault();
+}
+
+function onDrag(event: PointerEvent) {
+  const st = dragState;
+  if (!st) return;
+  const totalWeight = st.startLeftWeight + st.startRightWeight;
+  const dx = event.clientX - st.startX;
+  // Convert pixel delta to a weight delta proportional to the share of the
+  // container width the dragged pair occupies. This keeps the cursor stuck
+  // to the divider regardless of how many panes are open.
+  const pairShareWidth = (totalWeight / sumOfWeights()) * st.containerWidth;
+  if (pairShareWidth <= 0) return;
+  const deltaWeight = (dx / pairShareWidth) * totalWeight;
+
+  let nextLeft = st.startLeftWeight + deltaWeight;
+  let nextRight = st.startRightWeight - deltaWeight;
+  if (nextLeft < MIN_PANE_WEIGHT) {
+    nextRight -= (MIN_PANE_WEIGHT - nextLeft);
+    nextLeft = MIN_PANE_WEIGHT;
+  }
+  if (nextRight < MIN_PANE_WEIGHT) {
+    nextLeft -= (MIN_PANE_WEIGHT - nextRight);
+    nextRight = MIN_PANE_WEIGHT;
+  }
+  if (nextLeft < MIN_PANE_WEIGHT || nextRight < MIN_PANE_WEIGHT) return;
+  st.leftRef.value = nextLeft;
+  st.rightRef.value = nextRight;
+}
+
+function endDrag() {
+  if (!dragState) return;
+  dragState = null;
+  activeDivider.value = null;
+  window.removeEventListener('pointermove', onDrag);
+  window.removeEventListener('pointerup', endDrag);
+  window.removeEventListener('pointercancel', endDrag);
+}
+
+// sumOfWeights returns the sum across panes that are currently *open*. A
+// collapsed pane contributes nothing to the layout grow share because its
+// CSS treats it as a fixed-width handle.
+function sumOfWeights(): number {
+  let total = 0;
+  if (!cCollapsed.value) total += cWeight.value;
+  if (!asmCollapsed.value) total += asmWeight.value;
+  if (!varsCollapsed.value) total += varsWeight.value;
+  return total > 0 ? total : 1;
+}
+
+// Style helpers — each open pane reads its flex-grow from the corresponding
+// ref. Collapsed panes get a 28px handle from CSS.
+const cPaneStyle = computed(() => ({ flexGrow: cWeight.value, flexShrink: 1, flexBasis: '0' }));
+const asmPaneStyle = computed(() => ({ flexGrow: asmWeight.value, flexShrink: 1, flexBasis: '0' }));
+const varsPaneStyle = computed(() => ({ flexGrow: varsWeight.value, flexShrink: 1, flexBasis: '0' }));
+
+const showDividerCAsm = computed(() => !cCollapsed.value && !asmCollapsed.value);
+const showDividerAsmVars = computed(() => !asmCollapsed.value && !varsCollapsed.value);
+
+// ─── VARS payload ─────────────────────────────────────────────────────────
+// procVars / procVarMeta are keyed by the leader PID. viewingTGID already
+// returns that PID for the active tab, so we just look it up.
+const varSnapshot = computed<VarSnapshot | null>(() => {
+  const tgid = viewingTGID.value;
+  if (!tgid) return null;
+  return cpu.procVars[tgid] ?? null;
+});
+
+const varMeta = computed<VarMeta | null>(() => {
+  const tgid = viewingTGID.value;
+  if (!tgid) return null;
+  return cpu.procVarMeta[tgid] ?? null;
+});
+
+const hasVarMetadata = computed<boolean>(() => {
+  const m = varMeta.value;
+  if (!m) return false;
+  return Boolean((m.globals && m.globals.length) || (m.locals && m.locals.length));
+});
+
+// Filter threads to those whose PID actually exists in the current process
+// table — a stale snapshot occasionally references a TID that has already
+// been reaped. Keep them in source order (backend sorted by PID).
+const varThreads = computed<ThreadVarSnapshot[]>(() => {
+  const snap = varSnapshot.value;
+  if (!snap) return [];
+  return snap.threads;
+});
+
+const varGlobals = computed<GlobalSnapshot[]>(() => varSnapshot.value?.globals ?? []);
+
+// Track previous value to flash on change. Keyed by "<scope>:<name>" so
+// globals and per-thread locals do not collide.
+const previousValues = ref<Record<string, string>>({});
+const flashingKeys = ref<Set<string>>(new Set());
+
+function valueKey(scope: string, name: string): string { return `${scope}:${name}`; }
+
+watch(varSnapshot, (snap, prev) => {
+  if (!snap) return;
+  const next: Record<string, string> = { ...previousValues.value };
+  const justChanged = new Set<string>();
+
+  for (const g of snap.globals) {
+    const key = valueKey('global', g.name);
+    const v = g.value_hex ?? '';
+    if (prev && previousValues.value[key] !== undefined && previousValues.value[key] !== v) {
+      justChanged.add(key);
+    }
+    next[key] = v;
+  }
+  for (const th of snap.threads) {
+    for (const l of th.locals) {
+      const key = valueKey(`T${th.tid}`, l.name);
+      const v = l.value_hex ?? '';
+      if (prev && previousValues.value[key] !== undefined && previousValues.value[key] !== v) {
+        justChanged.add(key);
+      }
+      next[key] = v;
+    }
+  }
+  previousValues.value = next;
+  if (justChanged.size === 0) return;
+  flashingKeys.value = justChanged;
+  setTimeout(() => {
+    if (flashingKeys.value === justChanged) flashingKeys.value = new Set();
+  }, 350);
+}, { deep: true });
+
+function isFlashing(scope: string, name: string): boolean {
+  return flashingKeys.value.has(valueKey(scope, name));
+}
+
+function localLocLabel(l: LocalSnapshot): string {
+  if (l.loc.kind === 'reg') return `[${l.loc.reg}]`;
+  if (l.loc.kind === 'stack') {
+    const off = l.loc.offset ?? 0;
+    if (off === 0) return '[EBP]';
+    if (off < 0) return `[EBP${off}]`;
+    return `[EBP+${off}]`;
+  }
+  if (l.loc.kind === 'mem' && l.loc.addr !== undefined) {
+    return `[0x${l.loc.addr.toString(16).toUpperCase()}]`;
+  }
+  return '';
+}
+
+function threadChipStyle(tid: number): Record<string, string> {
+  const coreId = visibleCoreOfPID.value[tid];
+  if (coreId !== undefined) {
+    return { background: `var(--core-${coreId % 4})`, color: 'var(--core-fg)' };
+  }
+  return {};
+}
+
+// ─── C-source tokenisation for the popover ────────────────────────────────
+// Build the set of declared variable names so the renderer can mark each
+// token in the C source. Locals and globals share the namespace because the
+// popover only needs a key; resolution to a specific scope happens at hover
+// time using `viewingGroup`'s threads.
+const declaredVarNames = computed<Set<string>>(() => {
+  const names = new Set<string>();
+  const meta = varMeta.value;
+  if (!meta) return names;
+  for (const g of meta.globals ?? []) names.add(g.name);
+  for (const l of meta.locals ?? []) names.add(l.name);
+  return names;
+});
+
+interface CToken { text: string; isVar: boolean }
+
+// Tokenise each C line by identifier vs anything-else. Keeping the
+// non-identifier chunks intact preserves whitespace, punctuation and the
+// look of the original source.
+function tokenizeLine(line: string): CToken[] {
+  if (!line) return [];
+  const out: CToken[] = [];
+  const re = /[A-Za-z_]\w*/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line)) !== null) {
+    if (m.index > last) {
+      out.push({ text: line.slice(last, m.index), isVar: false });
+    }
+    out.push({ text: m[0], isVar: declaredVarNames.value.has(m[0]) });
+    last = re.lastIndex;
+  }
+  if (last < line.length) out.push({ text: line.slice(last), isVar: false });
+  return out;
+}
+
+// Lazily memoise the tokenisation per current source so we don't redo regex
+// on every render of the v-for. Re-runs only when source or var names change.
+const tokenisedLines = computed<CToken[][]>(() => sourceLines.value.map(tokenizeLine));
+
+// ─── Popover state ───────────────────────────────────────────────────────
+interface PopoverState {
+  visible: boolean;
+  name: string;
+  anchorRect: DOMRect | null;
+}
+const popover = ref<PopoverState>({ visible: false, name: '', anchorRect: null });
+let popoverTimer: number | null = null;
+
+function showPopover(name: string, ev: MouseEvent) {
+  if (!declaredVarNames.value.has(name)) return;
+  if (popoverTimer !== null) { clearTimeout(popoverTimer); popoverTimer = null; }
+  const target = ev.currentTarget as HTMLElement | null;
+  popover.value = {
+    visible: true,
+    name,
+    anchorRect: target?.getBoundingClientRect() ?? null,
+  };
+}
+
+function hidePopover() {
+  popoverTimer = window.setTimeout(() => {
+    popover.value = { visible: false, name: '', anchorRect: null };
+    popoverTimer = null;
+  }, 150);
+}
+
+function keepPopover() {
+  if (popoverTimer !== null) { clearTimeout(popoverTimer); popoverTimer = null; }
+}
+
+// On mount, re-validate the persisted collapse state: if all three slots are
+// collapsed (e.g. someone hand-edited localStorage), reopen C so the panel
+// is usable.
+onMounted(() => {
+  if (cCollapsed.value && asmCollapsed.value && varsCollapsed.value) {
+    cCollapsed.value = false;
+  }
+});
+
+// Defensive cleanup: an unmount mid-drag would otherwise leave the window
+// listeners alive and respond to future pointer events from a stale closure.
+onBeforeUnmount(() => {
+  if (dragState !== null) endDrag();
+});
 </script>
 
 <template>
@@ -413,17 +809,32 @@ function chipStyle(c: ResolvedCursor): Record<string, string> {
               class="meta-cursor"
               :style="chipStyle(c)"
             >
-              T{{ c.tid }}<template v-if="c.asmOffset !== null">@{{ fmtHex(c.asmOffset) }}</template><template v-else>·{{ c.state }}</template><span v-if="i < resolvedCursors.length - 1">, </span>
+              {{ chipLabelPrefix() }}{{ c.tid }}<template v-if="c.asmOffset !== null">@{{ fmtHex(c.asmOffset) }}</template><template v-else>·{{ c.state }}</template><span v-if="i < resolvedCursors.length - 1">, </span>
             </span>
           </template>
         </span>
       </div>
 
-      <div class="split" :class="{ 'split--no-asm': sourceMap.length === 0 }">
-        <section class="pane pane--c">
+      <div
+        ref="splitRef"
+        class="split"
+        :class="{
+          'split--c-collapsed': cCollapsed,
+          'split--asm-collapsed': asmCollapsed,
+          'split--vars-collapsed': varsCollapsed,
+          'split--no-asm': sourceMap.length === 0,
+        }"
+      >
+        <!-- C pane: collapsed handle is a thin vertical bar with the rotated
+             title; user clicks the chevron / handle to expand. -->
+        <section v-if="cCollapsed" class="pane-handle" @click="toggleC" :title="t('panels.codeAsm.expandC')">
+          <span class="pane-handle-title">{{ t('panels.codeAsm.cTitle') }}</span>
+        </section>
+        <section v-else class="pane pane--c" :style="cPaneStyle">
           <header class="pane-head">
             <span class="pane-title">{{ t('panels.codeAsm.cTitle') }}</span>
             <span class="pane-sub">{{ t('panels.codeAsm.cLinesCount', { n: sourceLines.length }) }}</span>
+            <button class="pane-collapse" :title="t('panels.codeAsm.collapseC')" @click="toggleC">−</button>
           </header>
           <ol v-if="source" ref="cListRef" class="c-list">
             <li
@@ -432,7 +843,18 @@ function chipStyle(c: ResolvedCursor): Record<string, string> {
               :class="['line', { 'line--current': isActiveLine(idx + 1) }]"
             >
               <span class="line-no">{{ idx + 1 }}</span>
-              <span class="line-text">{{ line || ' ' }}</span>
+              <span class="line-text">
+                <template v-for="(tok, ti) in tokenisedLines[idx]" :key="ti">
+                  <span
+                    v-if="tok.isVar"
+                    class="c-token c-token--var"
+                    @mouseenter="showPopover(tok.text, $event)"
+                    @mouseleave="hidePopover"
+                  >{{ tok.text }}</span>
+                  <template v-else>{{ tok.text }}</template>
+                </template>
+                <template v-if="!tokenisedLines[idx] || tokenisedLines[idx].length === 0">{{ line || ' ' }}</template>
+              </span>
               <span v-if="isActiveLine(idx + 1)" class="line-cursors">
                 <span
                   v-for="c in cursorsAtCLine(idx + 1)"
@@ -441,17 +863,34 @@ function chipStyle(c: ResolvedCursor): Record<string, string> {
                   :class="{ 'thread-chip--idle': c.coreId === null }"
                   :style="chipStyle(c)"
                   :title="cursorTooltip(c)"
-                >T{{ c.tid }}</span>
+                >{{ chipLabelPrefix() }}{{ c.tid }}</span>
               </span>
             </li>
           </ol>
           <div v-else class="pane-empty">{{ t('panels.codeAsm.emptyC') }}</div>
         </section>
 
-        <section v-if="sourceMap.length > 0" class="pane pane--asm">
+        <!-- Drag handle between C and ASM. Reuses the global ColumnResizer
+             so the visual treatment (grip pill, hover/active highlight) is
+             identical to the layout-level resizers in Simulator.vue. -->
+        <ColumnResizer
+          v-if="showDividerCAsm"
+          side="left"
+          :active="activeDivider === 'c-asm'"
+          @pointerdown="(e) => startDrag('c-asm', e)"
+        />
+
+        <!-- ASM pane: same collapse pattern. The legacy "no mapping" fallback
+             is folded into the open pane body so the collapsed handle is the
+             same regardless. -->
+        <section v-if="asmCollapsed" class="pane-handle" @click="toggleAsm" :title="t('panels.codeAsm.expandAsm')">
+          <span class="pane-handle-title">{{ t('panels.codeAsm.asmTitle') }}</span>
+        </section>
+        <section v-else-if="sourceMap.length > 0" class="pane pane--asm" :style="asmPaneStyle">
           <header class="pane-head">
             <span class="pane-title">{{ t('panels.codeAsm.asmTitle') }}</span>
             <span class="pane-sub">{{ t('panels.codeAsm.asmInstrCount', { n: sourceMap.length }) }}</span>
+            <button class="pane-collapse" :title="t('panels.codeAsm.collapseAsm')" @click="toggleAsm">−</button>
           </header>
           <ol ref="asmListRef" class="asm-list">
             <li
@@ -471,22 +910,107 @@ function chipStyle(c: ResolvedCursor): Record<string, string> {
                   :class="{ 'thread-chip--idle': c.coreId === null }"
                   :style="chipStyle(c)"
                   :title="cursorTooltip(c)"
-                >T{{ c.tid }}</span>
+                >{{ chipLabelPrefix() }}{{ c.tid }}</span>
               </span>
             </li>
           </ol>
         </section>
-
-        <section v-else class="pane pane--asm pane--asm-fallback">
+        <section v-else class="pane pane--asm pane--asm-fallback" :style="asmPaneStyle">
           <header class="pane-head">
             <span class="pane-title">{{ t('panels.codeAsm.asmTitle') }}</span>
             <span class="pane-sub">{{ t('panels.codeAsm.noMappingSub') }}</span>
+            <button class="pane-collapse" :title="t('panels.codeAsm.collapseAsm')" @click="toggleAsm">−</button>
           </header>
-          <div class="pane-empty">
-            {{ t('panels.codeAsm.noMappingBody') }}
+          <div class="pane-empty">{{ t('panels.codeAsm.noMappingBody') }}</div>
+        </section>
+
+        <!-- Drag handle between ASM and VARS. -->
+        <ColumnResizer
+          v-if="showDividerAsmVars"
+          side="right"
+          :active="activeDivider === 'asm-vars'"
+          @pointerdown="(e) => startDrag('asm-vars', e)"
+        />
+
+        <!-- VARS pane: opt-in column. Empty body when the demo declared no
+             variables, so the toggle is still discoverable. -->
+        <section v-if="varsCollapsed" class="pane-handle pane-handle--vars" @click="toggleVars" :title="t('panels.codeAsm.expandVars')">
+          <span class="pane-handle-title">{{ t('panels.codeAsm.varsTitle') }}</span>
+        </section>
+        <section v-else class="pane pane--vars" :style="varsPaneStyle">
+          <header class="pane-head">
+            <span class="pane-title">{{ t('panels.codeAsm.varsTitle') }}</span>
+            <span class="pane-sub" v-if="hasVarMetadata">{{ t('panels.codeAsm.varsLiveSub') }}</span>
+            <span class="pane-sub" v-else>{{ t('panels.codeAsm.varsEmptySub') }}</span>
+            <button class="pane-collapse" :title="t('panels.codeAsm.collapseVars')" @click="toggleVars">−</button>
+          </header>
+          <div v-if="!hasVarMetadata" class="pane-empty">
+            {{ t('panels.codeAsm.varsNoMeta') }}
+          </div>
+          <div v-else class="vars-body">
+            <div v-if="varGlobals.length > 0" class="vars-section">
+              <div class="vars-section-title">{{ t('panels.codeAsm.globals') }}</div>
+              <ul class="vars-list">
+                <li
+                  v-for="g in varGlobals"
+                  :key="g.name"
+                  class="var-row"
+                  :class="{ 'var-row--flash': isFlashing('global', g.name), 'var-row--unmapped': g.unmapped }"
+                >
+                  <span class="var-name">{{ g.name }}</span>
+                  <span class="var-loc">[{{ g.addr }}]</span>
+                  <span class="var-type">{{ g.type }}</span>
+                  <span v-if="g.unmapped" class="var-val var-val--unmapped">{{ t('panels.codeAsm.unmapped') }}</span>
+                  <span v-else class="var-val">{{ g.value_dec }} <span class="var-val-hex">{{ g.value_hex }}</span></span>
+                </li>
+              </ul>
+            </div>
+            <div
+              v-for="th in varThreads"
+              :key="th.tid"
+              class="vars-section vars-section--thread"
+              :class="{ 'vars-section--out': !th.in_scope }"
+            >
+              <div class="vars-section-title vars-section-title--thread">
+                <span class="thread-chip" :style="threadChipStyle(th.tid)">{{ th.label }}</span>
+                <span class="vars-fn" v-if="th.func">{{ th.func }}</span>
+                <span class="vars-fn vars-fn--none" v-else>{{ t('panels.codeAsm.outOfScope') }}</span>
+                <span class="vars-ebp">EBP={{ th.ebp }}</span>
+              </div>
+              <ul v-if="th.locals.length > 0" class="vars-list">
+                <li
+                  v-for="l in th.locals"
+                  :key="l.name"
+                  class="var-row"
+                  :class="{
+                    'var-row--flash': isFlashing(`T${th.tid}`, l.name),
+                    'var-row--unset': l.unset,
+                    'var-row--unmapped': l.unmapped,
+                  }"
+                >
+                  <span class="var-name">{{ l.name }}</span>
+                  <span class="var-loc">{{ localLocLabel(l) }}</span>
+                  <span class="var-type">{{ l.type }}</span>
+                  <span v-if="l.unset" class="var-val var-val--unset">{{ t('panels.codeAsm.unset') }}</span>
+                  <span v-else-if="l.unmapped" class="var-val var-val--unmapped">{{ t('panels.codeAsm.unmapped') }}</span>
+                  <span v-else class="var-val">{{ l.value_dec }} <span class="var-val-hex">{{ l.value_hex }}</span></span>
+                </li>
+              </ul>
+              <div v-else class="vars-no-locals">{{ t('panels.codeAsm.noLocalsDeclared') }}</div>
+            </div>
           </div>
         </section>
       </div>
+
+      <VarPopover
+        v-if="popover.visible"
+        :name="popover.name"
+        :anchor-rect="popover.anchorRect"
+        :var-meta="varMeta"
+        :var-snapshot="varSnapshot"
+        @stay="keepPopover"
+        @leave="hidePopover"
+      />
 
       <div class="explain">
         <details>
@@ -628,19 +1152,69 @@ function chipStyle(c: ResolvedCursor): Record<string, string> {
   border-radius: var(--radius-sm);
 }
 
-/* Split layout: 2 equal columns when ASM is available, single column on
-   fallback. Each pane scrolls independently so the highlighted row can be
-   centered without dragging the other side. */
+/* Split layout: up to three flex columns (C, ASM, VARS) with drag handles
+   between any two open panes. Each open pane reads its own flex-grow value
+   from a reactive ref so the user can carve the row to their liking; the
+   weights live in localStorage. Collapsed panes degrade to a 28px handle
+   that is not draggable. */
 .split {
   flex: 1;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  display: flex;
+  flex-direction: row;
+  gap: 0;
   overflow: hidden;
   min-height: 0;
 }
-.split--no-asm { grid-template-columns: 1fr; }
 .split--no-asm .pane--asm-fallback { display: none; }
+
+/* Open panes obey the flex style applied inline; a min-width keeps them
+   readable when the divider gets dragged close to a sibling. */
+.pane {
+  min-width: 120px;
+}
+
+/* Pane dividers use the shared <ColumnResizer> so their look matches the
+   layout-level resizers in Simulator.vue. No local divider CSS lives here
+   anymore. */
+
+/* Collapsed handle: thin clickable bar with the title rotated 90deg so the
+   pane is still identifiable without taking horizontal space. flex: 0 0 28px
+   pins the width so the handle never steals space from the open panes. */
+.pane-handle {
+  flex: 0 0 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  transition: background 120ms ease;
+}
+.pane-handle:hover { background: rgba(var(--accent-rgb), 0.08); }
+.pane-handle-title {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+.pane-collapse {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  line-height: 14px;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+}
+.pane-collapse:hover { color: var(--amber); border-color: var(--amber); }
 
 .pane {
   display: flex;
@@ -792,6 +1366,75 @@ function chipStyle(c: ResolvedCursor): Record<string, string> {
 .explain p:first-of-type { margin-top: 4px; }
 .explain strong { color: var(--text); }
 .explain em { color: var(--amber-dim); }
+
+/* ─── VARS pane ───────────────────────────────────────────────────────── */
+.pane--vars { min-width: 220px; }
+.vars-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.vars-section {
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--border);
+}
+.vars-section:last-child { border-bottom: none; }
+.vars-section--out { opacity: 0.5; }
+.vars-section-title {
+  color: var(--amber-dim);
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.vars-section-title--thread {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.vars-fn { color: var(--text); text-transform: none; letter-spacing: 0; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+.vars-fn--none { color: var(--text-muted); font-style: italic; }
+.vars-ebp { color: var(--text-muted); font-family: 'JetBrains Mono', monospace; font-size: 10px; margin-left: auto; }
+.vars-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.var-row {
+  display: grid;
+  grid-template-columns: minmax(40px, auto) minmax(60px, auto) 32px 1fr;
+  gap: 6px;
+  align-items: baseline;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  transition: background 350ms ease;
+}
+.var-row--flash { background: rgba(var(--accent-rgb), 0.18); }
+.var-row--unset, .var-row--unmapped { opacity: 0.55; }
+.var-name { color: var(--text); }
+.var-loc { color: var(--text-muted); font-size: 10px; }
+.var-type { color: var(--amber-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
+.var-val { color: var(--text); justify-self: end; }
+.var-val-hex { color: var(--text-muted); font-size: 10px; margin-left: 4px; }
+.var-val--unset, .var-val--unmapped { color: var(--text-muted); font-style: italic; font-size: 10px; }
+.vars-no-locals { color: var(--text-muted); font-style: italic; font-size: 10px; padding: 2px 4px; }
+
+/* ─── Identifier tokens in the C pane ─────────────────────────────────── */
+.c-token--var {
+  border-bottom: 1px dotted rgba(var(--accent-rgb), 0.5);
+  cursor: help;
+  transition: background 120ms ease, color 120ms ease;
+}
+.c-token--var:hover {
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--amber);
+}
 
 @media (max-width: 768px) {
   /* Narrow viewports: stack panes vertically so each one keeps a usable

@@ -31,8 +31,13 @@ export const formatLog = {
       mnemonic,
     });
   },
-  modeSwitch(from: number, to: number, cause: string): string {
-    return `▸ ${t('logEvents.modeSwitch', { from: modeLabel(from), to: modeLabel(to), cause })}`;
+  modeSwitch(from: number, to: number, cause: string, kind?: string): string {
+    return `▸ ${t('logEvents.modeSwitch', {
+      from: modeLabel(from),
+      to: modeLabel(to),
+      kind: kind || 'HW',
+      cause,
+    })}`;
   },
   irq(vector: number, source: string): string {
     return `◉ ${t('logEvents.irq', { vector: hex(vector, 2), source })}`;
@@ -72,6 +77,12 @@ export const formatLog = {
       .map((a) => `0x${(a >>> 0).toString(16)}`)
       .join(', ');
     return `⚙ ${t('logEvents.syscall', { name, args: argsStr, result, pid })}`;
+  },
+  syscallError(name: string, args: number[], error: string, pid: number): string {
+    const argsStr = args
+      .map((a) => `0x${(a >>> 0).toString(16)}`)
+      .join(', ');
+    return `⚠ ${t('logEvents.syscallError', { name, args: argsStr, error, pid })}`;
   },
   coreAssign(coreId: number, pid: number): string {
     return `◈ ${t('logEvents.coreAssign', { core: coreId, pid })}`;

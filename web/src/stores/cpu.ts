@@ -13,15 +13,16 @@ export type CpuEvent =
   | { type: 'reg_write'; core_id: number; tick?: number; reg: string; old: number; new: number }
   | { type: 'mem_read'; core_id: number; tick?: number; addr: number; value: number; size: number }
   | { type: 'mem_write'; core_id: number; tick?: number; addr: number; old: number; new: number; size: number }
-  | { type: 'mode_switch'; core_id: number; tick?: number; from: number; to: number; cause: string; new_cs?: number; new_ds?: number; new_ss?: number; new_esp?: number }
+  | { type: 'mode_switch'; core_id: number; tick?: number; from: number; to: number; kind?: string; cause: string; new_cs?: number; new_ds?: number; new_ss?: number; new_esp?: number }
   | { type: 'irq_fire'; core_id: number; tick?: number; vector: number; source: string; handler: number; from_mode: number; saved_eip?: number; saved_cs?: number; saved_eflags?: number }
   | { type: 'page_fault'; core_id: number; tick?: number; addr: number; mode: number; perm_needed: string }
   | { type: 'halt'; core_id: number; tick?: number; pid?: number }
   | { type: 'tick'; value: number }
   | { type: 'state'; halted?: boolean; running?: boolean; paused?: boolean; hz?: number; clockHz?: number; speedMul?: number; tickIntervalMs?: number }
-  | { type: 'snapshot'; regs: Record<string, number>; segments: Record<string, number>; mode: number; halted: boolean; tick: number; timer_quantum?: number; current_pid?: number; ready_queue?: number[]; wait_queue?: WaitInfo[]; procs?: PCBInfo[]; sources?: Record<string, string>; source_maps?: Record<string, SourceLine[]>; cores?: CoreInfo[]; num_cores?: number; running?: boolean; paused?: boolean; hz?: number; clockHz?: number; speedMul?: number; tickIntervalMs?: number }
+  | { type: 'snapshot'; regs: Record<string, number>; segments: Record<string, number>; mode: number; halted: boolean; tick: number; timer_quantum?: number; current_pid?: number; ready_queue?: number[]; wait_queue?: WaitInfo[]; procs?: PCBInfo[]; sources?: Record<string, string>; source_maps?: Record<string, SourceLine[]>; vars?: Record<string, VarSnapshot> | null; cores?: CoreInfo[]; num_cores?: number; running?: boolean; paused?: boolean; hz?: number; clockHz?: number; speedMul?: number; tickIntervalMs?: number }
   | { type: 'programs'; list: ProgramInfo[] }
-  | { type: 'loaded'; name: string; pids: number[]; procs: PCBInfo[]; sources: Record<string, string>; source_maps?: Record<string, SourceLine[]> }
+  | { type: 'loaded'; name: string; pids: number[]; procs: PCBInfo[]; sources: Record<string, string>; source_maps?: Record<string, SourceLine[]>; var_meta?: Record<string, VarMeta> | null }
+  | { type: 'vars_update'; vars: Record<string, VarSnapshot> | null }
   | { type: 'reset' }
   | { type: 'procs'; procs: PCBInfo[] }
   | { type: 'pipe_create'; core_id?: number; tick?: number; pipe_id: number; owner_pid: number; fd_r: number; fd_w: number; is_fifo: boolean; name?: string }
@@ -37,7 +38,7 @@ export type CpuEvent =
   | { type: 'wake'; core_id?: number; tick?: number; pid: number; from_reason: string; ready_queue: number[] }
   | { type: 'init_reap'; core_id?: number; tick?: number; init_pid: number; reaps: { child_pid: number; exit_code: number; reparented: boolean }[]; ready_queue: number[] }
   | { type: 'process_state'; core_id?: number; tick?: number; pid: number; state: string; reason?: string; exit_code?: number }
-  | { type: 'syscall'; core_id?: number; tick?: number; pid: number; num: number; name: string; args: number[]; result: number }
+  | { type: 'syscall'; core_id?: number; tick?: number; pid: number; num: number; name: string; args: number[]; result: number; error?: string }
   | { type: 'console_out'; core_id?: number; tick?: number; pid: number; kind?: 'in' | 'out'; bytes: number[]; text: string }
   | { type: 'kbd_state'; buf_used: number; buf_cap: number; readers: { pid: number; prog: string }[] }
   | { type: 'core_assign'; core_id: number; tick?: number; pid: number }
@@ -204,6 +205,85 @@ export interface SourceLine {
   offset: number;
   mnemonic: string;
   c_line: number;
+}
+
+// VarType, VarLocKind and VarLoc mirror their Go counterparts in
+// internal/sim. The VARS panel uses Loc to render a label like "[EAX]" or
+// "[EBP-4]" next to the value, and the popover uses it to resolve a token
+// in the C source against the right thread.
+export type VarType = 'int' | 'uint' | 'ptr' | 'char';
+export type VarLocKind = 'mem' | 'reg' | 'stack';
+export interface VarLoc {
+  kind: VarLocKind;
+  addr?: number;
+  reg?: string;
+  offset?: number;
+}
+
+// VarMetaGlobal / VarMetaLocal / VarMetaFunc are the static slice declared
+// by a demo (name, type, address) — they arrive once in the `loaded` event
+// and never change while the demo is running. Lets the UI tokenize the C
+// source even before the first snapshot arrives.
+export interface VarMetaGlobal {
+  name: string;
+  type: VarType;
+  addr: string; // backend ships hex string ("0x3F0000")
+  len: number;
+}
+export interface VarMetaLocal {
+  name: string;
+  type: VarType;
+  func: string;
+  loc: VarLoc;
+}
+export interface VarMetaFunc {
+  name: string;
+  start_offset: number;
+  end_offset: number;
+}
+export interface VarMeta {
+  globals?: VarMetaGlobal[];
+  locals?: VarMetaLocal[];
+  funcs?: VarMetaFunc[];
+}
+
+// GlobalSnapshot / LocalSnapshot / ThreadVarSnapshot / VarSnapshot are the
+// per-tick values resolved from kernel memory + register file. value_hex /
+// value_dec are pre-formatted on the backend so the UI does not have to know
+// signed-vs-unsigned semantics.
+export interface GlobalSnapshot {
+  name: string;
+  type: VarType;
+  addr: string;
+  len: number;
+  value_hex?: string;
+  value_dec?: string;
+  unmapped?: boolean;
+}
+export interface LocalSnapshot {
+  name: string;
+  type: VarType;
+  func: string;
+  loc: VarLoc;
+  resolved_addr?: string;
+  value_hex?: string;
+  value_dec?: string;
+  unset?: boolean;
+  unmapped?: boolean;
+}
+export interface ThreadVarSnapshot {
+  tid: number;
+  label: string;
+  name: string;
+  func?: string;
+  in_scope: boolean;
+  ebp: string;
+  regs: Record<string, number>;
+  locals: LocalSnapshot[];
+}
+export interface VarSnapshot {
+  globals: GlobalSnapshot[];
+  threads: ThreadVarSnapshot[];
 }
 
 // IrqFrame is the three-word stack frame the CPU HW pushed to the kernel
@@ -588,6 +668,12 @@ export const useCpuStore = defineStore('cpu', () => {
   // Mapping line-C ↔ offset-byte para cada PID. Empty record = no bridge
   // declared (legacy demo); the UI degrades to plain Source display.
   const procSourceMaps = ref<Record<number, SourceLine[]>>({});
+  // Metadata estática de variables por leader PID, recibida en `loaded`.
+  // Estructura (nombres, tipos, scopes) — los valores vienen en procVars.
+  const procVarMeta = ref<Record<number, VarMeta>>({});
+  // Valores resueltos de variables por leader PID, actualizados con cada
+  // `snapshot`. Empty si el demo no declaró metadata.
+  const procVars = ref<Record<number, VarSnapshot>>({});
   // PIDs que cambiaron en el último evento (para animación flash)
   const flashingPIDs = reactive<Set<number>>(new Set());
 
@@ -800,6 +886,12 @@ export const useCpuStore = defineStore('cpu', () => {
         // computed downstream) only re-runs once per tick.
         if (msg && msg.type === 'tick_events' && Array.isArray(msg.events)) {
           for (const ev of msg.events as CpuEvent[]) applyEvent(ev);
+          // vars piggybacks on the same atomic frame: if events landed,
+          // vars must too. This sidesteps the dropped-frame skew that a
+          // separate vars_update message had under WS backpressure.
+          if (msg.vars !== undefined) {
+            applyVarsPayload(msg.vars as Record<string, VarSnapshot> | null);
+          }
         } else {
           applyEvent(msg as CpuEvent);
         }
@@ -813,6 +905,21 @@ export const useCpuStore = defineStore('cpu', () => {
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(cmd));
     }
+  }
+
+  // applyVarsPayload hydrates procVars from a "vars" map keyed by leader PID.
+  // Shared between the legacy `vars_update` frame and the new piggyback in
+  // `tick_events.vars` so both paths produce the same store state.
+  function applyVarsPayload(vars: Record<string, VarSnapshot> | null | undefined) {
+    if (!vars) {
+      procVars.value = {};
+      return;
+    }
+    const next: Record<number, VarSnapshot> = {};
+    for (const [pid, snap] of Object.entries(vars)) {
+      next[Number(pid)] = snap;
+    }
+    procVars.value = next;
   }
 
   function applyEvent(ev: CpuEvent) {
@@ -874,6 +981,15 @@ export const useCpuStore = defineStore('cpu', () => {
             procSourceMaps.value[Number(pid)] = lines;
           }
         }
+        if (ev.vars) {
+          const next: Record<number, VarSnapshot> = {};
+          for (const [pid, snap] of Object.entries(ev.vars)) {
+            next[Number(pid)] = snap;
+          }
+          procVars.value = next;
+        } else if (ev.vars === null) {
+          procVars.value = {};
+        }
         changedRegs.clear();
         for (const k of Object.keys(changedRegsByCore)) delete changedRegsByCore[Number(k)];
         break;
@@ -918,8 +1034,7 @@ export const useCpuStore = defineStore('cpu', () => {
       case 'mode_switch': {
         const c = ensureCoreSlot(ev.core_id);
         c.mode = ev.to;
-        pushLog(formatLog.modeSwitch(ev.from, ev.to, ev.cause), 'red', ev.core_id, ev.tick);
-        // K = kernel code; mode_switch is HW, so strip it from the entry.
+        pushLog(formatLog.modeSwitch(ev.from, ev.to, ev.cause, ev.kind), 'red', ev.core_id, ev.tick);
         const lastMS = log.value[log.value.length - 1];
         if (lastMS) lastMS.inKernel = false;
         if (isSelected(ev.core_id)) mode.value = ev.to;
@@ -1028,8 +1143,26 @@ export const useCpuStore = defineStore('cpu', () => {
         } else {
           procSourceMaps.value = {};
         }
+        if (ev.var_meta) {
+          const meta: Record<number, VarMeta> = {};
+          for (const [pid, m] of Object.entries(ev.var_meta)) {
+            meta[Number(pid)] = m;
+          }
+          procVarMeta.value = meta;
+        } else {
+          procVarMeta.value = {};
+        }
+        // A new demo always starts with no resolved values; the next snapshot
+        // event will fill procVars in once the kernel ticks.
+        procVars.value = {};
         break;
       }
+      case 'vars_update':
+        // Legacy path: kept so older sim builds that still send a standalone
+        // vars_update frame keep working. The atomic delivery path is via
+        // tick_events.vars (see the WS onmessage handler).
+        applyVarsPayload(ev.vars);
+        break;
       case 'reset':
         pushLog(formatLog.reset(), 'cyan', undefined, undefined, 'global');
         changedRegs.clear();
@@ -1043,6 +1176,8 @@ export const useCpuStore = defineStore('cpu', () => {
         kbdReaders.value = [];
         procSources.value = {};
         procSourceMaps.value = {};
+        procVarMeta.value = {};
+        procVars.value = {};
         mutexes.value = [];
         semaphores.value = [];
         pipes.value = [];
@@ -1186,7 +1321,11 @@ export const useCpuStore = defineStore('cpu', () => {
         break;
       }
       case 'syscall':
-        pushLog(formatLog.syscall(ev.name, ev.args, ev.result, ev.pid), 'green', ev.core_id, ev.tick);
+        if (ev.error) {
+          pushLog(formatLog.syscallError(ev.name, ev.args, ev.error, ev.pid), 'red', ev.core_id, ev.tick);
+        } else {
+          pushLog(formatLog.syscall(ev.name, ev.args, ev.result, ev.pid), 'green', ev.core_id, ev.tick);
+        }
         break;
       case 'console_out':
         consoleChunks.value.push({
@@ -1652,6 +1791,7 @@ export const useCpuStore = defineStore('cpu', () => {
     programs, categories, loadCategories, selectedProgram, log, connected, hasEverConnected, lastError,
     reconnectAttempts, nextRetryAt, reconnectNow,
     procs, currentPID, readyQueue, waitQueue, flashingPIDs, procSources, procSourceMaps,
+    procVarMeta, procVars,
     pendingMemoryJump, requestMemoryJump, clearMemoryJump, lastMnemonic,
     cores, numCores, selectedCoreId, selectedCoreIds, visibleCores, isCoreVisible,
     toggleCoreSelection, selectAllCores, selectOnlyCore, setSelectedCore, setVisibleCores,
