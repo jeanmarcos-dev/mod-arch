@@ -407,14 +407,11 @@ func execInstruction(c *CPU) error {
 			return c.dispatchFault(0x0D)
 		}
 		c.Halted = true
-		// Kernel-mode HLT is the swapper's resting state, not a noteworthy
-		// event: the idle thread loops on it every time an IRQ wakes it up
-		// and IRET bounces back through the JMP. Emitting EventHalt for it
-		// would flood the log with one entry per IRQ. The frontend already
-		// surfaces idle activity through core.running_idle and idle_ticks.
-		if c.Mode != ModeKernel {
-			c.Emit(EventHalt{CoreID: c.CoreID, Tick: c.Tick})
-		}
+		// Only the swapper reaches this point: user-mode HLT was rerouted to
+		// dispatchFault above (privileged instruction → #GP). PID 0 lets the
+		// frontend tag the entry as "HLT idle" instead of the red HALT used
+		// for the death cascade.
+		c.Emit(EventHalt{CoreID: c.CoreID, Tick: c.Tick, PID: 0})
 
 	case opcode == 0x90:
 		c.emitInstr(startEIP, "NOP")

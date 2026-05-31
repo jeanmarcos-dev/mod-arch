@@ -85,6 +85,40 @@ func TestISA_SUB(t *testing.T) {
 	}
 }
 
+// TestISA_HLT_KernelMode_EmitsEventHalt covers the swapper resting state:
+// kernel-mode HLT must mark the CPU halted AND emit EventHalt{PID:0} so the
+// frontend can render the idle HLT in the event log. PID 0 identifies the
+// swapper to the UI; the user-mode branch raises #GP and never reaches this
+// emission (covered separately by the fault-on-privileged-HLT tests).
+func TestISA_HLT_KernelMode_EmitsEventHalt(t *testing.T) {
+	c := newTestCPU(t, []byte{0xF4})
+	c.CoreID = 3
+
+	evs, err := c.Step()
+	if err != nil {
+		t.Fatalf("step hlt: %v", err)
+	}
+	if !c.Halted {
+		t.Fatal("CPU did not halt after HLT in kernel mode")
+	}
+	var halt *EventHalt
+	for i := range evs {
+		if h, ok := evs[i].(EventHalt); ok {
+			halt = &h
+			break
+		}
+	}
+	if halt == nil {
+		t.Fatalf("Step emitted no EventHalt for kernel-mode HLT; events = %+v", evs)
+	}
+	if halt.PID != 0 {
+		t.Errorf("EventHalt.PID = %d, want 0 (swapper)", halt.PID)
+	}
+	if halt.CoreID != 3 {
+		t.Errorf("EventHalt.CoreID = %d, want 3", halt.CoreID)
+	}
+}
+
 func TestCPU_GetSetReg32_Errors(t *testing.T) {
 	c := New(DefaultMemSize)
 	if _, err := c.GetReg32("BOGUS"); err == nil {

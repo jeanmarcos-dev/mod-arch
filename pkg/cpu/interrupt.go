@@ -74,21 +74,26 @@ func (c *CPU) dispatchIRQ(vector uint8, source string) error {
 	// x86 behavior of HLT: "sleep until any interrupt arrives".
 	c.Halted = false
 
-	// If coming from user, switch to the kernel stack. In real x86 this is
-	// done by consulting the TSS, which is per-CPU; here each core carries its
-	// own KernelStackTop so concurrent traps land on separate frames.
+	// Switch to the per-core kernel stack. DS is collapsed into the ring
+	// switch so the segment file is coherent the moment CPL flips (real
+	// kernels do this manually as their first instruction).
 	if oldMode == ModeUser {
 		c.SavedUserESP = oldESP
 		c.SavedUserSS = c.R.SS
 		c.R.ESP = c.KernelStackTop
 		c.R.SS = SelKernelData
+		c.R.DS = SelKernelData
 	}
 
 	// Mode switch — done automatically by the HW.
 	c.Mode = ModeKernel
 	c.R.CS = SelKernelCode
 	if oldMode != ModeKernel {
-		c.Emit(EventModeSwitch{CoreID: c.CoreID, Tick: c.Tick, From: oldMode, To: ModeKernel, Cause: causeOf(source)})
+		c.Emit(EventModeSwitch{
+			CoreID: c.CoreID, Tick: c.Tick,
+			From: oldMode, To: ModeKernel, Cause: causeOf(source),
+			NewCS: c.R.CS, NewDS: c.R.DS, NewSS: c.R.SS, NewESP: c.R.ESP,
+		})
 	}
 
 	// Push the interrupt frame now that we are on the kernel stack.
@@ -153,7 +158,13 @@ func (c *CPU) handleIRET() error {
 		c.Mode = ModeUser
 		c.R.ESP = c.SavedUserESP
 		c.R.SS = c.SavedUserSS
-		c.Emit(EventModeSwitch{CoreID: c.CoreID, Tick: c.Tick, From: oldMode, To: ModeUser, Cause: "IRET"})
+		// Trap frame does not hold DS; restore from the sim convention.
+		c.R.DS = SelUserData
+		c.Emit(EventModeSwitch{
+			CoreID: c.CoreID, Tick: c.Tick,
+			From: oldMode, To: ModeUser, Cause: "IRET",
+			NewCS: c.R.CS, NewDS: c.R.DS, NewSS: c.R.SS, NewESP: c.R.ESP,
+		})
 	}
 
 	return nil

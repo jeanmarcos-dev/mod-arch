@@ -78,6 +78,13 @@ type EventModeSwitch struct {
 	From   uint8  `json:"from"`  // 3 or 0
 	To     uint8  `json:"to"`    // 3 or 0
 	Cause  string `json:"cause"` // "INT" | "IRET" | "fault"
+	// Destination-ring selectors + ESP loaded atomically with the CPL flip.
+	// Carried on the event because dispatchIRQ/handleIRET mutate c.R
+	// directly without emitting per-register reg_writes.
+	NewCS  uint16 `json:"new_cs,omitempty"`
+	NewDS  uint16 `json:"new_ds,omitempty"`
+	NewSS  uint16 `json:"new_ss,omitempty"`
+	NewESP uint32 `json:"new_esp,omitempty"`
 }
 
 // Tag returns the event tag.
