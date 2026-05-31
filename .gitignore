@@ -65,3 +65,7 @@ state-dump-*.db
 
 # Playwright MCP browser session artifacts (console logs, traces).
 /.playwright-mcp/
+
+# Academic paper draft (LaTeX sources, figures, bibliography). Lives in the
+# repo for convenience but is not part of the simulator itself.
+/paper/
