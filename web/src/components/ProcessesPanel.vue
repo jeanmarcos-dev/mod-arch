@@ -19,9 +19,7 @@ function stateClass(state: string) {
   return `state-${state.toLowerCase()}`;
 }
 
-// Mirror of pkg/cpu/cpu.go FlagCF/ZF/SF/IF/OF bit positions. Anything outside
-// this set is irrelevant for the chip strip; if the backend adds new flags
-// the strip degrades silently (no chip rendered) instead of breaking layout.
+// Mirrors pkg/cpu/cpu.go FlagCF/ZF/SF/IF/OF bit positions.
 type FlagName = 'CF' | 'ZF' | 'SF' | 'IF' | 'OF';
 const EFLAGS_BITS: Array<{ name: FlagName; mask: number }> = [
   { name: 'CF', mask: 1 << 0  },
@@ -31,20 +29,12 @@ const EFLAGS_BITS: Array<{ name: FlagName; mask: number }> = [
   { name: 'OF', mask: 1 << 11 },
 ];
 
-// Lista ordenada por PID para que las tarjetas no salten. El PID es secuencial
-// al crear cada proceso, así que esto equivale al orden de carga del kernel.
 const sortedProcs = computed(() => [...cpu.procs].sort((a, b) => a.pid - b.pid));
 
-// Depth cap keeps the indent inside the narrow col-right column; deeper
-// subtrees still render but stop accumulating horizontal offset and surface
-// a ↳ dN chip via realDepth.
+// Deeper subtrees stop accumulating indent and surface a ↳ dN chip instead.
 const TREE_DEPTH_CAP = 4;
 const { treeNodes, initPID } = useProcessTree({ depthCap: TREE_DEPTH_CAP });
 
-// swapperCoreOf parses the "swapper/N" name the backend assigns to per-core
-// idle PCBs (one task per core, all sharing PID 0 with a unique negative
-// TID). The core ID drives the live state read from cpu.cores and the
-// border tint of the proc-card.
 function swapperCoreOf(p: PCBInfo): number | null {
   if (p.is_idle !== true) return null;
   const m = /^swapper\/(\d+)$/.exec(p.name);
@@ -52,8 +42,6 @@ function swapperCoreOf(p: PCBInfo): number | null {
   return parseInt(m[1], 10);
 }
 
-// HLT cycles read live from the matching core. Falls back to zero while
-// the snapshot is still warming up.
 function swapperHltCycles(p: PCBInfo): number {
   const id = swapperCoreOf(p);
   if (id === null) return 0;
@@ -61,8 +49,6 @@ function swapperHltCycles(p: PCBInfo): number {
   return c?.idle_ticks ?? 0;
 }
 
-// IDLE while parked, HLT while actively executing the HLT loop. running_idle
-// disambiguates "no proc assigned" from "swapper bound and ticking".
 function swapperStateLabel(p: PCBInfo): string {
   const id = swapperCoreOf(p);
   if (id === null) return 'IDLE';
@@ -70,10 +56,6 @@ function swapperStateLabel(p: PCBInfo): string {
   return c?.running_idle ? 'HLT' : 'IDLE';
 }
 
-// True when the proc is bound to a core that is currently sitting in PL0,
-// i.e. the hardware trapped on its behalf and the kernel is running in its
-// context. The PCB in memory is stale at this point — the live state lives
-// in the CPU registers + the kernel-stack interrupt frame.
 function isKernelTrapped(p: PCBInfo): boolean {
   if (p.is_kthread || p.is_idle) return false;
   const coreId = coreOfPid(p.pid);
@@ -82,18 +64,11 @@ function isKernelTrapped(p: PCBInfo): boolean {
   return !!c && c.mode === 0;
 }
 
-// kthreadIsRunning derives the live RUN/SLEEP appearance of a kernel/N PCB
-// from the mode of the core it is bound to. Backend stores them as BLOCKED
-// forever (they are never scheduled); the frontend lights them up while
-// their core sits in PL0 to make "the kernel is executing here right now"
-// observable in the process tree.
+// RUN only when the scheduler actually dispatches the kthread onto a core.
+// IRQ handlers run in interrupt context on the user proc, not here.
 function kthreadIsRunning(p: PCBInfo): boolean {
   if (!p.is_kthread || p.name === 'kthreadd') return false;
-  const m = /^kernel\/(\d+)$/.exec(p.name);
-  if (!m) return false;
-  const coreId = parseInt(m[1], 10);
-  const core = cpu.cores.find(c => c.id === coreId);
-  return !!core && core.mode === 0 && core.running_idle !== true;
+  return cpu.cores.some(c => c.current_pid === p.pid);
 }
 
 function kthreadStateLabel(p: PCBInfo): string {
@@ -133,8 +108,7 @@ function persistExpanded() {
 
 const _loaded = loadExpanded();
 const expandedPids = ref<Set<number>>(_loaded.set);
-// On first visit (no localStorage entry yet), auto-expand all PCBs once they
-// appear. Subsequent visits respect whatever the user has toggled.
+// First visit (no localStorage entry): auto-expand all PCBs once.
 let firstSessionAutoExpand = !_loaded.hadEntry;
 watch(
   () => sortedProcs.value.map(p => p.pid),
@@ -178,21 +152,15 @@ const allExpanded = computed(() =>
 );
 
 
-// PID → core that is currently executing it (if any). Used to surface the
-// C<id> chip on RUN cards and to pick the live register source.
+// Scheduling fact — do NOT filter by isCoreVisible (otherwise a proc on a
+// hidden core gets mislabeled). Visibility is added explicitly at the chip.
 function coreOfPid(pid: number): number | null {
   for (const c of cpu.cores) {
-    if (!cpu.isCoreVisible(c.id)) continue;
     if (c.current_pid === pid) return c.id;
   }
   return null;
 }
 
-// PCB-visible register file: always the kernel-saved snapshot from the last
-// context switch. While the process is RUN the live regs tick in the assigned
-// core (see Cores panel); these numbers stay frozen until the scheduler emits
-// the next `pcb_save`, which mirrors the real "context save on dispatch out"
-// mechanic of the OS.
 function pcbRegs(p: PCBInfo): Record<string, number> {
   return p.regs;
 }
@@ -202,7 +170,7 @@ function pcbEIP(p: PCBInfo): number {
 }
 
 function regsList(regs: Record<string, number>): Array<{ name: string; val: number }> {
-  const order = ['EAX', 'EBX', 'ECX', 'EDX', 'ESP', 'EBP', 'EIP'];
+  const order = ['EAX', 'EBX', 'ECX', 'EDX', 'ESI', 'EDI', 'ESP', 'EBP', 'EIP'];
   return order.filter(k => k in regs).map(k => ({ name: k, val: regs[k] }));
 }
 
@@ -211,6 +179,7 @@ function flagOn(eflags: number, mask: number): boolean {
 }
 
 function regsSource(p: PCBInfo): string {
+  if (isKernelTrapped(p)) return t('panels.processes.regsSrcStaleInHandler');
   return coreOfPid(p.pid) !== null
     ? t('panels.processes.regsSrcPreDispatch')
     : t('panels.processes.regsSrcSaved');
@@ -245,16 +214,20 @@ function flagChipTitle(name: FlagName, on: boolean): string {
 }
 
 function regCellTitle(reg: string, p: PCBInfo): string {
-  const cell = coreOfPid(p.pid) !== null
-    ? t('panels.processes.regCellPreDispatch', { reg })
-    : t('panels.processes.regCellSaved', { reg });
+  const cell = isKernelTrapped(p)
+    ? t('panels.processes.regCellStaleInHandler', { reg })
+    : coreOfPid(p.pid) !== null
+      ? t('panels.processes.regCellPreDispatch', { reg })
+      : t('panels.processes.regCellSaved', { reg });
   return t('panels.processes.regCellTitle', { cell, pid: p.pid });
 }
 
 function regsSrcTitle(p: PCBInfo): string {
-  const desc = coreOfPid(p.pid) !== null
-    ? t('panels.processes.regsHintPreDispatch')
-    : t('panels.processes.regsHintSaved');
+  const desc = isKernelTrapped(p)
+    ? t('panels.processes.regsHintStaleInHandler')
+    : coreOfPid(p.pid) !== null
+      ? t('panels.processes.regsHintPreDispatch')
+      : t('panels.processes.regsHintSaved');
   return t('panels.processes.regsValuesAre', { desc });
 }
 </script>
@@ -352,7 +325,9 @@ function regsSrcTitle(p: PCBInfo): string {
           <span class="proc-card__name" :title="t('panels.processes.nameTooltip', { name: node.proc.name, eip: hex(pcbEIP(node.proc), 8) })">{{ node.proc.name }}</span>
           <span class="proc-card__head-spacer" />
           <span
-            v-if="!node.proc.is_kthread && !node.proc.is_idle && coreOfPid(node.proc.pid) !== null"
+            v-if="!node.proc.is_kthread && !node.proc.is_idle
+                  && coreOfPid(node.proc.pid) !== null
+                  && cpu.isCoreVisible(coreOfPid(node.proc.pid) as number)"
             class="proc-card__core"
             :style="{ color: `var(--core-${(coreOfPid(node.proc.pid) as number) % 4})` }"
             :title="t('panels.processes.coreRunning', { core: coreOfPid(node.proc.pid) ?? 0 })"
@@ -536,31 +511,21 @@ function regsSrcTitle(p: PCBInfo): string {
   }
 }
 
-/* swapper proc-card: one per core (Linux-style swapper/N). Compact look
- * matches the kthread cards, but uses cyan to set the idle-task family
- * apart from the amber kernel-thread cards. */
 .proc-card--swapper {
   border-left: 2px solid var(--cyan, #6cf);
   background: rgba(102, 204, 255, 0.06);
-}
-.proc-card--swapper .proc-card__head {
-  cursor: default;
 }
 .proc-card--swapper.state-hlt {
   background: rgba(102, 204, 255, 0.14);
 }
 .proc-card__swapper-ticks {
-  margin-right: 6px;
-  font-size: 10px;
+  margin-right: 4px;
+  font-size: 9px;
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
   opacity: 0.85;
 }
 
-/* "K · live in CN" chip: surfaces the stale-PCB invariant when a user proc
- * is trapped in the kernel. The label spells it out so the alumno does not
- * have to know the convention to read the panel: "this PCB's regs are stale
- * right now; the live state lives in the CPU + kernel-stack frame of CN." */
 .proc-card__trap-chip {
   display: inline-flex;
   align-items: baseline;
@@ -575,20 +540,41 @@ function regsSrcTitle(p: PCBInfo): string {
   white-space: nowrap;
 }
 
-/* kthread proc-card: compact rendering for kthreadd + kernel/N nodes.
- * They have no register file to expand into, so we suppress the body and
- * let the header live as a single dense row inside the tree. The amber
- * accent reuses the existing kernel-mode hue from the Event Log so
- * visualizations match across panels. */
 .proc-card--kthread {
   border-left: 2px solid var(--amber);
   background: rgba(var(--accent-rgb), 0.04);
 }
-.proc-card--kthread .proc-card__head {
-  cursor: default;
-}
 .proc-card--kthread.state-run {
   background: rgba(var(--accent-rgb), 0.12);
+}
+
+/* Compact dimensions shared by swapper + kthread cards. */
+.proc-card--swapper .proc-card__head,
+.proc-card--kthread .proc-card__head {
+  padding: 2px 8px;
+  gap: 4px 6px;
+  font-size: 10px;
+  cursor: default;
+}
+.proc-card--swapper .proc-card__pid,
+.proc-card--kthread .proc-card__pid {
+  font-size: 9px;
+}
+.proc-card--swapper .proc-card__name,
+.proc-card--kthread .proc-card__name {
+  font-size: 10px;
+}
+.proc-card--swapper .proc-card__state,
+.proc-card--kthread .proc-card__state {
+  font-size: 8px;
+}
+.proc-card--swapper .proc-card__core,
+.proc-card--kthread .proc-card__core {
+  font-size: 8px;
+}
+.proc-card--swapper .proc-card__parent-chip,
+.proc-card--kthread .proc-card__parent-chip {
+  font-size: 8px;
 }
 
 .proc-list {

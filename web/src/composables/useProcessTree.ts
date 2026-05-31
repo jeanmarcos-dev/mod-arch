@@ -54,13 +54,7 @@ export function useProcessTree(opts: UseProcessTreeOptions = {}): UseProcessTree
 
   const treeNodes = computed<ProcTreeNode[]>(() => {
     const hideInit = !prefs.showInit && initPID.value > 0;
-    // Visibility model:
-    //   showInit ON  → render swapper (PID 0, one task per core), kthreadd
-    //                  (PID 2), the kernel/N siblings, init (PID 1) and
-    //                  every user proc as a single hierarchical tree.
-    //   showInit OFF → strip kernel-side machinery (idle + init + kthreads),
-    //                  leaving only the user-proc subtree as standalone
-    //                  roots — matches the introductory demo experience.
+    // showInit OFF strips the kernel-side machinery (idle + init + kthreads).
     const visibleProcs = hideInit
       ? cpu.procs.filter(p =>
           p.is_idle !== true &&
@@ -68,50 +62,72 @@ export function useProcessTree(opts: UseProcessTreeOptions = {}): UseProcessTree
           p.is_kthread !== true,
         )
       : cpu.procs.slice();
-    const byParent = new Map<number, PCBInfo[]>();
-    for (const p of visibleProcs) {
-      let pp = treeParentOf(p);
-      // When init is hidden, promote its direct children to top-level so
-      // they appear as roots instead of orphaned under a missing node.
-      if (hideInit && pp === initPID.value) pp = 0;
-      if (!byParent.has(pp)) byParent.set(pp, []);
-      byParent.get(pp)!.push(p);
+
+    // Swappers all share PID 0 so we key them by TID (negative sentinel).
+    const keyOf = (p: PCBInfo) => p.is_idle === true ? `t${p.tid ?? 0}` : `p${p.pid}`;
+
+    // swapper/0 (lowest core) acts as init_task: visual root of the tree.
+    const swapperCoreOf = (p: PCBInfo): number => {
+      const m = /^swapper\/(\d+)$/.exec(p.name ?? '');
+      return m ? parseInt(m[1], 10) : Number.POSITIVE_INFINITY;
+    };
+    let rootSwapper: PCBInfo | null = null;
+    if (!hideInit) {
+      const swappers = visibleProcs.filter(p => p.is_idle === true);
+      swappers.sort((a, b) => swapperCoreOf(a) - swapperCoreOf(b));
+      rootSwapper = swappers[0] ?? null;
     }
-    // Within each bucket: swappers (is_idle, all share PID 0) sort by tid so
-    // swapper/0 always comes before swapper/1. Everyone else sorts by PID.
+    const ROOT = '__root__';
+
+    // Threads collapse under their leader. Every swapper is a sibling at
+    // ROOT; init and kthreadd hang from swapper/0 (Linux init_task lineage).
+    const parentKeyOf = (p: PCBInfo): string => {
+      const tgid = p.tgid ?? p.pid;
+      if (tgid !== p.pid) return `p${tgid}`;
+      if (p.is_idle === true) return ROOT;
+      if (rootSwapper && (p.parent_pid ?? 0) === 0) return keyOf(rootSwapper);
+      let pp = p.parent_pid ?? 0;
+      if (hideInit && pp === initPID.value) pp = 0;
+      return `p${pp}`;
+    };
+
+    const byParent = new Map<string, PCBInfo[]>();
+    for (const p of visibleProcs) {
+      const pk = parentKeyOf(p);
+      if (!byParent.has(pk)) byParent.set(pk, []);
+      byParent.get(pk)!.push(p);
+    }
     for (const list of byParent.values()) {
       list.sort((a, b) => {
         if (a.pid !== b.pid) return a.pid - b.pid;
         return (a.tid ?? 0) - (b.tid ?? 0);
       });
     }
-    // Identity key: swappers all share PID 0, so we key them by TID (each
-    // swapper carries a unique negative TID assigned by the backend). Every
-    // other PCB uses its PID directly.
-    const keyOf = (p: PCBInfo) => p.is_idle === true ? `t${p.tid ?? 0}` : `p${p.pid}`;
+
     const out: ProcTreeNode[] = [];
-    // Guard against revisiting PID 0: the swapper's PID would otherwise loop
-    // the recursion back to the root bucket. Swappers are leaves anyway.
-    const visited = new Set<number>([0]);
-    const visit = (parent: number, depth: number) => {
+    const visited = new Set<string>();
+    const visit = (parent: string, depth: number) => {
       const kids = byParent.get(parent);
       if (!kids) return;
       for (const k of kids) {
+        const kkey = keyOf(k);
+        if (visited.has(kkey)) continue;
+        visited.add(kkey);
         out.push({
           proc: k,
           depth: Math.min(depth, cap),
           realDepth: depth,
           isThread: isThreadOf(k),
         });
-        if (k.is_idle === true) continue;
-        if (visited.has(k.pid)) continue;
-        visited.add(k.pid);
-        visit(k.pid, depth + 1);
+        visit(kkey, depth + 1);
       }
     };
-    visit(0, 0);
-    // Fallback for snapshots arriving mid-reload where some proc may lack a
-    // resolvable parent — append them so they remain visible.
+    if (rootSwapper) {
+      visit(ROOT, 0);
+    } else {
+      visit('p0', 0);
+    }
+    // Mid-reload fallback: unreachable procs append at depth 0.
     if (out.length < visibleProcs.length) {
       const seen = new Set(out.map(n => keyOf(n.proc)));
       for (const p of visibleProcs) {

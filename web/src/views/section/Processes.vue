@@ -46,12 +46,10 @@ const EFLAGS_BITS: Array<{ name: FlagName; mask: number }> = [
 // processes running on a hidden core no longer steal the highlight.
 const visibleCores = computed(() => cpu.cores.filter(c => cpu.isCoreVisible(c.id)));
 
-// PID → visible core id currently executing it (or null). PCB cards surface
-// the C<id> chip without ever reading register values from the core: the
-// register file shown on the card is always the kernel-saved snapshot in
-// `p.regs`, which only updates on `pcb_save` / `pcb_restore`.
+// Scheduling fact — do NOT filter by isCoreVisible (template adds it
+// explicitly at the C{id} chip).
 function coreOfPid(pid: number): number | null {
-  for (const c of visibleCores.value) {
+  for (const c of cpu.cores) {
     if (c.current_pid === pid) return c.id;
   }
   return null;
@@ -239,7 +237,8 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
               <span class="pcb-card__name">{{ node.proc.name }}</span>
               <span class="pcb-card__head-spacer" />
               <span
-                v-if="coreOfPid(node.proc.pid) !== null"
+                v-if="coreOfPid(node.proc.pid) !== null
+                      && cpu.isCoreVisible(coreOfPid(node.proc.pid) as number)"
                 class="pcb-card__core"
                 :style="{ color: `var(--core-${(coreOfPid(node.proc.pid) as number) % 4})` }"
                 :title="t('panels.processes.coreRunning', { core: coreOfPid(node.proc.pid) ?? 0 })"

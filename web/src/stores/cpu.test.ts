@@ -205,3 +205,31 @@ describe('cpu store — idle task (PID 0)', () => {
     expect(cpu.idleTaskEnabled).toBe(false);
   });
 });
+
+describe('cpu store — halt event formatting', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('formats a swapper HLT (pid=0) as "HLT idle" with cyan color and leaves machine.halted untouched', () => {
+    const cpu = useCpuStore();
+    const before = cpu.log.length;
+    cpu.__applyEvent({ type: 'halt', core_id: 0, pid: 0, tick: 5 } as any);
+    const entry = cpu.log[cpu.log.length - 1];
+    expect(cpu.log.length).toBe(before + 1);
+    expect(entry.text).toContain('HLT idle');
+    expect(entry.text).not.toContain('HALT (');
+    expect(entry.color).toBe('cyan');
+    expect(cpu.halted).toBe(false);
+  });
+
+  it('formats a process-death HLT (pid>0) as "HALT (Pn)" with red color and freezes halted', () => {
+    const cpu = useCpuStore();
+    cpu.__applyEvent({ type: 'halt', core_id: 0, pid: 3, tick: 9 } as any);
+    const entry = cpu.log[cpu.log.length - 1];
+    expect(entry.text).toContain('HALT (P3)');
+    expect(entry.text).not.toContain('HLT idle');
+    expect(entry.color).toBe('red');
+    expect(cpu.halted).toBe(true);
+  });
+});

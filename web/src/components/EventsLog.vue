@@ -1,11 +1,20 @@
 <script setup lang="ts">
 import { useCpuStore, type LogEntry } from '../stores/cpu';
-import { computed, nextTick, onUpdated, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller';
 
+const props = defineProps<{ active: boolean }>();
 const cpu = useCpuStore();
-const scroller = ref<HTMLElement | null>(null);
 const { t } = useI18n();
+
+// Ref to the DynamicScroller. Its root element is the scrollable container,
+// so we hook the scroll listener there once the component is mounted. The
+// component is generic over its items type, so we keep the ref untyped to
+// avoid fighting TS over the generic instantiation.
+type DynamicScrollerInstance = { $el: HTMLElement; scrollToBottom?: () => void };
+const scroller = ref<DynamicScrollerInstance | null>(null);
+let scrollEl: HTMLElement | null = null;
 
 // Sticky autoscroll: follow new events only while the user is parked at the
 // bottom. Once they scroll up to inspect history, we stop forcing the view
@@ -14,20 +23,25 @@ const { t } = useI18n();
 const STICK_THRESHOLD_PX = 24;
 const stickToBottom = ref(true);
 
-function onScroll() {
-  const el = scroller.value;
-  if (!el) return;
-  const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+function handleScroll() {
+  if (!scrollEl) return;
+  const distance = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
   stickToBottom.value = distance <= STICK_THRESHOLD_PX;
 }
 
-onUpdated(() => {
-  if (!stickToBottom.value) return;
-  // Defer one frame so layout has settled before measuring scrollHeight.
-  nextTick(() => {
-    const el = scroller.value;
-    if (el) el.scrollTop = el.scrollHeight;
-  });
+watch(scroller, (s) => {
+  if (scrollEl) {
+    scrollEl.removeEventListener('scroll', handleScroll);
+    scrollEl = null;
+  }
+  if (s) {
+    scrollEl = s.$el ?? null;
+    scrollEl?.addEventListener('scroll', handleScroll, { passive: true });
+  }
+});
+
+onBeforeUnmount(() => {
+  scrollEl?.removeEventListener('scroll', handleScroll);
 });
 
 function colorOf(c: string) {
@@ -53,12 +67,14 @@ const visibleCores = computed(() =>
     .sort((a, b) => a - b),
 );
 
-const multicore = computed(() => visibleCores.value.length > 1);
-
 interface GridRow {
   key: string;
   tick: number | null;
   isGlobal: boolean;
+  // Zebra parity is bound to `tick % 2` (not to the row's array index) so
+  // shifts on cpu.log and global-row interleaving don't flip every row's
+  // background when a new event arrives.
+  alt: boolean;
   globalEntry?: LogEntry;
   cells: Map<number, LogEntry[]>;
 }
@@ -68,6 +84,12 @@ interface GridRow {
 // events without a tick stamp still show up). Global entries (loaded/reset/
 // ws_*) get their own full-width row.
 const gridRows = computed<GridRow[]>(() => {
+  // While the alumno is looking at another pizarra tab (Code / Memory) this
+  // panel is hidden with v-show. Skip the O(n) rebuild — the simulator can
+  // stream hundreds of events per second and recomputing for an invisible
+  // view is pure waste. We reconstruct in one pass when active flips back.
+  if (!props.active) return [];
+
   const rows: GridRow[] = [];
   const tickIndex = new Map<number, number>();
   let untickedSeq = 0;
@@ -75,9 +97,10 @@ const gridRows = computed<GridRow[]>(() => {
   for (const e of visibleLog.value) {
     if (e.scope === 'global') {
       rows.push({
-        key: `g-${rows.length}`,
+        key: `g-${untickedSeq++}`,
         tick: null,
         isGlobal: true,
+        alt: false,
         globalEntry: e,
         cells: new Map(),
       });
@@ -92,9 +115,10 @@ const gridRows = computed<GridRow[]>(() => {
     if (idx === undefined) {
       idx = rows.length;
       rows.push({
-        key: tick !== null ? `t-${tick}-${idx}` : `u-${untickedSeq++}`,
+        key: tick !== null ? `t-${tick}` : `u-${untickedSeq++}`,
         tick,
         isGlobal: false,
+        alt: tick !== null ? (tick % 2) === 1 : false,
         cells: new Map(),
       });
       if (tick !== null) tickIndex.set(tick, idx);
@@ -110,20 +134,40 @@ const gridRows = computed<GridRow[]>(() => {
 });
 
 const gridStyle = computed(() => {
-  // 56px for the tick column + one fr per visible core. Single-core has no
-  // tick column at all (single-core sessions stay visually identical to the
-  // legacy stream view).
+  // 56px tick column + one fr per visible core. Single- and multi-core
+  // sessions share the same layout so the alumno reads the panel the same
+  // way regardless of how many cores are active. Exposed as a CSS variable
+  // so the sticky header row and every body row stay column-aligned even
+  // though they live in separate grids (the scroller sits between them).
   const cols = visibleCores.value.length;
   return {
-    gridTemplateColumns: `56px repeat(${cols}, minmax(120px, 1fr))`,
+    '--ev-cols': `56px repeat(${cols}, minmax(120px, 1fr))`,
   };
+});
+
+// Follow the tail when new events arrive. Watching cpu.log.length covers
+// both the "new row appears" case and the "existing row grows taller because
+// of an extra entry in the same tick" case.
+watch(() => cpu.log.length, async () => {
+  if (!props.active || !stickToBottom.value) return;
+  await nextTick();
+  scroller.value?.scrollToBottom?.();
+});
+
+// Coming back from another tab: the body was empty while hidden, so it
+// rebuilds in one pass and we need to re-stick to the tail.
+watch(() => props.active, async (active) => {
+  if (!active) return;
+  await nextTick();
+  if (stickToBottom.value) {
+    scroller.value?.scrollToBottom?.();
+  }
 });
 </script>
 
 <template>
-  <div class="panel log" ref="scroller" data-pizarra-anchor="events-panel" @scroll.passive="onScroll">
-    <!-- Multi-core: grid with one column per core and one row per tick. -->
-    <div v-if="multicore" class="grid" :style="gridStyle">
+  <div class="panel log" data-pizarra-anchor="events-panel" :style="gridStyle">
+    <div class="grid__head-row">
       <div class="grid__head grid__head--tick">{{ t('panels.events.tickColumn') }}</div>
       <div
         v-for="c in visibleCores"
@@ -131,62 +175,58 @@ const gridStyle = computed(() => {
         class="grid__head"
         :style="{ color: `var(--core-${c % 4})` }"
       >C{{ c }}</div>
-
-      <template v-for="(row, rowIdx) in gridRows" :key="row.key">
-        <!-- Global rows: span the whole grid as a horizontal separator. -->
-        <div
-          v-if="row.isGlobal && row.globalEntry"
-          class="grid__global"
-          :style="{ gridColumn: `1 / span ${visibleCores.length + 1}`, color: colorOf(row.globalEntry.color) }"
-          :aria-label="t('panels.events.globalRowAria')"
-        >{{ row.globalEntry.text }}</div>
-
-        <template v-else>
-          <div class="grid__tick" :class="{ 'grid__cell--alt': rowIdx % 2 === 1 }">{{ row.tick !== null ? row.tick : '·' }}</div>
-          <div
-            v-for="c in visibleCores"
-            :key="`${row.key}-c${c}`"
-            class="grid__cell"
-            :class="{
-              'grid__cell--alt': rowIdx % 2 === 1,
-              'grid__cell--kernel': (row.cells.get(c) ?? []).some(e => e.inKernel),
-              'grid__cell--scheduler': (row.cells.get(c) ?? []).some(e => e.kind === 'scheduler'),
-            }"
-            :style="{ borderLeftColor: `var(--core-${c % 4})` }"
-          >
-            <div
-              v-for="(entry, i) in (row.cells.get(c) ?? [])"
-              :key="`${row.key}-c${c}-${i}`"
-              class="grid__entry"
-              :class="{ 'grid__entry--kernel': entry.inKernel }"
-              :style="{ color: colorOf(entry.color) }"
-            ><span v-if="entry.kind === 'scheduler'" class="grid__sched-chip" :title="t('panels.events.schedulerChipTitle')">S</span><span v-if="entry.inKernel" class="grid__kernel-chip" :title="t('panels.events.kernelChipTitle')">K</span>{{ entry.text }}</div>
-          </div>
-        </template>
-      </template>
-
-      <div v-if="gridRows.length === 0" class="empty"
-        :style="{ gridColumn: `1 / span ${visibleCores.length + 1}` }">
-        {{ cpu.log.length === 0 ? t('panels.events.emptyLoad') : t('panels.events.emptyNoCores') }}
-      </div>
     </div>
 
-    <!-- Single-core: legacy stream layout to keep the introductory demo simple. -->
-    <template v-else>
-      <div class="panel-title">{{ t('panels.events.title') }}</div>
-      <div
-        v-for="(e, i) in visibleLog"
-        :key="i"
-        class="line"
-        :class="{ 'line--global': e.scope === 'global', 'line--alt': i % 2 === 1 }"
-        :style="{ color: colorOf(e.color) }"
-      >
-        <span class="line__text">{{ e.text }}</span>
-      </div>
-      <div v-if="visibleLog.length === 0" class="empty">
-        {{ cpu.log.length === 0 ? t('panels.events.emptyLoad') : t('panels.events.emptyNoCores') }}
-      </div>
-    </template>
+    <DynamicScroller
+      ref="scroller"
+      class="log__scroller"
+      :items="gridRows"
+      :min-item-size="22"
+      key-field="key"
+    >
+      <template #default="{ item: row, index, active: itemActive }">
+        <DynamicScrollerItem
+          :item="row"
+          :active="itemActive"
+          :index="index"
+          :size-dependencies="[row.cells.size, row.isGlobal, visibleCores.length]"
+        >
+          <div
+            v-if="row.isGlobal && row.globalEntry"
+            class="grid__global"
+            :style="{ color: colorOf(row.globalEntry.color) }"
+            :aria-label="t('panels.events.globalRowAria')"
+          >{{ row.globalEntry.text }}</div>
+
+          <div v-else class="grid__row">
+            <div class="grid__tick" :class="{ 'grid__cell--alt': row.alt }">{{ row.tick !== null ? row.tick : '·' }}</div>
+            <div
+              v-for="c in visibleCores"
+              :key="`${row.key}-c${c}`"
+              class="grid__cell"
+              :class="{
+                'grid__cell--alt': row.alt,
+                'grid__cell--kernel': (row.cells.get(c) ?? []).some(e => e.inKernel),
+                'grid__cell--scheduler': (row.cells.get(c) ?? []).some(e => e.kind === 'scheduler'),
+              }"
+              :style="{ borderLeftColor: `var(--core-${c % 4})` }"
+            >
+              <div
+                v-for="(entry, i) in (row.cells.get(c) ?? [])"
+                :key="`${row.key}-c${c}-${i}`"
+                class="grid__entry"
+                :class="{ 'grid__entry--kernel': entry.inKernel }"
+                :style="{ color: colorOf(entry.color) }"
+              ><span v-if="entry.kind === 'scheduler'" class="grid__sched-chip" :title="t('panels.events.schedulerChipTitle')">S</span><span v-if="entry.inKernel" class="grid__kernel-chip" :title="t('panels.events.kernelChipTitle')">K</span>{{ entry.text }}</div>
+            </div>
+          </div>
+        </DynamicScrollerItem>
+      </template>
+    </DynamicScroller>
+
+    <div v-if="props.active && gridRows.length === 0" class="empty">
+      {{ cpu.log.length === 0 ? t('panels.events.emptyLoad') : t('panels.events.emptyNoCores') }}
+    </div>
   </div>
 </template>
 
@@ -194,53 +234,60 @@ const gridStyle = computed(() => {
 .log {
   flex: 1;
   height: 100%;
-  overflow-y: auto;
-  /* Multicore grid renders its own sticky header flush against the panel
-     edges; nuke the .panel inherited padding so the header sits on top
-     without a strip of background showing through. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  /* The grid renders its own sticky header flush against the panel edges;
+     nuke the .panel inherited padding so the header sits on top without a
+     strip of background showing through. */
   padding: 0 !important;
   font-size: 14px;
-}
-
-.line {
-  padding: 1px 8px;
   font-family: 'JetBrains Mono', monospace;
-  white-space: pre;
 }
 
-.line--alt {
-  background: rgba(255, 255, 255, 0.025);
-}
-
-.line--global {
-  font-style: italic;
-  opacity: 0.85;
-}
-
-.line__text { /* baseline alignment handled by parent */ }
-
-.grid {
+.grid__head-row {
   display: grid;
-  gap: 0;
-  font-family: 'JetBrains Mono', monospace;
+  grid-template-columns: var(--ev-cols);
+  background: var(--surface-2, #131a22);
+  border-bottom: 1px solid var(--border-muted, rgba(255, 255, 255, 0.1));
+  flex-shrink: 0;
   font-size: 13px;
+  /* Reserve the same gutter the body scroller below uses (scrollbar-gutter:
+     stable) so the column dividers line up vertically with the body grid. */
+  padding-right: var(--ev-scrollbar-gutter, 10px);
 }
 
 .grid__head {
-  position: sticky;
-  top: 0;
-  background: var(--bg, #111);
-  border-bottom: 1px solid var(--border-muted, rgba(255, 255, 255, 0.1));
   padding: 4px 6px;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.5px;
   text-align: center;
-  z-index: 1;
+  border-right: 1px solid var(--border, rgba(255, 181, 71, 0.18));
+}
+
+.grid__head-row .grid__head:last-child {
+  border-right: none;
 }
 
 .grid__head--tick {
   color: var(--text-muted, rgba(255, 255, 255, 0.5));
+}
+
+.log__scroller {
+  flex: 1;
+  min-height: 0;
+  font-size: 13px;
+  /* Keep the scrollbar gutter reserved even when content fits, so the body
+     grid width matches the header row above regardless of row count. */
+  scrollbar-gutter: stable;
+}
+
+.grid__row {
+  display: grid;
+  grid-template-columns: var(--ev-cols);
+  contain: layout style;
 }
 
 .grid__tick {
@@ -248,22 +295,28 @@ const gridStyle = computed(() => {
   text-align: right;
   color: var(--text-muted, rgba(255, 255, 255, 0.45));
   font-size: 11px;
-  border-right: 1px solid var(--border-muted, rgba(255, 255, 255, 0.06));
+  border-right: 1px solid var(--border, rgba(255, 181, 71, 0.18));
   white-space: nowrap;
 }
 
 .grid__cell {
   border-left: 2px solid transparent;
+  border-right: 1px solid var(--border, rgba(255, 181, 71, 0.12));
   padding: 1px 6px;
   min-height: 1.4em;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-/* Zebra striping: every other row gets a faint background so the eye can
-   trace which (tick, core) cells belong together as one horizontal slice. */
+.grid__row .grid__cell:last-child {
+  border-right: none;
+}
+
+/* Zebra striping: parity is bound to row.tick (see GridRow.alt) so the
+   pattern stays stable even when the log cap shifts entries off the front
+   or a global row gets interleaved. */
 .grid__cell--alt {
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(var(--accent-rgb), 0.045);
 }
 
 /* Cells whose events ran in PL0 get an amber-tinted background. Combined
@@ -332,21 +385,22 @@ const gridStyle = computed(() => {
 }
 
 .empty {
+  position: absolute;
+  top: 32px;
+  left: 0;
+  right: 0;
   color: var(--text-muted);
   font-style: italic;
   padding: 20px 0;
   text-align: center;
+  pointer-events: none;
 }
 
 @media (max-width: 768px) {
   .log {
     font-size: 12px;
   }
-  .line {
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .grid {
+  .log__scroller {
     font-size: 11px;
   }
   .grid__cell {

@@ -13,7 +13,7 @@ export type CpuEvent =
   | { type: 'reg_write'; core_id: number; tick?: number; reg: string; old: number; new: number }
   | { type: 'mem_read'; core_id: number; tick?: number; addr: number; value: number; size: number }
   | { type: 'mem_write'; core_id: number; tick?: number; addr: number; old: number; new: number; size: number }
-  | { type: 'mode_switch'; core_id: number; tick?: number; from: number; to: number; cause: string }
+  | { type: 'mode_switch'; core_id: number; tick?: number; from: number; to: number; cause: string; new_cs?: number; new_ds?: number; new_ss?: number; new_esp?: number }
   | { type: 'irq_fire'; core_id: number; tick?: number; vector: number; source: string; handler: number; from_mode: number; saved_eip?: number; saved_cs?: number; saved_eflags?: number }
   | { type: 'page_fault'; core_id: number; tick?: number; addr: number; mode: number; perm_needed: string }
   | { type: 'halt'; core_id: number; tick?: number; pid?: number }
@@ -792,8 +792,17 @@ export const useCpuStore = defineStore('cpu', () => {
     };
     ws.onmessage = (e) => {
       try {
-        const ev = JSON.parse(e.data) as CpuEvent;
-        applyEvent(ev);
+        const msg = JSON.parse(e.data);
+        // The backend bundles every event produced in the same simulator tick
+        // into one frame ({type:"tick_events", events:[...]}). Applying the
+        // whole batch inside a single sync callback keeps every log.value
+        // mutation in the same reactive turn, so gridRows (and any other
+        // computed downstream) only re-runs once per tick.
+        if (msg && msg.type === 'tick_events' && Array.isArray(msg.events)) {
+          for (const ev of msg.events as CpuEvent[]) applyEvent(ev);
+        } else {
+          applyEvent(msg as CpuEvent);
+        }
       } catch (err) {
         pushLog(formatLog.wsJsonErr(err), 'red', undefined, undefined, 'global');
       }
@@ -910,14 +919,23 @@ export const useCpuStore = defineStore('cpu', () => {
         const c = ensureCoreSlot(ev.core_id);
         c.mode = ev.to;
         pushLog(formatLog.modeSwitch(ev.from, ev.to, ev.cause), 'red', ev.core_id, ev.tick);
+        // K = kernel code; mode_switch is HW, so strip it from the entry.
+        const lastMS = log.value[log.value.length - 1];
+        if (lastMS) lastMS.inKernel = false;
         if (isSelected(ev.core_id)) mode.value = ev.to;
-        // IRET pops the interrupt frame; the panel needs to clear that core
-        // so it goes back to "— sin handler activo —". Defer the mutation
-        // with queueMicrotask so subscribers fired below (in particular the
-        // InterruptNarrator, which reads the stack-frame DOM slots to spawn
-        // the IRET mini-arrows) still see the slots mounted. Vue will flush
-        // the unmount in the next microtask, after the narrator captured its
-        // coordinates.
+        if (ev.new_cs  !== undefined) c.segments.CS = ev.new_cs;
+        if (ev.new_ds  !== undefined) c.segments.DS = ev.new_ds;
+        if (ev.new_ss  !== undefined) c.segments.SS = ev.new_ss;
+        if (ev.new_esp !== undefined) c.regs.ESP    = ev.new_esp;
+        if (isSelected(ev.core_id)) {
+          if (ev.new_cs  !== undefined) segments.CS = ev.new_cs;
+          if (ev.new_ds  !== undefined) segments.DS = ev.new_ds;
+          if (ev.new_ss  !== undefined) segments.SS = ev.new_ss;
+          if (ev.new_esp !== undefined) regs.ESP    = ev.new_esp;
+        }
+        delete lastMnemonic[ev.core_id];
+        // Defer the frame-slot unmount so the InterruptNarrator can still
+        // read DOM coordinates for the IRET mini-arrows before Vue flushes.
         if (ev.cause === 'IRET') {
           const coreId = ev.core_id;
           queueMicrotask(() => {
@@ -928,6 +946,9 @@ export const useCpuStore = defineStore('cpu', () => {
       }
       case 'irq_fire': {
         pushLog(formatLog.irq(ev.vector, ev.source), 'yellow', ev.core_id, ev.tick);
+        // K = kernel code; HW IRQ delivery is not, strip it.
+        const lastIRQ = log.value[log.value.length - 1];
+        if (lastIRQ) lastIRQ.inKernel = false;
         lastFiredHandlerByVector.value = {
           ...lastFiredHandlerByVector.value,
           [ev.vector]: {
@@ -964,8 +985,14 @@ export const useCpuStore = defineStore('cpu', () => {
       case 'halt': {
         const c = ensureCoreSlot(ev.core_id);
         c.halted = true;
-        pushLog(formatLog.halt(), 'red', ev.core_id, ev.tick);
-        if (isSelected(ev.core_id)) halted.value = true;
+        const pid = (ev as { pid?: number }).pid ?? -1;
+        // PID 0 is the swapper parking on HLT between IRQs — non-fatal, cyan.
+        // Any other PID is the terminal cascade (process death) — red.
+        const isIdle = pid === 0;
+        pushLog(formatLog.halt(pid), isIdle ? 'cyan' : 'red', ev.core_id, ev.tick);
+        // Only the cascade halt freezes the UI as "machine halted". Swapper
+        // HLT keeps the run loop alive — the next IRQ wakes it back up.
+        if (!isIdle && isSelected(ev.core_id)) halted.value = true;
         break;
       }
       case 'state':
@@ -1054,6 +1081,34 @@ export const useCpuStore = defineStore('cpu', () => {
       case 'pcb_restore': {
         const p = procs.value.find(x => x.pid === ev.pid);
         if (p) p.regs = ev.regs;
+        // Inside a handler (c.mode === 0) the ring-dependent regs live in
+        // the patched trap frame and become live only at the IRET
+        // mode_switch — never overwrite them here. Ring-independent GP
+        // regs are safe either way.
+        const c = ensureCoreSlot(ev.core_id);
+        const ringIndependent = ['EAX', 'EBX', 'ECX', 'EDX', 'ESI', 'EDI', 'EBP', 'EFLAGS'] as const;
+        for (const k of ringIndependent) {
+          if (k in ev.regs) c.regs[k] = ev.regs[k];
+        }
+        if (c.mode !== 0) {
+          if ('EIP' in ev.regs) c.regs.EIP = ev.regs.EIP;
+          if ('ESP' in ev.regs) c.regs.ESP = ev.regs.ESP;
+          for (const k of ['CS', 'DS', 'SS'] as const) {
+            if (k in ev.regs) c.segments[k] = ev.regs[k];
+          }
+        }
+        if (isSelected(ev.core_id)) {
+          for (const k of ringIndependent) {
+            if (k in ev.regs) regs[k] = ev.regs[k];
+          }
+          if (c.mode !== 0) {
+            if ('EIP' in ev.regs) regs.EIP = ev.regs.EIP;
+            if ('ESP' in ev.regs) regs.ESP = ev.regs.ESP;
+            for (const k of ['CS', 'DS', 'SS'] as const) {
+              if (k in ev.regs) segments[k] = ev.regs[k];
+            }
+          }
+        }
         flashPID(ev.pid);
         pushLog(formatLog.pcbRestore(ev.pid, ev.regs.EIP || 0), 'green', ev.core_id, ev.tick, undefined, 'scheduler');
         break;
@@ -1482,7 +1537,10 @@ export const useCpuStore = defineStore('cpu', () => {
   function share() { send({ cmd: 'share' }); }
   function unshare() { send({ cmd: 'unshare' }); }
   function setAlias(alias: string) { send({ cmd: 'set_alias', alias }); }
-  function setNumCores(n: number) { send({ cmd: 'set_num_cores', cores: n }); }
+  function setNumCores(n: number) {
+    send({ cmd: 'set_num_cores', cores: n });
+    setVisibleCores(Array.from({ length: Math.max(1, n) }, (_, i) => i));
+  }
   function setIdleTaskEnabled(enabled: boolean) { send({ cmd: 'set_idle_task', idle_task: enabled }); }
 
   // idleTaskEnabled is derived from the process table: PID 0 only appears

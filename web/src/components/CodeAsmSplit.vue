@@ -47,13 +47,24 @@ function tgidOf(p: PCBInfo): number {
   return p.tgid ?? p.pid;
 }
 
-// Group every visible PCB by TGID. The leader is the member whose pid == tgid
-// (or is_leader true); when a snapshot arrives mid-clone and no leader is
-// present yet, the smallest-pid member acts as the temporary leader so the
-// tab still renders.
+// Kernel-side PCBs (swapper, init, kthreadd, per-core kernel/N) have no C
+// source attached and would render empty tabs in a panel dedicated to user
+// programs. Mirrors the "hide kernel machinery" filter in useProcessTree.
+function isUserProc(p: PCBInfo): boolean {
+  if (p.is_idle === true) return false;
+  if (p.is_kthread === true) return false;
+  if (p.name === 'init') return false;
+  return true;
+}
+
+// Group every visible user PCB by TGID. The leader is the member whose
+// pid == tgid (or is_leader true); when a snapshot arrives mid-clone and no
+// leader is present yet, the smallest-pid member acts as the temporary
+// leader so the tab still renders.
 const tgidGroups = computed<TGIDGroup[]>(() => {
   const byTgid = new Map<number, PCBInfo[]>();
   for (const p of cpu.procs) {
+    if (!isUserProc(p)) continue;
     const key = tgidOf(p);
     const bucket = byTgid.get(key);
     if (bucket) bucket.push(p);
@@ -71,16 +82,22 @@ const tgidGroups = computed<TGIDGroup[]>(() => {
 
 // The TGID actually being displayed: follows the focused core's current_pid
 // (resolved to its TGID) unless the user pins a leader. `pinnedPID` stores the
-// leader's pid, so an explicit pin always maps to exactly one group.
+// leader's pid, so an explicit pin always maps to exactly one group. When the
+// focused core is running a kernel-side PCB (filtered out of tgidGroups), we
+// fall back to the first user group so the panel keeps showing user code
+// instead of blanking on every HLT/idle transition.
 const viewingTGID = computed<number | null>(() => {
   if (pinnedPID.value) {
     const group = tgidGroups.value.find(g => g.leader.pid === pinnedPID.value);
     if (group) return tgidOf(group.leader);
     return pinnedPID.value;
   }
-  if (!cpu.currentPID) return null;
-  const proc = cpu.procs.find(p => p.pid === cpu.currentPID);
-  return proc ? tgidOf(proc) : cpu.currentPID;
+  if (cpu.currentPID) {
+    const proc = cpu.procs.find(p => p.pid === cpu.currentPID);
+    const tgid = proc ? tgidOf(proc) : cpu.currentPID;
+    if (tgidGroups.value.some(g => tgidOf(g.leader) === tgid)) return tgid;
+  }
+  return tgidGroups.value[0] ? tgidOf(tgidGroups.value[0].leader) : null;
 });
 
 const viewingGroup = computed<TGIDGroup | null>(() => {

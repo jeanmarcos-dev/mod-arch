@@ -180,6 +180,13 @@ const wqTransitionName = computed(() => prefs.schedulerAnimationEnabled ? 'wq' :
   transition: transform 220ms ease-in, opacity 200ms ease-in;
   position: absolute;
 }
+/* The head pill pulses via a CSS animation on `opacity`; that animation
+   would override the leave transition's opacity:0 target and keep the
+   pill visible for ~1.6s after a Reset. The compound selector bumps
+   specificity above .rq-pill--head so the leave actually fades it. */
+.rq-pill.rq-leave-active {
+  animation: none;
+}
 /* Moves (same key, new index) glide horizontally as the queue shrinks
    ahead of them. Without this the pills would snap to their new spots
    the instant the head leaves. */
@@ -207,6 +214,14 @@ const wqTransitionName = computed(() => prefs.schedulerAnimationEnabled ? 'wq' :
 .wq-leave-active {
   transition: transform 220ms ease-in, opacity 200ms ease-in;
   position: absolute;
+}
+/* wq-pill carries an infinite `wait-pulse` animation on opacity that
+   would otherwise override the leave transition and leave the pill
+   stuck at ~0.7 opacity for the full pulse period, overlapping the
+   "— empty —" placeholder after a Reset. The compound selector raises
+   specificity above .wq-pill so animation:none wins the cascade. */
+.wq-pill.wq-leave-active {
+  animation: none;
 }
 .wq-move {
   transition: transform 240ms cubic-bezier(.2,.8,.2,1);

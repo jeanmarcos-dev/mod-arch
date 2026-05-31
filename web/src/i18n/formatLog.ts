@@ -40,8 +40,11 @@ export const formatLog = {
   pageFault(addr: number, permNeeded: string, mode: number): string {
     return `✗ ${t('logEvents.pageFault', { addr: `0x${addr.toString(16)}`, perm: permNeeded, mode })}`;
   },
-  halt(): string {
-    return `▸ ${t('logEvents.halt')}`;
+  halt(pid: number): string {
+    if (pid === 0) {
+      return `▸ ${t('logEvents.haltIdle')}`;
+    }
+    return `▸ ${t('logEvents.haltDead', { pid })}`;
   },
   loaded(name: string, count: number, pids: number[]): string {
     return `▸ ${t('logEvents.loaded', { name, count, pids: pids.join(',') })}`;

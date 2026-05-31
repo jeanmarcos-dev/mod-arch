@@ -382,7 +382,7 @@ onUnmounted(() => {
         >
           <CodeAsmSplit v-if="!isLocked('code')" v-show="visible.code" />
           <LockedPanel v-else v-show="visible.code" />
-          <EventsLog v-if="!isLocked('events')" v-show="visible.events" />
+          <EventsLog v-if="!isLocked('events')" v-show="visible.events" :active="visible.events" />
           <LockedPanel v-else v-show="visible.events" />
           <MemoryPanel v-if="!isLocked('memory')" v-show="visible.memory" />
           <LockedPanel v-else v-show="visible.memory" />
