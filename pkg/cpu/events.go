@@ -63,24 +63,16 @@ type EventMemWrite struct {
 // Tag returns the event tag.
 func (EventMemWrite) Tag() string { return "mem_write" }
 
-// EventModeSwitch records a PL3 <-> PL0 transition. The Cause field identifies
-// who triggered the change:
-//
-//   - "INT"   software (int N instruction) or hardware (IRQ); CPU does it automatically
-//   - "IRET"  software (iret instruction); CPU does it automatically on execution
-//   - "fault" CPU detected a violation (page fault, divide error, etc.) — HW
-//
-// In all three cases the mode bit transition is performed by the CPU HARDWARE.
-// Software only decides what to do AFTER the change; it never flips the bit.
+// EventModeSwitch records a PL3 <-> PL0 transition. Kind distinguishes the
+// transitions the HW performs autonomously (INT/IRET/fault) from the ones
+// the scheduler initiates by directly loading a PCB onto a core ("dispatch").
 type EventModeSwitch struct {
 	CoreID int    `json:"core_id"`
 	Tick   uint64 `json:"tick"`
-	From   uint8  `json:"from"`  // 3 or 0
-	To     uint8  `json:"to"`    // 3 or 0
-	Cause  string `json:"cause"` // "INT" | "IRET" | "fault"
-	// Destination-ring selectors + ESP loaded atomically with the CPL flip.
-	// Carried on the event because dispatchIRQ/handleIRET mutate c.R
-	// directly without emitting per-register reg_writes.
+	From   uint8  `json:"from"`
+	To     uint8  `json:"to"`
+	Kind   string `json:"kind"`  // "HW" | "SW"
+	Cause  string `json:"cause"` // "INT" | "IRET" | "fault" | "dispatch"
 	NewCS  uint16 `json:"new_cs,omitempty"`
 	NewDS  uint16 `json:"new_ds,omitempty"`
 	NewSS  uint16 `json:"new_ss,omitempty"`
@@ -220,7 +212,9 @@ type EventProcessState struct {
 func (EventProcessState) Tag() string { return "process_state" }
 
 // EventSyscall describes a syscall: number, name, args, and result. It is
-// emitted by the kernel after the dispatch completes but before IRET.
+// emitted by the kernel after the dispatch completes but before IRET. When the
+// syscall fails (Result is ^uint32(0)), Error carries the human-readable reason
+// so the UI can render an explicit failure instead of just "→ 4294967295".
 type EventSyscall struct {
 	CoreID int      `json:"core_id"`
 	Tick   uint64   `json:"tick"`
@@ -229,6 +223,7 @@ type EventSyscall struct {
 	Name   string   `json:"name"`
 	Args   []uint32 `json:"args"`
 	Result uint32   `json:"result"`
+	Error  string   `json:"error,omitempty"`
 }
 
 // Tag returns the event tag.

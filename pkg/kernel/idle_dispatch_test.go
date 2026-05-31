@@ -89,6 +89,120 @@ func TestDispatchIdleCores_Idempotent(t *testing.T) {
 	}
 }
 
+// TestDispatchIdleCores_NoEvictionWhenStaysIdle guards against the noisy
+// preempt+reassign pattern when an idle core has no user proc to swap to.
+// With more cores than ready procs only the cores that will actually be
+// dispatched should emit EventCoreRelease; the ones that bounce back to idle
+// stay silent.
+func TestDispatchIdleCores_NoEvictionWhenStaysIdle(t *testing.T) {
+	k := NewMulti(cpu.DefaultMemSize, 4)
+	if err := k.SpawnIdle(); err != nil {
+		t.Fatalf("SpawnIdle: %v", err)
+	}
+	k.IdleTaskEnabled = true
+
+	_ = k.DispatchIdleCores()
+	for _, c := range k.Cores {
+		if !c.RunningIdle {
+			t.Fatalf("setup: core %d not idle after bootstrap", c.ID)
+		}
+	}
+
+	if _, err := k.AddProcess("p1", []byte{0x90, 0xF4}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := k.AddProcess("p2", []byte{0x90, 0xF4}); err != nil {
+		t.Fatal(err)
+	}
+
+	evs := k.DispatchIdleCores()
+
+	releases := 0
+	for _, e := range evs {
+		if rel, ok := e.(cpu.EventCoreRelease); ok && rel.PID == 0 {
+			releases++
+		}
+	}
+	if releases != 2 {
+		t.Errorf("idle EventCoreRelease count = %d, want 2 (one per dispatched proc)", releases)
+	}
+}
+
+// TestStepCore_IdleTimerFires covers the local-APIC timer on idle cores: a
+// swapper-bound core must receive its timer IRQ every TimerQuantum HLT ticks,
+// so a core that sits in idle is not silently isolated from the scheduler.
+// The idle gate queues the IRQ and falls through to CPU.Step in the same
+// tick — symmetric with user cores' shouldFireTimer path — so the test
+// asserts on the dispatched EventIRQFire rather than on PendingIRQs.
+func TestStepCore_IdleTimerFires(t *testing.T) {
+	k := NewMulti(cpu.DefaultMemSize, 1)
+	if err := k.SpawnIdle(); err != nil {
+		t.Fatalf("SpawnIdle: %v", err)
+	}
+	k.IdleTaskEnabled = true
+	k.TimerQuantum = 4
+	_ = k.DispatchIdleCores()
+
+	core := k.Cores[0]
+	if !core.RunningIdle {
+		t.Fatalf("setup: core 0 not RunningIdle")
+	}
+
+	var fired *cpu.EventIRQFire
+	for i := 0; i < k.TimerQuantum+1; i++ {
+		evs, err := k.stepCore(core)
+		if err != nil {
+			t.Fatalf("stepCore #%d: %v", i, err)
+		}
+		for j := range evs {
+			if irq, ok := evs[j].(cpu.EventIRQFire); ok && irq.Vector == IRQTimer {
+				fired = &irq
+			}
+		}
+	}
+	if fired == nil {
+		t.Fatalf("timer did not fire within %d idle ticks", k.TimerQuantum+1)
+	}
+	if fired.Source != "HW" {
+		t.Errorf("EventIRQFire.Source = %q, want HW", fired.Source)
+	}
+}
+
+// TestStepCore_IdleHaltTickPreIncrement guards the EventHalt tick stamp on
+// the idle gate. The very first stepCore decodes the HLT byte (Tick=0); the
+// next call lands in the gate and must stamp EventHalt with Tick=1, matching
+// pre-increment semantics used by EventInstruction.
+func TestStepCore_IdleHaltTickPreIncrement(t *testing.T) {
+	k := NewMulti(cpu.DefaultMemSize, 1)
+	if err := k.SpawnIdle(); err != nil {
+		t.Fatalf("SpawnIdle: %v", err)
+	}
+	k.IdleTaskEnabled = true
+	_ = k.DispatchIdleCores()
+	core := k.Cores[0]
+
+	if _, err := k.stepCore(core); err != nil {
+		t.Fatalf("stepCore #0 (HLT): %v", err)
+	}
+	evs, err := k.stepCore(core)
+	if err != nil {
+		t.Fatalf("stepCore #1 (idle gate): %v", err)
+	}
+	var halt *cpu.EventHalt
+	for i := range evs {
+		if h, ok := evs[i].(cpu.EventHalt); ok {
+			halt = &h
+			break
+		}
+	}
+	if halt == nil {
+		t.Fatalf("no EventHalt emitted from the idle gate")
+	}
+	if halt.Tick != 1 {
+		t.Errorf("idle gate EventHalt.Tick = %d, want 1 (pre-increment after the HLT tick)", halt.Tick)
+	}
+}
+
 // TestDispatchIdleCores_EvictsIdleForRealProc covers preemption: a core
 // happily running PID 0 must yield when a user proc joins the ready queue.
 // The kernel emits EventCoreRelease{PID:0, "idle preempted"} so the frontend

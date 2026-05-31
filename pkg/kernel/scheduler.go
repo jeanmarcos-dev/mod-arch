@@ -235,13 +235,17 @@ func pcbRegsSnapshot(p *PCB) map[string]uint32 {
 func (k *Kernel) DispatchIdleCores() []cpu.Event {
 	var out []cpu.Event
 
-	// Eviction pass: any core currently bound to the swapper must yield as
-	// soon as a real user proc (anything not init) joins the ready queue.
-	// Done before the assignment loop so firstIdleCore picks the freshly
-	// vacated core, and so the frontend gets a paired Release→Assign sequence
-	// for the swap rather than a silent CurrentPID overwrite.
-	if k.IdleTaskEnabled && k.hasNonInitReady() {
+	// Eviction pass: evict only as many swapper-bound cores as there are
+	// real user procs ready to land on them. Cores that would just bounce
+	// back to idle stay idle silently — no Release/Assign churn in the
+	// event log.
+	if k.IdleTaskEnabled {
+		needed := k.countDispatchableReady()
+		evicted := 0
 		for _, c := range k.Cores {
+			if evicted >= needed {
+				break
+			}
 			if c.RunningIdle {
 				n := len(out)
 				out = append(out, cpu.EventCoreRelease{
@@ -249,10 +253,9 @@ func (k *Kernel) DispatchIdleCores() []cpu.Event {
 				})
 				stampKernelContext(out[n:], c.ID, c.CPU.Tick)
 				c.RunningIdle = false
-				// Park the core in the legacy "no proc" sentinel so the
-				// assignment loop below treats it as a fresh idle slot.
 				c.CurrentPID = 0
 				c.CPU.Halted = true
+				evicted++
 			}
 		}
 	}
@@ -291,6 +294,7 @@ func (k *Kernel) DispatchIdleCores() []cpu.Event {
 		)
 		out = append(out, k.consumePendingReaps(pcb)...)
 
+		oldMode := idle.CPU.Mode
 		idle.CurrentPID = pid
 		pcb.State = StateRun
 		pcb.Core = idle.ID
@@ -300,6 +304,21 @@ func (k *Kernel) DispatchIdleCores() []cpu.Event {
 			cpu.EventCoreAssign{CoreID: idle.ID, PID: pid},
 			cpu.EventProcessState{PID: pid, State: string(StateRun)},
 		)
+		// Scheduler-initiated CPL flip: loadCPUFromPCB just dropped the core
+		// into user mode without going through an IRET, so the audit trail
+		// would otherwise have a silent kernel→user transition between the
+		// PCBRestore and the first user instruction.
+		if oldMode != idle.CPU.Mode {
+			out = append(out, cpu.EventModeSwitch{
+				CoreID: idle.ID, Tick: idle.CPU.Tick,
+				From: oldMode, To: idle.CPU.Mode,
+				Kind: "SW", Cause: "dispatch",
+				NewCS:  idle.CPU.R.CS,
+				NewDS:  idle.CPU.R.DS,
+				NewSS:  idle.CPU.R.SS,
+				NewESP: idle.CPU.R.ESP,
+			})
+		}
 		stampKernelContext(out[n:], idle.ID, idle.CPU.Tick)
 	}
 
@@ -349,6 +368,24 @@ func (k *Kernel) hasNonInitReady() bool {
 		}
 	}
 	return false
+}
+
+// countDispatchableReady returns how many ready PIDs would actually land on
+// an idle core through DispatchIdleCores's assignment loop. Init is excluded
+// (it goes through runInitReapCycle and never occupies a core); kthreads are
+// excluded defensively (they should never reach Ready in the first place).
+func (k *Kernel) countDispatchableReady() int {
+	n := 0
+	for _, pid := range k.Ready.Snapshot() {
+		if k.InitPID != 0 && pid == k.InitPID {
+			continue
+		}
+		if p := k.Processes[pid]; p != nil && p.IsKThread {
+			continue
+		}
+		n++
+	}
+	return n
 }
 
 // runInitReapCycle is the dispatch-time choreography for init: a visible

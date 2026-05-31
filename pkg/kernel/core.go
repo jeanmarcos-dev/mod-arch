@@ -44,4 +44,12 @@ type Core struct {
 	// sees the loop is alive without the event stream filling up with
 	// repeated HLT entries.
 	IdleTicks uint64
+
+	// idleTicksSinceFire counts swapper HLT ticks since the last timer fire
+	// on this core. Real x86 local-APIC timers keep ticking on idle cores
+	// too; modeling that pedagogically requires a quantum counter that
+	// advances during HLT, separate from userInstructionsSinceFire (which
+	// only counts user-mode instructions and therefore never grows while a
+	// core is parked in HLT). shouldFireTimerIdle uses it.
+	idleTicksSinceFire uint64
 }

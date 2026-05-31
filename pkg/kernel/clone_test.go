@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
@@ -206,5 +207,131 @@ func TestClone_ForkPathProducesIndependentSpaces(t *testing.T) {
 	}
 	if child.TGID != child.PID {
 		t.Errorf("child TGID=%d, want %d (fork starts a new thread group)", child.TGID, child.PID)
+	}
+}
+
+// TestClone_PIDSpaceAfterKThreads guards the boot-time PID budget against the
+// regression where MaxProcesses (the user-code slot count) doubled as the PID
+// ceiling. Once SpawnKThreadd + SpawnKernelThreads added kthreadd and a per-
+// core kernel/N, the old `nextPID > MaxProcesses+1` check rejected the second
+// CLONE_THREAD a user program issued — the threads_race demo lost its second
+// sibling silently. Each row spawns a realistic kernel (init + kthreadd +
+// kernel threads), then asks the leader to clone N siblings; all of them must
+// land with distinct TIDs and an EventThreadCreate apiece.
+func TestClone_PIDSpaceAfterKThreads(t *testing.T) {
+	tests := []struct {
+		name     string
+		cores    int
+		nThreads int
+	}{
+		{"two threads single core", 1, 2},
+		{"two threads two cores", 2, 2},
+		{"three threads (fills shared stack slots)", 1, 3},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			k := NewMulti(cpu.DefaultMemSize, tc.cores)
+			if _, err := k.SpawnInit(); err != nil {
+				t.Fatalf("SpawnInit: %v", err)
+			}
+			k.SpawnKThreadd()
+			k.SpawnKernelThreads()
+			leaderPID, err := k.AddProcess("leader", []byte{0xF4})
+			if err != nil {
+				t.Fatalf("AddProcess: %v", err)
+			}
+			parent := k.Processes[leaderPID]
+
+			seenTIDs := map[int]bool{}
+			for i := 0; i < tc.nThreads; i++ {
+				child, evs, err := k.Clone(k.Cores[0], parent, CloneVM|CloneFiles|CloneThread, cloneOptions{
+					childEIP: 0x200080,
+				})
+				if err != nil {
+					t.Fatalf("clone #%d (after %d kthreads + leader) failed: %v",
+						i+1, leaderPID-1, err)
+				}
+				if seenTIDs[child.PID] {
+					t.Errorf("clone #%d reused TID %d", i+1, child.PID)
+				}
+				seenTIDs[child.PID] = true
+
+				ev, ok := findEvent[cpu.EventThreadCreate](evs)
+				if !ok {
+					t.Errorf("clone #%d: no EventThreadCreate emitted", i+1)
+					continue
+				}
+				if ev.TID != child.PID {
+					t.Errorf("clone #%d: EventThreadCreate.TID=%d, want %d", i+1, ev.TID, child.PID)
+				}
+				if ev.TGID != parent.TGID {
+					t.Errorf("clone #%d: EventThreadCreate.TGID=%d, want %d", i+1, ev.TGID, parent.TGID)
+				}
+			}
+			if len(seenTIDs) != tc.nThreads {
+				t.Errorf("got %d unique TIDs, want %d", len(seenTIDs), tc.nThreads)
+			}
+		})
+	}
+}
+
+// TestClone_PIDExhaustionReportsError forces the PID ceiling and asserts both
+// the error path of Clone() and the EventSyscall.Error stamping done by
+// handleSyscall. Without the latter, a failed clone would surface to the UI
+// as just result=0xFFFFFFFF with no human-readable reason — the very bug that
+// hid the threads_race regression for so long.
+func TestClone_PIDExhaustionReportsError(t *testing.T) {
+	k := NewMulti(cpu.DefaultMemSize, 1)
+	if _, err := k.SpawnInit(); err != nil {
+		t.Fatalf("SpawnInit: %v", err)
+	}
+	k.SpawnKThreadd()
+	k.SpawnKernelThreads()
+	leaderPID, err := k.AddProcess("leader", []byte{0xF4})
+	if err != nil {
+		t.Fatalf("AddProcess: %v", err)
+	}
+	parent := k.Processes[leaderPID]
+
+	// Push nextPID one past the ceiling so the very next Clone fails.
+	k.nextPID = MaxPIDs + 1
+
+	_, _, err = k.Clone(k.Cores[0], parent, CloneVM|CloneFiles|CloneThread, cloneOptions{
+		childEIP: 0x200080,
+	})
+	if err == nil {
+		t.Fatal("expected error when nextPID > MaxPIDs, got nil")
+	}
+	if !strings.Contains(err.Error(), "PID space exhausted") {
+		t.Errorf("error = %q, want substring 'PID space exhausted'", err.Error())
+	}
+
+	// Re-arm and exercise the full handleSyscall path so we can assert that
+	// the failure surfaces on EventSyscall.Error (and not just on the return
+	// tuple of Clone).
+	k.nextPID = MaxPIDs + 1
+	core := k.Cores[0]
+	core.CurrentPID = leaderPID
+	core.CPU.R.EAX = SysClone
+	core.CPU.R.EBX = uint32(CloneVM | CloneFiles | CloneThread)
+	core.CPU.R.ECX = 0
+	core.CPU.R.EDX = 0x200080
+
+	evs := k.handleSyscall(core)
+	syscallEv, ok := findEvent[cpu.EventSyscall](evs)
+	if !ok {
+		t.Fatal("handleSyscall emitted no EventSyscall")
+	}
+	if syscallEv.Name != "clone" {
+		t.Errorf("EventSyscall.Name=%q, want %q", syscallEv.Name, "clone")
+	}
+	if syscallEv.Result != ^uint32(0) {
+		t.Errorf("EventSyscall.Result=0x%X, want 0xFFFFFFFF (failure sentinel)", syscallEv.Result)
+	}
+	if syscallEv.Error == "" {
+		t.Error("EventSyscall.Error is empty — failed clone surfaces silently to the UI")
+	}
+	if !strings.Contains(syscallEv.Error, "PID space exhausted") {
+		t.Errorf("EventSyscall.Error=%q, want substring 'PID space exhausted'", syscallEv.Error)
 	}
 }

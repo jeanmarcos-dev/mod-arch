@@ -8,10 +8,10 @@ import (
 
 // TestDispatchIdleCores_AssignsReadyToIdle covers the canonical scenario:
 // three procs loaded onto a 2-core kernel. Two go to RUN, one stays in the
-// ready queue, and eight events are emitted (PCBRestore + SchedDecision +
-// CoreAssign + ProcessState per dispatched proc). The final SchedDecision
-// must carry the post-pop ready queue so the frontend never sees a RUN
-// process still queued.
+// ready queue, and ten events are emitted (SchedDecision + PCBRestore +
+// CoreAssign + ProcessState + ModeSwitch per dispatched proc). The final
+// SchedDecision must carry the post-pop ready queue so the frontend never
+// sees a RUN process still queued.
 func TestDispatchIdleCores_AssignsReadyToIdle(t *testing.T) {
 	k := NewMulti(cpu.DefaultMemSize, 2)
 	if _, err := k.AddProcess("p1", []byte{0x90, 0xF4}); err != nil {
@@ -38,8 +38,25 @@ func TestDispatchIdleCores_AssignsReadyToIdle(t *testing.T) {
 	if snap := k.Ready.Snapshot(); len(snap) != 1 || snap[0] != 3 {
 		t.Errorf("ready queue = %v, want [3]", snap)
 	}
-	if len(evs) != 8 {
-		t.Errorf("events emitted = %d, want 8 (4 per dispatched proc)", len(evs))
+	if len(evs) != 10 {
+		t.Errorf("events emitted = %d, want 10 (5 per dispatched proc)", len(evs))
+	}
+	var modeSwitches []cpu.EventModeSwitch
+	for _, e := range evs {
+		if ms, ok := e.(cpu.EventModeSwitch); ok {
+			modeSwitches = append(modeSwitches, ms)
+		}
+	}
+	if len(modeSwitches) != 2 {
+		t.Fatalf("ModeSwitch events = %d, want 2", len(modeSwitches))
+	}
+	for _, ms := range modeSwitches {
+		if ms.Kind != "SW" || ms.Cause != "dispatch" {
+			t.Errorf("ModeSwitch = %+v, want Kind=SW Cause=dispatch", ms)
+		}
+		if ms.From != cpu.ModeKernel || ms.To != cpu.ModeUser {
+			t.Errorf("ModeSwitch From/To = %d/%d, want 0/3", ms.From, ms.To)
+		}
 	}
 	// Every dispatched proc must carry one SchedDecision; the last one must
 	// reflect the post-pop ready queue (just P3 left).

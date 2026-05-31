@@ -68,8 +68,8 @@ func (k *Kernel) Clone(core *Core, parent *PCB, flags CloneFlags, opts cloneOpti
 	if parent == nil {
 		return nil, nil, fmt.Errorf("clone: nil parent")
 	}
-	if k.nextPID > MaxProcesses+1 { // +1 to reserve room for init's PID 1
-		return nil, nil, fmt.Errorf("clone: PID space exhausted")
+	if k.nextPID > MaxPIDs {
+		return nil, nil, fmt.Errorf("clone: PID space exhausted (max %d)", MaxPIDs)
 	}
 	parentMem := parent.MemSpace()
 	if parentMem == nil {

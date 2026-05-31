@@ -91,7 +91,7 @@ func (c *CPU) dispatchIRQ(vector uint8, source string) error {
 	if oldMode != ModeKernel {
 		c.Emit(EventModeSwitch{
 			CoreID: c.CoreID, Tick: c.Tick,
-			From: oldMode, To: ModeKernel, Cause: causeOf(source),
+			From: oldMode, To: ModeKernel, Kind: "HW", Cause: causeOf(source),
 			NewCS: c.R.CS, NewDS: c.R.DS, NewSS: c.R.SS, NewESP: c.R.ESP,
 		})
 	}
@@ -162,7 +162,7 @@ func (c *CPU) handleIRET() error {
 		c.R.DS = SelUserData
 		c.Emit(EventModeSwitch{
 			CoreID: c.CoreID, Tick: c.Tick,
-			From: oldMode, To: ModeUser, Cause: "IRET",
+			From: oldMode, To: ModeUser, Kind: "HW", Cause: "IRET",
 			NewCS: c.R.CS, NewDS: c.R.DS, NewSS: c.R.SS, NewESP: c.R.ESP,
 		})
 	}

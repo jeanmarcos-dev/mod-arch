@@ -15,6 +15,12 @@ const (
 	MaxProcesses  = 4
 	ProcCodeSize  = 0x40000 // 256 KB per process
 	ProcStackSize = 0x40000
+
+	// MaxPIDs caps the monotonic PID counter. Decoupled from MaxProcesses
+	// because PIDs are consumed by kernel daemons (init, kthreadd, kernel/N)
+	// and user threads too — none of which take a user-code slot. The
+	// counter never recycles, so this is the lifetime budget of the demo.
+	MaxPIDs = 32
 )
 
 // MaxCores caps how many simulated cores Kernel.NewMulti will spin up. The
@@ -282,6 +288,8 @@ func (k *Kernel) Reset() {
 		c.CPU.Reset()
 		c.CurrentPID = 0
 		c.userInstructionsSinceFire = 0
+		c.IdleTicks = 0
+		c.idleTicksSinceFire = 0
 		// CPU.Reset clears Halted; with no process loaded every core has
 		// nothing to run, so park them all halted. loadCPUFromPCB clears
 		// Halted on the core that receives the next AddProcess call.
@@ -474,23 +482,34 @@ func (k *Kernel) Step() ([]cpu.Event, error) {
 // idle: it does not tick and emits nothing. It only wakes up once the
 // scheduler assigns it work or routes an interrupt its way.
 func (k *Kernel) stepCore(core *Core) ([]cpu.Event, error) {
-	if core.CurrentPID == 0 && len(core.CPU.PendingIRQs) == 0 {
-		// Swapper parked on HLT: advance the CPU tick (the real x86 keeps
-		// counting cycles while halted), bump the idle counter, and surface
-		// the activity as an EventHalt so the event log stays visibly alive
-		// instead of going silent the moment the user proc blocks. One entry
-		// per tick per swapper-bound core is honest — the simulator IS
-		// advancing, the CPU IS in HLT, and the cadence is the lesson.
+	// Gate the idle short-circuit on Halted so the path is only taken when
+	// the swapper is genuinely parked on HLT. After a timer IRQ wakes the
+	// CPU the handler still needs to run (NOP + IRET + JMP + HLT); falling
+	// into the short-circuit there would skip those instructions.
+	if core.CurrentPID == 0 && len(core.CPU.PendingIRQs) == 0 && core.CPU.Halted {
 		if core.RunningIdle {
-			core.CPU.Tick++
 			core.IdleTicks++
-			return []cpu.Event{cpu.EventHalt{
-				CoreID: core.ID,
-				Tick:   core.CPU.Tick,
-				PID:    0,
-			}}, nil
+			core.idleTicksSinceFire++
+			// Local-APIC timer for the idle core: when the quantum is
+			// reached, queue the IRQ and fall through to CPU.Step so it
+			// dispatches in this same tick — symmetric with user cores,
+			// whose shouldFireTimer also queues at the start of stepCore
+			// and the IRQ event is stamped at this same tick.
+			if k.TimerQuantum > 0 && core.idleTicksSinceFire >= uint64(k.TimerQuantum) {
+				core.CPU.PendingIRQs = append(core.CPU.PendingIRQs, IRQTimer)
+				core.idleTicksSinceFire = 0
+			} else {
+				tick := core.CPU.Tick
+				core.CPU.Tick++
+				return []cpu.Event{cpu.EventHalt{
+					CoreID: core.ID,
+					Tick:   tick,
+					PID:    0,
+				}}, nil
+			}
+		} else {
+			return nil, nil
 		}
-		return nil, nil
 	}
 	if k.shouldFireTimer(core) {
 		core.CPU.PendingIRQs = append(core.CPU.PendingIRQs, IRQTimer)

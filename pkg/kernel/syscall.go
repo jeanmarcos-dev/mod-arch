@@ -35,18 +35,20 @@ const (
 // stack. arg3 (EDX) carries the child entry-point EIP — glibc fills it with
 // the function passed to pthread_create.
 //
-// Returns the child PID to the parent (Clone() stamps EAX=0 on the child).
-// Failure returns ^uint32(0).
-func (k *Kernel) sysClone(core *Core, flags, childStack, childEIP uint32) (uint32, []cpu.Event) {
+// Returns the child PID to the parent (Clone() stamps EAX=0 on the child) and
+// an error string that handleSyscall stamps onto EventSyscall.Error so the UI
+// can render a failed clone explicitly instead of just "-1". Failure returns
+// (^uint32(0), nil, err.Error()).
+func (k *Kernel) sysClone(core *Core, flags, childStack, childEIP uint32) (uint32, []cpu.Event, string) {
 	parent := k.Processes[core.CurrentPID]
 	child, events, err := k.Clone(core, parent, CloneFlags(flags), cloneOptions{
 		childStackTop: childStack,
 		childEIP:      childEIP,
 	})
 	if err != nil {
-		return ^uint32(0), nil
+		return ^uint32(0), nil, err.Error()
 	}
-	return uint32(child.PID), events
+	return uint32(child.PID), events, ""
 }
 
 // Standard file descriptors.
@@ -110,6 +112,7 @@ func (k *Kernel) handleSyscall(core *Core) []cpu.Event {
 	var out []cpu.Event
 	var result uint32
 	var name string
+	var syscallErr string
 
 	switch num {
 	case SysFork:
@@ -133,7 +136,7 @@ func (k *Kernel) handleSyscall(core *Core) []cpu.Event {
 	case SysClone:
 		name = "clone"
 		var subEvs []cpu.Event
-		result, subEvs = k.sysClone(core, arg1, arg2, arg3)
+		result, subEvs, syscallErr = k.sysClone(core, arg1, arg2, arg3)
 		out = append(out, subEvs...)
 	case SysPipe:
 		name = "pipe"
@@ -191,6 +194,7 @@ func (k *Kernel) handleSyscall(core *Core) []cpu.Event {
 		Name:   name,
 		Args:   syscallArgs(num, arg1, arg2, arg3),
 		Result: result,
+		Error:  syscallErr,
 	}
 	out = append([]cpu.Event{syscallEv}, out...)
 	return stampKernelContext(out, core.ID, core.CPU.Tick)
