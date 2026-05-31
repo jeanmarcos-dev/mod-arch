@@ -77,12 +77,12 @@ const kbufLabel = computed(() => {
 
 <template>
   <div class="panel console" data-pizarra-anchor="console-panel">
-    <div class="console__io">
+    <div class="console__top">
       <ConsoleMonitor class="console__monitor" />
-      <KeyboardNarrator class="console__narrator" />
     </div>
 
-    <section class="console__keyboard" :aria-label="t('panels.console.kbdAria')">
+    <div class="console__bottom">
+      <section class="console__keyboard" :aria-label="t('panels.console.kbdAria')">
       <header class="kbd__header">
         <button
           type="button"
@@ -156,30 +156,39 @@ const kbufLabel = computed(() => {
           @keydown="onKeyDown"
         />
       </div>
-    </section>
+      </section>
+
+      <KeyboardNarrator class="console__narrator" />
+    </div>
   </div>
 </template>
 
 <style scoped>
 .console {
-  /* Width: takes its share of .middle via --mc-weight (set inline from
-     Simulator.vue); 60vh caps it so a huge weight on tall screens cannot
-     swallow the entire viewport. min-height keeps a usable strip even when
-     the user drags the resizer to its top. */
-  flex: var(--mc-weight, 1) 1 0;
-  min-height: 240px;
-  max-height: 60vh;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  /* Height now comes from the parent ConsoleDrawer — the panel just fills
+     it. Grid: stdout (CONSOLE) on top, KEYBOARD HW + NARRATOR sidebar at
+     the bottom, mirroring a real terminal where output flows up and input
+     lives below. */
+  display: grid;
+  grid-template-rows: 3fr 2fr;
+  gap: 4px;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
 }
 
-.console__io {
-  flex: 1;
+.console__top {
   min-height: 0;
+  min-width: 0;
+  display: flex;
+}
+
+.console__bottom {
+  min-height: 0;
+  min-width: 0;
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-  gap: 6px;
+  gap: 4px;
 }
 
 .console__monitor,
@@ -188,21 +197,27 @@ const kbufLabel = computed(() => {
   min-width: 0;
 }
 
+.console__monitor {
+  flex: 1 1 auto;
+  width: 100%;
+}
+
 .console__keyboard {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   background: var(--panel-soft);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 8px 10px;
+  border-radius: 0;
+  padding: 5px 7px;
+  min-height: 0;
 }
 
 .kbd__header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .kbd__title {
@@ -211,11 +226,11 @@ const kbufLabel = computed(() => {
   padding: 0;
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 5px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--green);
-  letter-spacing: 1px;
+  letter-spacing: 0.8px;
   text-transform: uppercase;
   cursor: pointer;
   justify-self: flex-start;
@@ -228,7 +243,7 @@ const kbufLabel = computed(() => {
 }
 
 .kbd__title-hint {
-  font-size: 10px;
+  font-size: 9px;
   font-style: italic;
   color: var(--text-dim);
   letter-spacing: 0;
@@ -239,9 +254,9 @@ const kbufLabel = computed(() => {
   background: transparent;
   border: 1px solid var(--terminal-border);
   border-radius: 0;
-  padding: 2px 10px;
+  padding: 1px 7px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: 9px;
   color: var(--text-dim);
   cursor: pointer;
   transition: color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
@@ -280,13 +295,13 @@ const kbufLabel = computed(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 6px;
+  gap: 5px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: 9px;
   color: var(--text-dim);
-  padding: 6px 2px 0;
+  padding: 3px 2px 0;
   border-top: 1px dashed var(--border);
-  min-height: 14px;
+  min-height: 12px;
 }
 
 .kbd__readers-label {
@@ -318,11 +333,11 @@ const kbufLabel = computed(() => {
 .kbd__interactor {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   background: var(--terminal-bg);
   border: 1px solid var(--terminal-border);
   border-radius: 0;
-  padding: 4px 8px;
+  padding: 3px 6px;
   cursor: text;
   position: relative;
 }
@@ -335,10 +350,10 @@ const kbufLabel = computed(() => {
 .kbd__hint {
   flex: 1;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 10px;
   font-style: italic;
   color: var(--text-muted);
-  line-height: 1.3;
+  line-height: 1.25;
 }
 
 .kbd__specials-row {
@@ -378,11 +393,11 @@ const kbufLabel = computed(() => {
   border: 1px solid var(--terminal-border);
   color: var(--text-dim);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  padding: 2px 6px;
+  font-size: 9px;
+  padding: 1px 5px;
   border-radius: 0;
   cursor: pointer;
-  line-height: 1.4;
+  line-height: 1.3;
   white-space: nowrap;
   transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
 }
@@ -404,27 +419,19 @@ const kbufLabel = computed(() => {
 
 @media (max-width: 768px) {
   .console {
-    height: 100%;
-    flex: 1;
-    min-height: 0;
-    /* Mobile shows one panel at a time via tab; the desktop viewport cap
-       would only shrink the only visible panel for no reason. */
-    max-height: none;
-    /* Let the column scroll if the four stacked sections together exceed
-       the available height — better than letting the narrator overlap
-       the keyboard below. */
+    /* Mobile shows the drawer as a full-viewport tab; stack everything in a
+       single column so the monitor, the keyboard and the narrator all keep
+       a readable strip without horizontal squeeze. */
+    grid-template-rows: auto auto auto;
+    grid-auto-flow: row;
     overflow-y: auto;
   }
 
-  /* Side-by-side stops making sense on narrow screens — stack the narrator
-     under the monitor with explicit row weights so the monitor doesn't
-     dominate the viewport while empty and the narrator + keyboard keep
-     readable room below. */
-  .console__io {
+  .console__bottom {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto;
-    flex: 0 0 auto;
   }
+
   .console__monitor {
     min-height: 140px;
     max-height: 28vh;
@@ -467,7 +474,7 @@ const kbufLabel = computed(() => {
 }
 
 @media (max-width: 360px) {
-  .console__io { grid-template-rows: minmax(140px, 1fr) auto; }
+  .console { grid-template-rows: minmax(140px, 1fr) auto auto; }
   .console__monitor { min-height: 140px; max-height: 36vh; }
   .kbd__specials { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .kbd__hint { font-size: 11px; }

@@ -681,7 +681,7 @@ export const useCpuStore = defineStore('cpu', () => {
   // Salida acumulada de sys_write. Cada bloque tiene el PID que escribió y el
   // core que originó el write para colorearlos y filtrarlos por core en
   // multicore.
-  interface ConsoleChunk { pid: number; coreId?: number; kind?: 'in' | 'out'; text: string; bytes?: number[] }
+  interface ConsoleChunk { pid: number; coreId?: number; kind?: 'in' | 'out'; text: string; bytes?: number[]; ts: number }
   const consoleChunks = ref<ConsoleChunk[]>([]);
 
   // ─── Estado del teclado HW ──────────────────────────────────────────────
@@ -691,6 +691,10 @@ export const useCpuStore = defineStore('cpu', () => {
   const kbdBufUsed = ref(0);
   const kbdBufCap = ref(16);
   const kbdReaders = ref<KbdReader[]>([]);
+  // Wall-clock timestamp of the last IRQ 0x21 (keyboard) fire. The Console
+  // drawer compares it against its lastOpenedAt to decide whether to flash
+  // the IRQ badge.
+  const lastIrq21At = ref(0);
 
   // Helper compartido por la consola y el narrador del teclado.
   function processNameOf(pid: number): string {
@@ -1064,6 +1068,9 @@ export const useCpuStore = defineStore('cpu', () => {
         // K = kernel code; HW IRQ delivery is not, strip it.
         const lastIRQ = log.value[log.value.length - 1];
         if (lastIRQ) lastIRQ.inKernel = false;
+        // Stamp the wall-clock for IRQ 0x21 (keyboard) so the Console drawer
+        // can flash its badge when fires happen while collapsed.
+        if (ev.vector === 0x21) lastIrq21At.value = Date.now();
         lastFiredHandlerByVector.value = {
           ...lastFiredHandlerByVector.value,
           [ev.vector]: {
@@ -1334,6 +1341,7 @@ export const useCpuStore = defineStore('cpu', () => {
           kind: ev.kind ?? (ev.pid === 0 ? 'in' : 'out'),
           text: ev.text,
           bytes: ev.bytes,
+          ts: Date.now(),
         });
         if (consoleChunks.value.length > 200) consoleChunks.value.splice(0, consoleChunks.value.length - 200);
         break;
@@ -1798,7 +1806,7 @@ export const useCpuStore = defineStore('cpu', () => {
     mutexes, semaphores, pipes,
     activeFrameByCore, lastFiredHandlerByVector,
     subscribe,
-    consoleChunks, faultShake, kbdBufUsed, kbdBufCap, kbdReaders, processNameOf,
+    consoleChunks, faultShake, kbdBufUsed, kbdBufCap, kbdReaders, lastIrq21At, processNameOf,
     glossarySearch, glossaryOpenSignal,
     sessionInfo, isViewer, viewerLink,
     lastPresence, handRaiseSignal, lastHandRaiseLabel, ownerGlossaryHover,

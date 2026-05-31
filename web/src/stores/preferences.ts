@@ -70,6 +70,26 @@ export interface LayoutSnapshot {
 
 export const PANEL_HEIGHT_MIN_WEIGHT = 0.15;
 
+// Console drawer persistent state. The drawer is anchored at the bottom of
+// the whole simulator shell; collapsed it shows only a centered pill, and
+// expanded it pushes the rest of the layout up by `heightPx`. Both fields
+// are persisted so a returning user finds the same configuration.
+export interface ConsoleDrawerState {
+  expanded: boolean;
+  heightPx: number;
+}
+
+export const CONSOLE_DRAWER_MIN_PX = 200;
+export const CONSOLE_DRAWER_DEFAULT_PX = 280;
+// Capped at half the viewport: any taller and the simulator panels above
+// lose more height than the drawer is worth.
+export const CONSOLE_DRAWER_MAX_RATIO = 0.5;
+
+export function consoleDrawerMaxPx(): number {
+  if (typeof window === 'undefined') return 600;
+  return Math.max(CONSOLE_DRAWER_MIN_PX, Math.floor(window.innerHeight * CONSOLE_DRAWER_MAX_RATIO));
+}
+
 interface PrefsState {
   sidebarCollapsed: boolean;
   // showInit controls whether the init process (PID 1, always present in the
@@ -100,6 +120,7 @@ interface PrefsState {
   asidesCollapsed: AsidesCollapsed;
   columnWidths: ColumnWidths;
   panelHeights: PanelHeights;
+  consoleDrawer: ConsoleDrawerState;
 }
 
 const STORAGE_KEY = 'modos-cpu:prefs:v1';
@@ -152,10 +173,18 @@ const DEFAULTS: PrefsState = {
     processes: 1,
     queues: 1.2,
     ipc: 1,
-    // Console arranca un poco más alta que la pila de tabs para preservar la
-    // sensación previa al resizer (cuando ConsolePanel crecía con el contenido).
+    // Legacy weights kept so previously-saved payloads deserialize without
+    // discarding everything; the console drawer no longer splits the center
+    // column, so these are dead fields. Reading them is a no-op now.
     middleTabs: 1,
     middleConsole: 1.2,
+  },
+  consoleDrawer: {
+    // Collapsed by default: a first-time visitor sees the full code +
+    // bitácora area; the pill at the bottom signals when there is I/O worth
+    // looking at. Returning users get whatever state they last left.
+    expanded: false,
+    heightPx: CONSOLE_DRAWER_DEFAULT_PX,
   },
 };
 
@@ -187,6 +216,18 @@ function sanitizeColumnWidths(input: unknown): ColumnWidths {
   }
   if (typeof src.rightPx === 'number' && Number.isFinite(src.rightPx)) {
     base.rightPx = Math.max(COLUMN_MIN_PX.right, src.rightPx);
+  }
+  return base;
+}
+
+function sanitizeConsoleDrawer(input: unknown): ConsoleDrawerState {
+  const base: ConsoleDrawerState = { ...DEFAULTS.consoleDrawer };
+  if (!input || typeof input !== 'object') return base;
+  const src = input as Record<string, unknown>;
+  if (typeof src.expanded === 'boolean') base.expanded = src.expanded;
+  if (typeof src.heightPx === 'number' && Number.isFinite(src.heightPx)) {
+    const maxPx = consoleDrawerMaxPx();
+    base.heightPx = Math.min(Math.max(CONSOLE_DRAWER_MIN_PX, Math.round(src.heightPx)), maxPx);
   }
   return base;
 }
@@ -277,6 +318,7 @@ function loadFromStorage(): PrefsState {
         ? sanitizePanelHeights(parsed.panelHeights)
         : { ...DEFAULTS.panelHeights },
       columnWidths: sanitizeColumnWidths(parsed.columnWidths),
+      consoleDrawer: sanitizeConsoleDrawer(parsed.consoleDrawer),
     };
   } catch {
     return { ...DEFAULTS, locale: i18nReadStoredLocale() };
@@ -302,6 +344,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
   const asidesCollapsed = ref<AsidesCollapsed>({ ...initial.asidesCollapsed });
   const columnWidths = ref<ColumnWidths>({ ...initial.columnWidths });
   const panelHeights = ref<PanelHeights>({ ...initial.panelHeights });
+  const consoleDrawer = ref<ConsoleDrawerState>({ ...initial.consoleDrawer });
 
   // Mobile drawer state is volatile by design: always starts closed so a
   // fresh reload doesn't reveal the sidebar over the content. Kept separate
@@ -331,11 +374,12 @@ export const usePreferencesStore = defineStore('preferences', () => {
       asidesCollapsed: asidesCollapsed.value,
       columnWidths: columnWidths.value,
       panelHeights: panelHeights.value,
+      consoleDrawer: consoleDrawer.value,
     });
   }
 
   watch(
-    [sidebarCollapsed, showInit, showInitTouched, mode, density, narratorsEnabled, schedulerAnimationEnabled, narratorMinTickMs, theme, locale, panelsCollapsed, asidesCollapsed, columnWidths, panelHeights],
+    [sidebarCollapsed, showInit, showInitTouched, mode, density, narratorsEnabled, schedulerAnimationEnabled, narratorMinTickMs, theme, locale, panelsCollapsed, asidesCollapsed, columnWidths, panelHeights, consoleDrawer],
     () => {
       try {
         window.localStorage.setItem(STORAGE_KEY, serialize());
@@ -408,6 +452,22 @@ export const usePreferencesStore = defineStore('preferences', () => {
     const clamped = Math.max(PANEL_HEIGHT_MIN_WEIGHT, weight);
     if (panelHeights.value[name] === clamped) return;
     panelHeights.value = { ...panelHeights.value, [name]: clamped };
+  }
+
+  function setConsoleDrawerExpanded(v: boolean) {
+    if (consoleDrawer.value.expanded === v) return;
+    consoleDrawer.value = { ...consoleDrawer.value, expanded: v };
+  }
+
+  function toggleConsoleDrawer() {
+    consoleDrawer.value = { ...consoleDrawer.value, expanded: !consoleDrawer.value.expanded };
+  }
+
+  function setConsoleDrawerHeight(px: number) {
+    const maxPx = consoleDrawerMaxPx();
+    const clamped = Math.min(Math.max(CONSOLE_DRAWER_MIN_PX, Math.round(px)), maxPx);
+    if (consoleDrawer.value.heightPx === clamped) return;
+    consoleDrawer.value = { ...consoleDrawer.value, heightPx: clamped };
   }
 
   // Layout snapshot covers everything the user can move/resize/collapse from
@@ -514,6 +574,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
     asidesCollapsed,
     columnWidths,
     panelHeights,
+    consoleDrawer,
     rowDensity,
     animationsEnabled,
     animationSpeed,
@@ -528,6 +589,9 @@ export const usePreferencesStore = defineStore('preferences', () => {
     toggleAside,
     setColumnWidth,
     setPanelHeight,
+    setConsoleDrawerExpanded,
+    toggleConsoleDrawer,
+    setConsoleDrawerHeight,
     getLayoutSnapshot,
     applyLayoutSnapshot,
     resetLayout,

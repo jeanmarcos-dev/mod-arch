@@ -762,6 +762,22 @@ const es = {
       hideInit: 'Ocultar init (PID 1)',
     },
     console: {
+      handle: {
+        label: 'CONSOLA',
+        idle: 'inactiva',
+        stdoutTip: 'Salida nueva de sys_write desde la última vez que abrió la consola.',
+        kbdTip: 'Un proceso está bloqueado esperando teclado (sys_read).',
+        irqTip: 'IRQ 0x21 (teclado) disparada recientemente.',
+        expandTitle: 'Abrir panel inferior',
+        collapseTitle: 'Cerrar panel inferior',
+        tutorTip: 'Mensajes nuevos del tutor MODARCHI.',
+      },
+      tabs: {
+        console: 'Consola',
+        modarchi: 'MODARCHI',
+        consoleTitle: 'Salida de sys_write y teclado del simulador',
+        modarchiTitle: 'Conversar con el tutor MODARCHI',
+      },
       title: 'CONSOLA · sys_write fd=1',
       clickToType: '⌨ clic para escribir',
       noOutput: '(sin output todavía)',

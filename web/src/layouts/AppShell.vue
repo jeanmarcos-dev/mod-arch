@@ -25,7 +25,8 @@ import ConnectionBanner from '../components/shell/ConnectionBanner.vue';
 import { useConnectionBanner } from '../composables/useConnectionBanner';
 import MobileMenuButton from '../components/shell/MobileMenuButton.vue';
 import GlossaryModal from '../components/GlossaryModal.vue';
-import TutorLauncher from '../components/tutor/TutorLauncher.vue';
+import ConsoleDrawer from '../components/console/ConsoleDrawer.vue';
+import { useBreakpoint } from '../composables/useBreakpoint';
 import WhiteboardCursor from '../components/whiteboard/WhiteboardCursor.vue';
 import WhiteboardClickRipple from '../components/whiteboard/WhiteboardClickRipple.vue';
 import WhiteboardFocusPill from '../components/whiteboard/WhiteboardFocusPill.vue';
@@ -41,6 +42,7 @@ const whiteboard = useWhiteboardStore();
 const route = useRoute();
 const { t, locale } = useI18n();
 const { visible: bannerVisible } = useConnectionBanner();
+const { isMobile } = useBreakpoint();
 
 // Any cpu.openGlossary('EIP') call from a panel opens the popup right where
 // the student clicked. The full /glosario page is still reachable from the
@@ -278,6 +280,7 @@ onBeforeUnmount(detachPointer);
           </Transition>
         </RouterView>
       </main>
+      <ConsoleDrawer v-if="!isMobile" />
     </div>
 
     <GlossaryModal
@@ -291,11 +294,6 @@ onBeforeUnmount(detachPointer);
     <WhiteboardCursor />
     <WhiteboardClickRipple />
     <WhiteboardFocusPill />
-
-    <!-- Tutor chat: floating FAB plus a slide-in panel. Backend reports
-         tutor disabled via an error message when the API keys are missing,
-         so this stays mounted at all times. -->
-    <TutorLauncher />
   </div>
 </template>
 

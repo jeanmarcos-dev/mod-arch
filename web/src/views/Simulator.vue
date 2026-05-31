@@ -6,7 +6,6 @@ import { useCpuStore } from '../stores/cpu';
 import { useViewerMirrorStore } from '../stores/viewerMirror';
 import { useAppConfigStore } from '../stores/appConfig';
 import { usePreferencesStore, COLUMN_MIN_PX, COLUMN_MAX_PERCENT } from '../stores/preferences';
-import { useSimBarStore } from '../stores/simBar';
 import { useIsStudent } from '../composables/useIsStudent';
 import { useResizableColumn } from '../composables/useResizableColumn';
 import { useResizableRow } from '../composables/useResizableRow';
@@ -15,7 +14,7 @@ import EventsLog from '../components/EventsLog.vue';
 import ProcessesPanel from '../components/ProcessesPanel.vue';
 import QueuesPanel from '../components/QueuesPanel.vue';
 import IpcPanel from '../components/IpcPanel.vue';
-import ConsolePanel from '../components/ConsolePanel.vue';
+import ConsoleDrawer from '../components/console/ConsoleDrawer.vue';
 import MemoryPanel from '../components/MemoryPanel.vue';
 import CodeAsmSplit from '../components/CodeAsmSplit.vue';
 import LockedPanel from '../components/shell/LockedPanel.vue';
@@ -30,7 +29,6 @@ const cpu = useCpuStore();
 const mirror = useViewerMirrorStore();
 const appCfg = useAppConfigStore();
 const prefs = usePreferencesStore();
-const bar = useSimBarStore();
 const isStudent = useIsStudent();
 const { t } = useI18n();
 
@@ -90,8 +88,6 @@ const cpuEl = ref<PanelRef>(null);
 const ipcEl = ref<PanelRef>(null);
 const processesEl = ref<PanelRef>(null);
 const queuesEl = ref<PanelRef>(null);
-const middleTabsEl = ref<PanelRef>(null);
-const consolePanelEl = ref<PanelRef>(null);
 
 // CSS variable, not `flex` shorthand: CollapsiblePanel reads --cpanel-weight
 // from this inline style and applies it only to flex-grow. The collapsed
@@ -101,9 +97,6 @@ const cpuStyle = computed(() => ({ '--cpanel-weight': String(prefs.panelHeights.
 const ipcStyle = computed(() => ({ '--cpanel-weight': String(prefs.panelHeights.ipc) }));
 const processesStyle = computed(() => ({ '--cpanel-weight': String(prefs.panelHeights.processes) }));
 const queuesStyle = computed(() => ({ '--cpanel-weight': String(prefs.panelHeights.queues) }));
-// Center column: tabs pile (Código/Bitácora/Memoria) vs ConsolePanel below.
-const middleTabsStyle = computed(() => ({ '--mc-weight': String(prefs.panelHeights.middleTabs) }));
-const middleConsoleStyle = computed(() => ({ '--mc-weight': String(prefs.panelHeights.middleConsole) }));
 
 const { isResizing: cpuIpcResizing, start: startCpuIpcResize } = useResizableRow({
   topEl: cpuEl,
@@ -121,19 +114,6 @@ const { isResizing: processesQueuesResizing, start: startProcessesQueuesResize }
   getBottomWeight: () => prefs.panelHeights.queues,
   setTopWeight: (w) => prefs.setPanelHeight('processes', w),
   setBottomWeight: (w) => prefs.setPanelHeight('queues', w),
-});
-
-// Center column: splits vertical space between the active tab (Código /
-// Bitácora / Memoria, all v-show siblings inside .middle__tabs-stack) and the
-// ConsolePanel directly below. Without this handle the console grows with its
-// content until it pushes the tabs out of the viewport.
-const { isResizing: middleTabsConsoleResizing, start: startMiddleTabsConsoleResize } = useResizableRow({
-  topEl: middleTabsEl,
-  bottomEl: consolePanelEl,
-  getTopWeight: () => prefs.panelHeights.middleTabs,
-  getBottomWeight: () => prefs.panelHeights.middleConsole,
-  setTopWeight: (w) => prefs.setPanelHeight('middleTabs', w),
-  setBottomWeight: (w) => prefs.setPanelHeight('middleConsole', w),
 });
 
 // Row resizers only make sense when both neighbours are expanded — a
@@ -278,21 +258,6 @@ const visible = computed(() => {
   };
 });
 
-// Forward "console panel is the active mobile tab" and "keyboard HW is taking
-// keystrokes" into the SimBar store so TutorLauncher can dim the FAB while
-// either condition holds. Resetting on unmount avoids a stuck-dim state if
-// the user navigates away with the console open.
-watch(
-  () => isMobile.value && visible.value.console,
-  (active) => bar.setConsoleMobileActive(active),
-  { immediate: true },
-);
-watch(
-  () => isMobile.value && visible.value.console && cpu.kbdReaders.length > 0,
-  (active) => bar.setKeyboardHwActive(active),
-  { immediate: true },
-);
-
 onMounted(() => {
   cpu.connect();
   checkMobile();
@@ -301,8 +266,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile);
-  bar.setConsoleMobileActive(false);
-  bar.setKeyboardHwActive(false);
 });
 </script>
 
@@ -414,10 +377,8 @@ onUnmounted(() => {
           ><ChevronsRight :size="14" :stroke-width="2.25" /></button>
         </div>
         <div
-          ref="middleTabsEl"
           class="middle__tabs-stack"
-          v-show="visible.code || visible.events || visible.memory"
-          :style="!isMobile ? middleTabsStyle : undefined"
+          v-show="visible.code || visible.events || visible.memory || (isMobile && visible.console)"
         >
           <CodeAsmSplit v-if="!isLocked('code')" v-show="visible.code" />
           <LockedPanel v-else v-show="visible.code" />
@@ -425,25 +386,14 @@ onUnmounted(() => {
           <LockedPanel v-else v-show="visible.events" />
           <MemoryPanel v-if="!isLocked('memory')" v-show="visible.memory" />
           <LockedPanel v-else v-show="visible.memory" />
+          <ConsoleDrawer
+            v-if="isMobile && !isLocked('console')"
+            v-show="visible.console"
+            class="middle__mobile-console"
+            :force-expanded="true"
+          />
+          <LockedPanel v-else-if="isMobile" v-show="visible.console" />
         </div>
-        <RowResizer
-          v-if="!isMobile && visible.console"
-          class="middle__row-resizer desktop-only"
-          :active="middleTabsConsoleResizing"
-          @pointerdown="startMiddleTabsConsoleResize"
-        />
-        <ConsolePanel
-          v-if="!isLocked('console')"
-          ref="consolePanelEl"
-          v-show="visible.console"
-          :style="!isMobile ? middleConsoleStyle : undefined"
-        />
-        <LockedPanel
-          v-else
-          ref="consolePanelEl"
-          v-show="visible.console"
-          :style="!isMobile ? middleConsoleStyle : undefined"
-        />
       </div>
       <ColumnResizer
         v-if="!isMobile && visible.procs && !rightAsideCollapsed"
@@ -512,10 +462,8 @@ onUnmounted(() => {
 .layout {
   display: flex;
   flex: 1;
-  /* No gap here: the ColumnResizer between columns is the only separator —
-     adding gap on top of the resizer width would waste horizontal space. */
   gap: 0;
-  padding: 8px;
+  padding: 0;
   overflow: hidden;
 }
 
@@ -532,12 +480,8 @@ onUnmounted(() => {
   min-height: 0;
 }
 
-/* Wrapper around the v-show'd tab panels (Código/Bitácora/Memoria). Only one
-   tab is visible at a time, so its single visible child stretches to fill the
-   wrapper. The wrapper itself participates in the .middle flex split against
-   ConsolePanel via --mc-weight, with the RowResizer in between. */
 .middle__tabs-stack {
-  flex: var(--mc-weight, 1) 1 0;
+  flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -548,11 +492,9 @@ onUnmounted(() => {
   min-height: 0;
 }
 
-/* Mobile already stacks every panel vertically with its own height rules; the
-   resizer makes no sense there. */
-@media (max-width: 768px) {
-  .middle__row-resizer { display: none; }
-  .middle__tabs-stack { flex: 1 1 auto; }
+.middle__mobile-console {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .col-left {
@@ -571,18 +513,26 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   background: var(--surface-overlay);
-  border: 1px solid var(--border);
+  border: 0;
   cursor: pointer;
   user-select: none;
   transition: background 120ms ease;
 }
+
+.aside-handle--left {
+  border-right: 1px solid var(--border);
+}
+
+.aside-handle--right {
+  border-left: 1px solid var(--border);
+}
 .aside-handle:hover {
   background: rgba(var(--accent-rgb), 0.08);
-  border-color: var(--amber);
 }
+.aside-handle--left:hover { border-right-color: var(--amber); }
+.aside-handle--right:hover { border-left-color: var(--amber); }
 .aside-handle:focus-visible {
   background: rgba(var(--accent-rgb), 0.08);
-  border-color: var(--amber);
   outline: 2px solid var(--amber);
   outline-offset: -2px;
 }
@@ -610,6 +560,29 @@ onUnmounted(() => {
 
 .col-left--stack > .col-left__panel + .col-left__panel {
   margin-top: 6px;
+}
+
+.col-left__panel {
+  border-left: 0;
+}
+.col-right__panel {
+  border-right: 0;
+}
+.col-left--stack > .col-left__panel:first-child,
+.col-right--stack > .col-right__panel:first-child {
+  border-top: 0;
+}
+.col-left--stack > .col-left__panel:last-child,
+.col-right--stack > .col-right__panel:last-child {
+  border-bottom: 0;
+}
+
+.middle-tabs .tab,
+.middle-tabs .aside-toggle {
+  border-top: 0;
+}
+.middle__tabs-stack > * {
+  border-bottom: 0;
 }
 
 /* Right column stacks two collapsible panels: Procesos and Colas. IPC used

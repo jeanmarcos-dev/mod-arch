@@ -250,12 +250,12 @@ function outcomeLabel(card: NarratorCard): string {
 
 .kbd-narrator__title {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--amber);
-  letter-spacing: 1px;
+  letter-spacing: 0.8px;
   text-transform: uppercase;
-  padding: 0 10px;
-  height: 32px;
+  padding: 0 7px;
+  height: 22px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -268,7 +268,7 @@ function outcomeLabel(card: NarratorCard): string {
 .kbd-narrator__feed {
   flex: 1;
   overflow-y: auto;
-  padding: 6px 8px;
+  padding: 4px 6px;
   position: relative;
   z-index: 0;
   min-height: 0;
@@ -276,13 +276,15 @@ function outcomeLabel(card: NarratorCard): string {
 
 .kbd-narrator__idle {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 10px;
   font-style: italic;
   color: var(--text-muted);
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100%;
+  text-align: center;
+  padding: 0 4px;
 }
 
 .kbd-narrator__list {
@@ -296,15 +298,15 @@ function outcomeLabel(card: NarratorCard): string {
 
 .kbd-narrator__row {
   display: grid;
-  grid-template-columns: 22px 44px 14px 1fr;
+  grid-template-columns: 20px 40px 12px 1fr;
   align-items: baseline;
   gap: 4px;
-  padding: 2px 4px;
+  padding: 1px 4px;
   border-left: 2px solid var(--amber);
   border-radius: 0;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  line-height: 1.3;
+  font-size: 10px;
+  line-height: 1.25;
   color: var(--terminal-fg);
   cursor: pointer;
   background: color-mix(in oklab, var(--amber) 6%, transparent);

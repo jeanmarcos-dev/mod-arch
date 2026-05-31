@@ -217,8 +217,8 @@ async function onCopy() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 10px;
-  height: 32px;
+  padding: 0 7px;
+  height: 22px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--terminal-border);
   background: color-mix(in oklab, var(--terminal-bg) 88%, var(--accent) 12%);
@@ -228,16 +228,16 @@ async function onCopy() {
 
 .monitor__title {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--accent);
-  letter-spacing: 1px;
+  letter-spacing: 0.8px;
   text-transform: uppercase;
   margin: 0;
 }
 
 .monitor__actions {
   display: flex;
-  gap: 4px;
+  gap: 2px;
 }
 
 .monitor__btn {
@@ -245,8 +245,8 @@ async function onCopy() {
   border: none;
   color: var(--text-dim);
   padding: 0;
-  width: 24px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -256,8 +256,8 @@ async function onCopy() {
 }
 
 .monitor__btn :deep(svg) {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   display: block;
 }
 
@@ -285,21 +285,21 @@ async function onCopy() {
 .monitor__screen {
   flex: 1;
   overflow-y: auto;
-  padding: 10px;
+  padding: 6px 8px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   position: relative;
   z-index: 0;
-  min-height: 120px;
+  min-height: 0;
 }
 
 .monitor__empty {
   color: var(--text-muted);
   font-style: italic;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
-  padding: 8px 2px;
+  font-size: 11px;
+  padding: 4px 2px;
 }
 
 .chunk {
@@ -376,12 +376,12 @@ async function onCopy() {
 .chunk__body {
   margin: 0;
   font-family: 'VT323', monospace;
-  font-size: 20px;
-  line-height: 1.15;
+  font-size: 16px;
+  line-height: 1.1;
   color: var(--chunk-color);
   white-space: pre-wrap;
   word-break: break-all;
-  text-shadow: 0 0 6px color-mix(in oklab, var(--chunk-color) 30%, transparent);
+  text-shadow: 0 0 5px color-mix(in oklab, var(--chunk-color) 30%, transparent);
   flex: 1;
   min-width: 0;
 }

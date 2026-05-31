@@ -765,6 +765,22 @@ const en: MessageSchema = {
       hideInit: 'Hide init (PID 1)',
     },
     console: {
+      handle: {
+        label: 'CONSOLE',
+        idle: 'idle',
+        stdoutTip: 'New sys_write output since the console was last opened.',
+        kbdTip: 'A process is blocked waiting on the keyboard (sys_read).',
+        irqTip: 'IRQ 0x21 (keyboard) fired recently.',
+        expandTitle: 'Open bottom panel',
+        collapseTitle: 'Close bottom panel',
+        tutorTip: 'New messages from MODARCHI tutor.',
+      },
+      tabs: {
+        console: 'Console',
+        modarchi: 'MODARCHI',
+        consoleTitle: 'sys_write output and simulator keyboard',
+        modarchiTitle: 'Chat with the MODARCHI tutor',
+      },
       title: 'CONSOLE · sys_write fd=1',
       clickToType: '⌨ click to type',
       noOutput: '(no output yet)',

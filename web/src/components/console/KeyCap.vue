@@ -77,8 +77,8 @@ const aria = computed(() => {
 .key-cap {
   --cap-bg: var(--surface-2, #1a1f1a);
   --cap-fg: var(--green);
-  width: 36px;
-  height: 36px;
+  width: 26px;
+  height: 26px;
   border-radius: 0;
   background: var(--cap-bg);
   border: 1px solid var(--terminal-border);
@@ -114,9 +114,9 @@ const aria = computed(() => {
 }
 
 .key-cap__char {
-  font-size: 22px;
+  font-size: 16px;
   line-height: 1;
-  text-shadow: 0 0 6px color-mix(in oklab, var(--cap-fg) 40%, transparent);
+  text-shadow: 0 0 5px color-mix(in oklab, var(--cap-fg) 40%, transparent);
 }
 
 .key-cap.is-idle .key-cap__char {

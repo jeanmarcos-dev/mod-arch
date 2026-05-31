@@ -58,17 +58,6 @@ export const useSimBarStore = defineStore('simBar', () => {
   // first thing the user sees.
   const toolsDrawerOpen = ref(false);
 
-  // Runtime-only overlay flags consumed by TutorLauncher to dim the FAB
-  // whenever a foreground tool is taking the mobile viewport — keeps the
-  // tutor from overlapping ProgramPicker, console, or keyboard HW.
-  const programPickerOpen = ref(false);
-  const consoleMobileActive = ref(false);
-  const keyboardHwActive = ref(false);
-
-  function setProgramPickerOpen(open: boolean) { programPickerOpen.value = open; }
-  function setConsoleMobileActive(active: boolean) { consoleMobileActive.value = active; }
-  function setKeyboardHwActive(active: boolean) { keyboardHwActive.value = active; }
-
   watch([mode, x, y, coresExpanded], ([m, px, py, ce]) => {
     try {
       window.localStorage.setItem(
@@ -145,9 +134,6 @@ export const useSimBarStore = defineStore('simBar', () => {
     y,
     coresExpanded,
     toolsDrawerOpen,
-    programPickerOpen,
-    consoleMobileActive,
-    keyboardHwActive,
     setPosition,
     dock,
     float,
@@ -156,9 +142,6 @@ export const useSimBarStore = defineStore('simBar', () => {
     openTools,
     closeTools,
     toggleTools,
-    setProgramPickerOpen,
-    setConsoleMobileActive,
-    setKeyboardHwActive,
     getState,
     applyState,
     reset,

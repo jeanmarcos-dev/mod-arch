@@ -5,13 +5,11 @@ import { useI18n } from 'vue-i18n';
 import { ChevronDown, ChevronRight, Lock, Search } from '@lucide/vue';
 import { useCpuStore, type ProgramInfo } from '../stores/cpu';
 import { useAppConfigStore } from '../stores/appConfig';
-import { useSimBarStore } from '../stores/simBar';
 import { useIsStudent } from '../composables/useIsStudent';
 
 const cpu = useCpuStore();
 const route = useRoute();
 const appCfg = useAppConfigStore();
-const bar = useSimBarStore();
 const isStudent = useIsStudent();
 const { t, te } = useI18n();
 
@@ -248,7 +246,6 @@ function onSearchKey(e: KeyboardEvent) {
 }
 
 watch(open, async (val) => {
-  bar.setProgramPickerOpen(val);
   if (val) {
     await nextTick();
     searchInput.value?.focus();
@@ -258,15 +255,12 @@ watch(open, async (val) => {
 onMounted(() => {
   document.addEventListener('click', onDocClick);
   document.addEventListener('keydown', onKeydown);
-  // Lazy-load categories when the picker mounts; cpu.connect() also kicks it
-  // off but the picker may render before the WS is up (e.g. on /overview).
   void cpu.loadCategories();
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClick);
   document.removeEventListener('keydown', onKeydown);
-  bar.setProgramPickerOpen(false);
 });
 </script>
 
