@@ -123,7 +123,7 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
           @click="(e) => onLinkClick(item, e)"
         >
           <span class="sidebar__icon" aria-hidden="true">
-            <component :is="item.icon" :size="collapsed ? 20 : 16" :stroke-width="2" />
+            <component :is="item.icon" :size="collapsed ? 14 : 16" :stroke-width="2" />
           </span>
           <span class="sidebar__label">
             {{ item.label }}
@@ -151,7 +151,7 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
       :aria-label="collapsed ? t('shell.sidebar.expandMenu') : t('shell.sidebar.collapseMenu')"
       @click="prefs.toggleSidebar()"
     >
-      <component :is="collapsed ? PanelLeftOpen : PanelLeftClose" :size="20" :stroke-width="2" />
+      <component :is="collapsed ? PanelLeftOpen : PanelLeftClose" :size="collapsed ? 14 : 20" :stroke-width="2" />
     </button>
   </aside>
 </template>
@@ -172,7 +172,7 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
 }
 
 .sidebar--collapsed {
-  width: 56px;
+  width: 35px;
 }
 
 /* Full-width header strip styled like a nav row. When the sidebar is
@@ -188,6 +188,7 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
   background: rgba(var(--accent-rgb), 0.10);
   border: none;
   border-left: 2px solid var(--amber);
+  border-right: 2px solid transparent;
   color: var(--amber);
   display: flex;
   align-items: center;
@@ -208,8 +209,10 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
 .sidebar--collapsed .sidebar__toggle {
   justify-content: center;
   padding: 0;
+  min-height: 28px;
   background: transparent;
   border-left-color: transparent;
+  border-right-color: transparent;
   color: var(--text-dim);
 }
 
@@ -245,6 +248,11 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+.sidebar--collapsed .sidebar__nav {
+  /* Collapsed toggle strip is only 28px tall — reclaim the 10px gap. */
+  padding-top: 28px;
 }
 
 .sidebar__group {
@@ -288,7 +296,8 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
 }
 
 .sidebar--collapsed .sidebar__group {
-  padding: 0 var(--space-2);
+  padding: 0 var(--space-1);
+  min-height: 10px;
   align-items: center;
 }
 
@@ -310,6 +319,7 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
   text-decoration: none;
   font-size: 13px;
   border-left: 2px solid transparent;
+  border-right: 2px solid transparent;
   transition:
     background var(--transition-fast),
     color var(--transition-fast),
@@ -405,7 +415,11 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
 
 .sidebar--collapsed .sidebar__icon {
   width: 100%;
-  font-size: 20px;
+  font-size: 14px;
+}
+
+.sidebar--collapsed .sidebar__link {
+  min-height: 28px;
 }
 
 .sidebar--collapsed .sidebar__label {
