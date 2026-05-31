@@ -139,7 +139,7 @@ func TestWS_LoadAndStep(t *testing.T) {
 		}
 		var msg map[string]any
 		_ = json.Unmarshal(data, &msg)
-		if msg["type"] == "halt" {
+		if containsEvent(msg, "halt") {
 			gotHalt = true
 		}
 		if msg["type"] == "state" && msg["halted"] == true {
@@ -332,6 +332,33 @@ func dialAsViewer(t *testing.T, ctx context.Context, ts *httptest.Server, wsURL 
 		_ = dialResp.Body.Close()
 	}
 	return conn
+}
+
+// containsEvent reports whether msg matches typeWanted directly or wraps an
+// event of that type inside a "tick_events" batch (the simulator coalesces
+// per-tick events into one frame, so individual event types no longer appear
+// at the top level).
+func containsEvent(msg map[string]any, typeWanted string) bool {
+	if msg["type"] == typeWanted {
+		return true
+	}
+	if msg["type"] != "tick_events" {
+		return false
+	}
+	events, ok := msg["events"].([]any)
+	if !ok {
+		return false
+	}
+	for _, ev := range events {
+		evMap, ok := ev.(map[string]any)
+		if !ok {
+			continue
+		}
+		if evMap["type"] == typeWanted {
+			return true
+		}
+	}
+	return false
 }
 
 // readUntil reads messages until one matches typeWanted or the deadline
