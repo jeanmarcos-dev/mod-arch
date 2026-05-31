@@ -16,11 +16,34 @@ import (
 // by the orchestrator before being fed back into the conversation.
 type ToolHandler func(ctx context.Context, sess *sessions.Session, args json.RawMessage) (any, error)
 
-// Tool bundles an LLM-facing declaration with the handler that runs when
-// the model invokes it.
+// Tool bundles an LLM-facing declaration with the handler that runs when the
+// model invokes it. The Eager fields let the orchestrator pre-run a tool
+// before the LLM sees the request and inject its result into the prompt, so
+// the model does not have to spend a function-calling round on inspection
+// work whose answer is almost always needed. Tools without Eager set behave
+// as classic on-demand function calls.
 type Tool struct {
 	Def     llm.ToolDef
 	Handler ToolHandler
+
+	// Eager marks the tool for pre-execution before the LLM call. Its result
+	// (JSON-encoded) is appended to the user prompt under EagerLabel.
+	Eager bool
+
+	// EagerWhen is an optional predicate evaluated against the current
+	// snapshot to decide whether to pre-run an eager tool on this call. Nil
+	// means "always run when Eager==true". Use this for tools that only make
+	// sense in certain states (e.g. get_program_source needs a running PID).
+	EagerWhen func(snap SnapshotView) bool
+
+	// EagerLabel is the short section title used in the prompt when this
+	// tool runs eagerly (e.g. "PROCESOS ACTUALES"). If empty, the tool name
+	// in uppercase is used as fallback.
+	EagerLabel string
+
+	// EagerArgs returns the JSON args to pass to the handler when running
+	// eagerly. Nil means "no args" (the handler accepts json.RawMessage(nil)).
+	EagerArgs func(snap SnapshotView) json.RawMessage
 }
 
 // DefaultTools is the toolset the tutor exposes. Six narrow functions that
@@ -37,7 +60,9 @@ func DefaultTools() []Tool {
 					"properties": map[string]any{},
 				},
 			},
-			Handler: handleGetProcesses,
+			Handler:    handleGetProcesses,
+			Eager:      true,
+			EagerLabel: "PROCESOS ACTUALES",
 		},
 		{
 			Def: llm.ToolDef{
@@ -101,7 +126,27 @@ func DefaultTools() []Tool {
 					},
 				},
 			},
-			Handler: handleGetProgramSource,
+			Handler:    handleGetProgramSource,
+			Eager:      true,
+			EagerLabel: "CÓDIGO DEL PROGRAMA EN EJECUCIÓN",
+			EagerWhen:  func(snap SnapshotView) bool { return snap.CurrentPID > 0 },
+			EagerArgs: func(snap SnapshotView) json.RawMessage {
+				b, _ := json.Marshal(map[string]int{"pid": snap.CurrentPID})
+				return b
+			},
+		},
+		{
+			Def: llm.ToolDef{
+				Name:        "get_scheduler_config",
+				Description: "Devuelve la configuración runtime del scheduler: política (siempre round-robin en este simulador), quantum del timer (ticks entre IRQ 0x20), número de núcleos, frecuencia del clock, multiplicador de velocidad, y si el idle task (PID 0, swapper) está habilitado. Úselo cuando el estudiante pregunte qué política de scheduling usa el simulador, cómo afecta el quantum a los context switches, por qué la simulación corre más rápido/lento, o cómo se comporta la CPU sin trabajo.",
+				Parameters: map[string]any{
+					"type":       "object",
+					"properties": map[string]any{},
+				},
+			},
+			Handler:    handleGetSchedulerConfig,
+			Eager:      true,
+			EagerLabel: "CONFIGURACIÓN DEL SCHEDULER",
 		},
 		{
 			Def: llm.ToolDef{
@@ -305,6 +350,52 @@ func handleGetProgramSource(_ context.Context, sess *sessions.Session, args json
 		all = append(all, buildEntry(pidKey))
 	}
 	return map[string]any{"programs": all, "count": len(all)}, nil
+}
+
+func handleGetSchedulerConfig(_ context.Context, sess *sessions.Session, _ json.RawMessage) (any, error) {
+	if sess == nil || sess.Sim == nil {
+		return nil, fmt.Errorf("no session")
+	}
+	snap := sess.Sim.Snapshot()
+	out := map[string]any{
+		"policy": "round_robin",
+		"policy_notes": "FIFO con preempción por timer (IRQ 0x20). Sin prioridades ni aging. " +
+			"El kernel hace context switch en cada vencimiento del quantum si hay otro proceso en READY.",
+	}
+	if v, ok := snap["timer_quantum"]; ok {
+		out["timer_quantum_ticks"] = v
+	}
+	if v, ok := snap["num_cores"]; ok {
+		out["num_cores"] = v
+	}
+	if v, ok := snap["clockHz"]; ok {
+		out["clock_hz"] = v
+	}
+	if v, ok := snap["speedMul"]; ok {
+		out["speed_multiplier"] = v
+	}
+	if v, ok := snap["hz"]; ok {
+		out["effective_hz"] = v
+	}
+	if v, ok := snap["tickIntervalMs"]; ok {
+		out["tick_interval_ms"] = v
+	}
+	if v, ok := snap["running"].(bool); ok {
+		out["running"] = v
+	}
+	if procs, ok := snap["procs"].([]map[string]any); ok {
+		for _, p := range procs {
+			if pid, ok := anyToInt(p["pid"]); ok && pid == 0 {
+				out["idle_task_enabled"] = true
+				out["idle_pid"] = 0
+				break
+			}
+		}
+		if _, ok := out["idle_task_enabled"]; !ok {
+			out["idle_task_enabled"] = false
+		}
+	}
+	return out, nil
 }
 
 func handleGetMemory(_ context.Context, sess *sessions.Session, args json.RawMessage) (any, error) {

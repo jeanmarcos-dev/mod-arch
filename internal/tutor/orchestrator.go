@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jeanmarcos/modos-cpu/internal/llm"
@@ -39,6 +40,10 @@ type Answer struct {
 	Degraded       bool       `json:"degraded"` // true when the LLM call failed and we fell back to retriever-only
 	UsageTokens    int        `json:"usage_tokens,omitempty"`
 	ToolsUsedNames []string   `json:"tools_used,omitempty"`
+	// LastError carries the underlying LLM error when Degraded=true. Kept out
+	// of the wire payload (json:"-") because the message can include request
+	// dumps useful only for server-side metrics / debugging.
+	LastError string `json:"-"`
 }
 
 // Options configures Service behavior. Zero values get reasonable defaults.
@@ -61,12 +66,23 @@ type Options struct {
 // passes something out of range, we never replay more than this many turns.
 const historyHardCap = 10
 
+// defaultMaxAnswerTokens caps the per-reply token budget. Modern Gemini and
+// other "thinking" models burn part of that budget on internal reasoning
+// before any visible text, and our prompt now carries eager-tool payloads
+// (process list JSON, current program source + ASM, scheduler config) on
+// top of the retrieved chunks. With that amount of context the model can
+// easily spend 1500+ tokens on reasoning alone, leaving the visible reply
+// truncated. 3000 is the smallest cap that consistently produces a complete
+// answer across our hardest demos without inviting wall-of-text replies.
+// Shared between Options.withDefaults and Build so both code paths agree.
+const defaultMaxAnswerTokens = 3000
+
 func (o Options) withDefaults() Options {
 	if o.TopK <= 0 {
 		o.TopK = 5
 	}
 	if o.MaxAnswerTokens <= 0 {
-		o.MaxAnswerTokens = 600
+		o.MaxAnswerTokens = defaultMaxAnswerTokens
 	}
 	if o.Temperature == 0 {
 		o.Temperature = 0.3
@@ -102,6 +118,7 @@ type Service struct {
 
 	toolDefs    []llm.ToolDef
 	toolByName  map[string]ToolHandler
+	tools       []Tool // full registry; needed to iterate eager tools generically
 	defaultMode string // applied when AskWithOptions receives Mode == ""
 }
 
@@ -148,6 +165,7 @@ func New(retriever *rag.Retriever, store *rag.Store, provider llm.Provider, logg
 		opts:       opts,
 		toolDefs:   defs,
 		toolByName: handlers,
+		tools:      tools,
 	}
 }
 
@@ -239,6 +257,8 @@ func (s *Service) recordMetric(ctx context.Context, sess *sessions.Session, ques
 	}
 	if callErr != nil {
 		row.Error = callErr.Error()
+	} else if ans != nil && ans.LastError != "" {
+		row.Error = ans.LastError
 	}
 	if err := s.metrics.Record(ctx, row); err != nil {
 		s.logger.Warn("tutor: metrics record failed", "err", err)
@@ -287,13 +307,38 @@ func (s *Service) askInternal(ctx context.Context, sess *sessions.Session, quest
 		}, nil
 	}
 
+	// Pre-execute the inspection tools whose answer almost every question
+	// needs. Running them deterministically here removes the dependency on
+	// the LLM correctly deciding to call them via function calling; the
+	// results land in the prompt directly. See runEagerTools for which tools
+	// are eager vs on-demand.
+	eager := s.runEagerTools(ctx, sess, snapshot)
+
 	retrieved, err := s.retriever.Retrieve(ctx, question, s.opts.TopK)
 	if err != nil {
 		s.logger.Warn("tutor: retrieval failed", "err", err)
 		// Continue without retrieved context; the LLM still has the snapshot.
 	}
+	// Hybrid retrieval: when a program is loaded, guarantee its demo chunk
+	// reaches the prompt even if cosine similarity buried it under the bigger
+	// corpus (Silberschatz alone has ~1500 chunks). A second retrieval keyed
+	// on the program name lets us pick the matching demo chunk and merge it
+	// in, displacing the weakest result if needed.
+	if snapshot.Program != "" {
+		demoMatches, dErr := s.retriever.Retrieve(ctx, snapshot.Program, 5)
+		if dErr != nil {
+			s.logger.Warn("tutor: demo retrieval failed", "err", dErr, "program", snapshot.Program)
+		} else {
+			for _, m := range demoMatches {
+				if m.Chunk.Source == rag.SourceDemos {
+					retrieved = mergeDemoIntoTopK(retrieved, m, s.opts.TopK)
+					break
+				}
+			}
+		}
+	}
 
-	initial := BuildMessages(question, snapText, retrieved, history)
+	initial := BuildMessages(question, snapText, eager, retrieved, history)
 	messages := toLLMMessages(initial)
 	// Socratic mode replaces the first system message with the alternate
 	// prompt. Tools and snapshot context stay untouched so the model can
@@ -331,7 +376,7 @@ func (s *Service) askInternal(ctx context.Context, sess *sessions.Session, quest
 			s.logger.Warn("tutor: llm call failed, falling back to retriever-only",
 				"err", err, "session", sessID, "iter", iter,
 			)
-			return s.fallbackAnswer(retrieved, start), nil
+			return s.fallbackAnswer(retrieved, start, err), nil
 		}
 		totalUsage += usage.TotalTokens
 		lastModel = model
@@ -372,7 +417,7 @@ func (s *Service) askInternal(ctx context.Context, sess *sessions.Session, quest
 		finalContent = "El tutor consultó varias herramientas pero no logró formular una respuesta concreta. Por favor reformule la pregunta."
 	}
 
-	citations := buildCitations(retrieved)
+	citations := buildCitationsFromText(finalContent, retrieved)
 	ans := &Answer{
 		Text:           finalContent,
 		Citations:      citations,
@@ -543,8 +588,10 @@ func (s *Service) runTool(ctx context.Context, sess *sessions.Session, call llm.
 }
 
 // fallbackAnswer surfaces the retrieved passages when the LLM call failed.
-// Better than blanking out; the student still gets something to read.
-func (s *Service) fallbackAnswer(retrieved []rag.ScoredChunk, start time.Time) *Answer {
+// Better than blanking out; the student still gets something to read. The
+// underlying llmErr is preserved on Answer.LastError so observability can
+// record what went wrong without exposing it on the wire.
+func (s *Service) fallbackAnswer(retrieved []rag.ScoredChunk, start time.Time, llmErr error) *Answer {
 	var b strings.Builder
 	b.WriteString("El tutor no pudo conectarse con el modelo de lenguaje en este momento. ")
 	b.WriteString("Le dejamos los pasajes más cercanos a su pregunta para que los revise:\n\n")
@@ -554,6 +601,10 @@ func (s *Service) fallbackAnswer(retrieved []rag.ScoredChunk, start time.Time) *
 	for i, sc := range retrieved {
 		fmt.Fprintf(&b, "%d. %s — %s\n\n", i+1, citationLabel(sc.Chunk), shorten(sc.Chunk.Text, 280))
 	}
+	errMsg := ""
+	if llmErr != nil {
+		errMsg = llmErr.Error()
+	}
 	return &Answer{
 		Text:          strings.TrimSpace(b.String()),
 		Citations:     buildCitations(retrieved),
@@ -561,7 +612,94 @@ func (s *Service) fallbackAnswer(retrieved []rag.ScoredChunk, start time.Time) *
 		Provider:      "",
 		Degraded:      true,
 		LatencyMS:     time.Since(start).Milliseconds(),
+		LastError:     errMsg,
 	}
+}
+
+// mergeDemoIntoTopK guarantees a demo chunk lands in the retrieved slice
+// without growing it. Returns base unchanged when the demo already appears
+// in it (matched by chunk ID). When the slice still has spare capacity the
+// demo is appended; otherwise it displaces the lowest-scoring entry (the
+// last position in a sorted-by-score slice).
+func mergeDemoIntoTopK(base []rag.ScoredChunk, demo rag.ScoredChunk, topK int) []rag.ScoredChunk {
+	for _, c := range base {
+		if c.Chunk.ID == demo.Chunk.ID {
+			return base
+		}
+	}
+	if len(base) < topK {
+		return append(base, demo)
+	}
+	out := make([]rag.ScoredChunk, len(base))
+	copy(out, base)
+	out[len(out)-1] = demo
+	return out
+}
+
+// EagerResult is one pre-executed tool's payload, ready to be embedded in
+// the user prompt under Label. The orchestrator keeps the slice ordered so
+// the prompt sections render in a predictable order.
+type EagerResult struct {
+	ToolName string
+	Label    string
+	Payload  string
+}
+
+// runEagerTools iterates over the registered tools, runs every one marked
+// Eager (whose optional EagerWhen predicate passes) in parallel, and returns
+// the JSON-encoded payloads in registration order. The set of eager tools is
+// data-driven: adding a new tool with Eager=true (including future MCP
+// tools) becomes part of the pre-load without touching this function or the
+// system prompt. Failures are swallowed silently — eager pre-load is a
+// best-effort optimization, the LLM can still invoke the tool on demand.
+func (s *Service) runEagerTools(ctx context.Context, sess *sessions.Session, snap SnapshotView) []EagerResult {
+	if sess == nil || sess.Sim == nil {
+		return nil
+	}
+	results := make([]EagerResult, len(s.tools))
+	var wg sync.WaitGroup
+	for i, t := range s.tools {
+		if !t.Eager {
+			continue
+		}
+		if t.EagerWhen != nil && !t.EagerWhen(snap) {
+			continue
+		}
+		wg.Add(1)
+		go func(idx int, tool Tool) {
+			defer wg.Done()
+			var args json.RawMessage
+			if tool.EagerArgs != nil {
+				args = tool.EagerArgs(snap)
+			}
+			v, err := tool.Handler(ctx, sess, args)
+			if err != nil {
+				return
+			}
+			b, mErr := json.Marshal(v)
+			if mErr != nil {
+				return
+			}
+			label := tool.EagerLabel
+			if label == "" {
+				label = strings.ToUpper(tool.Def.Name)
+			}
+			results[idx] = EagerResult{
+				ToolName: tool.Def.Name,
+				Label:    label,
+				Payload:  string(b),
+			}
+		}(i, t)
+	}
+	wg.Wait()
+	// Compact zero entries (skipped or failed tools) preserving order.
+	out := results[:0]
+	for _, r := range results {
+		if r.Payload != "" {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // answerCacheKey hashes question + snapshot digest + corpus version + the
@@ -627,6 +765,30 @@ func buildCitations(retrieved []rag.ScoredChunk) []Citation {
 	return out
 }
 
+// buildCitationsFromText narrows buildCitations to the chunks whose label
+// (e.g. "[Demo: two_counters]") appears literally in the LLM's reply. Without
+// this filter the UI shows every retrieved chunk as a citation, even when the
+// model never referenced it — which hides which sources actually grounded the
+// answer and turns retrieval noise into apparent evidence.
+func buildCitationsFromText(text string, retrieved []rag.ScoredChunk) []Citation {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	all := buildCitations(retrieved)
+	out := make([]Citation, 0, len(all))
+	seen := make(map[string]bool)
+	for _, c := range all {
+		if seen[c.Label] {
+			continue
+		}
+		if strings.Contains(text, c.Label) {
+			out = append(out, c)
+			seen[c.Label] = true
+		}
+	}
+	return out
+}
+
 func toLLMMessages(in []promptMessage) []llm.Message {
 	out := make([]llm.Message, len(in))
 	for i, m := range in {
@@ -673,3 +835,5 @@ func utf8RuneCount(s string) int {
 	}
 	return n
 }
+
+

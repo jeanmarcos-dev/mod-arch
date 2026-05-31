@@ -3,7 +3,7 @@ package tutor
 import "testing"
 
 func TestBuildMessagesNoHistory(t *testing.T) {
-	msgs := BuildMessages("¿qué es PL3?", "", nil, nil)
+	msgs := BuildMessages("¿qué es PL3?", "", nil, nil, nil)
 	if len(msgs) != 2 {
 		t.Fatalf("expected 2 messages (system+user), got %d", len(msgs))
 	}
@@ -17,7 +17,7 @@ func TestBuildMessagesWithHistoryOrdering(t *testing.T) {
 		{Role: "user", Text: "¿qué pasó en el último context switch?"},
 		{Role: "assistant", Text: "El kernel decidió correr P2."},
 	}
-	msgs := BuildMessages("¿y por qué?", "", nil, history)
+	msgs := BuildMessages("¿y por qué?", "", nil, nil, history)
 	if len(msgs) != 4 {
 		t.Fatalf("expected 4 messages (system+history+user), got %d", len(msgs))
 	}

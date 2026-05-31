@@ -80,7 +80,7 @@ func Build(ctx context.Context, deps BuildDeps, cfg Config) (*Service, error) {
 	}
 	maxTok := deps.MaxAnswerTok
 	if maxTok <= 0 {
-		maxTok = 600
+		maxTok = defaultMaxAnswerTokens
 	}
 	rlMax := deps.RateLimitMax
 	if rlMax <= 0 {
