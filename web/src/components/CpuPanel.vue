@@ -586,7 +586,7 @@ function pcbChipTitle(c: CoreInfo, p: PCBInfo): string {
 }
 
 .flash {
-  animation: flash-amber 800ms ease-out;
+  animation: flash-amber 250ms ease-out;
 }
 @keyframes flash-amber {
   0%   { background: rgba(var(--accent-rgb), 0.30); }

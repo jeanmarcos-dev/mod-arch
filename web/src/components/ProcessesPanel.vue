@@ -604,7 +604,7 @@ function regsSrcTitle(p: PCBInfo): string {
 
 .proc-card--flash {
   background: rgba(var(--accent-rgb), 0.18);
-  animation: flash-amber 800ms ease-out;
+  animation: flash-amber 250ms ease-out;
 }
 
 @keyframes flash-amber {

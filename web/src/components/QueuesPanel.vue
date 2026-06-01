@@ -34,13 +34,20 @@ const kthreadPIDs = computed(() => {
 const waitQueue = computed(() => baseWaitQueue.value.filter(w => !kthreadPIDs.value.has(w.pid)));
 const kthreadQueue = computed(() => baseWaitQueue.value.filter(w => kthreadPIDs.value.has(w.pid)));
 
-// TransitionGroup applies enter/leave classes only when its `name` prop is
-// truthy. Swapping the name to a sentinel ("rq-off"/"wq-off") with no
-// matching CSS rules silently disables the animation without us tearing out
-// the wrapper. We keep the ready and wait wrappers on separate names so the
-// two flows can ever diverge stylistically without touching the template.
-const rqTransitionName = computed(() => prefs.schedulerAnimationEnabled ? 'rq' : 'rq-off');
-const wqTransitionName = computed(() => prefs.schedulerAnimationEnabled ? 'wq' : 'wq-off');
+// Swapping the TransitionGroup name to a sentinel disables enter/leave
+// animations without tearing out the wrapper. Auto-off above 30 effective
+// ticks/sec: the micro animations smear into a constant shuffle and stop
+// being readable, while still paying their full layout cost.
+const ANIM_EFFECTIVE_HZ_CEILING = 30;
+const animationsAffordable = computed(
+  () => cpu.clockHz * cpu.speedMul <= ANIM_EFFECTIVE_HZ_CEILING,
+);
+const rqTransitionName = computed(() =>
+  (prefs.schedulerAnimationEnabled && animationsAffordable.value) ? 'rq' : 'rq-off',
+);
+const wqTransitionName = computed(() =>
+  (prefs.schedulerAnimationEnabled && animationsAffordable.value) ? 'wq' : 'wq-off',
+);
 </script>
 
 <template>

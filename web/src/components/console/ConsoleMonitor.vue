@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUpdated, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Hash, RotateCcw, Clipboard } from '@lucide/vue';
 import { useCpuStore } from '../../stores/cpu';
@@ -93,8 +93,24 @@ function scrollToBottom() {
 }
 
 onMounted(scrollToBottom);
-onUpdated(scrollToBottom);
-watch(groups, () => nextTick(scrollToBottom), { deep: true });
+let scrollPending = false;
+let scrollHandle: number | null = null;
+watch(() => cpu.consoleChunks.length, () => {
+  if (scrollPending) return;
+  scrollPending = true;
+  scrollHandle = requestAnimationFrame(() => {
+    scrollPending = false;
+    scrollHandle = null;
+    scrollToBottom();
+  });
+});
+
+onBeforeUnmount(() => {
+  if (scrollHandle !== null) {
+    cancelAnimationFrame(scrollHandle);
+    scrollHandle = null;
+  }
+});
 
 function onClear() {
   cpu.consoleChunks.splice(0, cpu.consoleChunks.length);
