@@ -366,20 +366,8 @@ func (s *Simulator) StepOnce() error {
 	if len(evs) > 0 {
 		tickEvs = append(tickEvs, evs...)
 	}
-	s.broadcastTickFrame(tick, tickEvs, varsPayload)
-	if procsSnap != nil {
-		s.Broadcast(map[string]any{"type": "procs", "procs": procsSnap})
-	}
-	s.Broadcast(map[string]any{"type": "tick", "value": tick})
-	// The legacy "machine halted" broadcast drives the frontend into its
-	// terminal state. With the idle task enabled, AllHalted() is true on
-	// almost every tick (the swapper is parked in HLT waiting for an IRQ),
-	// so emitting it would falsely freeze the UI. Gate it on the toggle:
-	// when idle is on, the run loop is still alive — there is no terminal
-	// halt to announce.
-	if halted && !idleEnabled {
-		s.Broadcast(map[string]any{"type": "state", "halted": true})
-	}
+	haltedNotice := halted && !idleEnabled
+	s.broadcastTickFrame(tick, tickEvs, varsPayload, procsSnap, haltedNotice)
 	return nil
 }
 
@@ -389,20 +377,20 @@ func (s *Simulator) StepOnce() error {
 // again once the rest of the tick arrived — so we batch them here so the
 // client can apply them atomically (one reactive update per tick).
 func (s *Simulator) broadcastTickEvents(tick uint64, evs []cpu.Event) {
-	s.broadcastTickFrame(tick, evs, nil)
+	s.broadcastTickFrame(tick, evs, nil, nil, false)
 }
 
-// broadcastTickFrame is the version of broadcastTickEvents that also carries
-// the per-program variable payload. We bundle vars into the SAME frame as the
-// tick's events so the WS layer either delivers both or drops both — never
-// half. Without this, a saturated Send buffer can drop vars_update while
-// keeping the instruction event, leaving the VARS panel one or more steps
-// behind the assembler cursor.
-//
-// vars may be nil for ticks unrelated to user-instruction execution (boot
-// dispatch, run-loop spin-up). evs may be empty when only vars are due.
-func (s *Simulator) broadcastTickFrame(tick uint64, evs []cpu.Event, vars map[string]any) {
-	if len(evs) == 0 && vars == nil {
+// broadcastTickFrame bundles every per-tick payload (events, vars, procs,
+// halt notice) into a single WS frame so the client pays one parse + one
+// reactive flush per tick. vars/procs/haltedNotice may be nil/false.
+func (s *Simulator) broadcastTickFrame(
+	tick uint64,
+	evs []cpu.Event,
+	vars map[string]any,
+	procs []map[string]any,
+	haltedNotice bool,
+) {
+	if len(evs) == 0 && vars == nil && procs == nil && !haltedNotice {
 		return
 	}
 	wire := make([]map[string]any, 0, len(evs))
@@ -411,12 +399,19 @@ func (s *Simulator) broadcastTickFrame(tick uint64, evs []cpu.Event, vars map[st
 		wire = append(wire, EventToWire(e))
 	}
 	msg := map[string]any{
-		"type":   "tick_events",
-		"tick":   tick,
-		"events": wire,
+		"type":       "tick_events",
+		"tick":       tick,
+		"tick_value": tick,
+		"events":     wire,
 	}
 	if vars != nil {
 		msg["vars"] = vars
+	}
+	if procs != nil {
+		msg["procs"] = procs
+	}
+	if haltedNotice {
+		msg["state"] = map[string]any{"halted": true}
 	}
 	s.Broadcast(msg)
 }

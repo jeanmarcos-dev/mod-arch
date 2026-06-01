@@ -286,7 +286,8 @@ func TestStepOnce_NoHaltedBroadcastWithIdle(t *testing.T) {
 		}
 	}
 
-	// Scan the client's queue for the legacy "machine halted" broadcast.
+	// Scan the client's queue for the "machine halted" broadcast, either
+	// as a top-level {type:"state"} or piggybacked inside tick_events.
 	for drain := true; drain; {
 		select {
 		case msg := <-client.Send:
@@ -294,6 +295,13 @@ func TestStepOnce_NoHaltedBroadcastWithIdle(t *testing.T) {
 			halted, _ := msg["halted"].(bool)
 			if kind == "state" && halted {
 				t.Error("StepOnce emitted {type:state, halted:true} with idle task enabled; this freezes the UI even though the run loop is alive")
+			}
+			if kind == "tick_events" {
+				if state, ok := msg["state"].(map[string]any); ok {
+					if h, _ := state["halted"].(bool); h {
+						t.Error("StepOnce piggybacked state.halted=true on tick_events with idle task enabled")
+					}
+				}
 			}
 		default:
 			drain = false

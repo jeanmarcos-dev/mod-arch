@@ -153,7 +153,7 @@ func TestStepOnce_BroadcastsProcsOnFork(t *testing.T) {
 		for {
 			select {
 			case msg := <-client.Send:
-				if msg["type"] == "procs" {
+				if msg["type"] == "tick_events" && msg["procs"] != nil {
 					sawProcs = true
 					procsMsg = msg
 				}
@@ -165,11 +165,11 @@ func TestStepOnce_BroadcastsProcsOnFork(t *testing.T) {
 	}
 
 	if !sawProcs {
-		t.Fatalf("no {type:procs} broadcast observed after %d steps", maxSteps)
+		t.Fatalf("no tick_events frame with procs piggyback observed after %d steps", maxSteps)
 	}
 	procs, ok := procsMsg["procs"].([]map[string]any)
 	if !ok {
-		t.Fatalf("procs broadcast missing procs slice: %#v", procsMsg)
+		t.Fatalf("procs piggyback missing procs slice: %#v", procsMsg)
 	}
 	// Demo proc plus init plus the new child created by sys_fork. We only
 	// assert >= 3 so a future change that adds extra bookkeeping procs does

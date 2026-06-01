@@ -145,6 +145,13 @@ func TestWS_LoadAndStep(t *testing.T) {
 		if msg["type"] == "state" && msg["halted"] == true {
 			gotHalt = true
 		}
+		if msg["type"] == "tick_events" {
+			if state, ok := msg["state"].(map[string]any); ok {
+				if h, _ := state["halted"].(bool); h {
+					gotHalt = true
+				}
+			}
+		}
 	}
 	if !gotHalt {
 		t.Fatal("never received halt event")
