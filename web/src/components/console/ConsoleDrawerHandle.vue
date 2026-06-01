@@ -145,7 +145,8 @@ const tutorBadgeLabel = computed(() =>
   justify-content: center;
   gap: 8px;
   background: var(--surface-overlay);
-  border: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
   cursor: pointer;
   user-select: none;
   transition: background 120ms ease, border-color 120ms ease;
@@ -153,12 +154,14 @@ const tutorBadgeLabel = computed(() =>
 
 .drawer-aside-handle:hover {
   background: rgba(var(--accent-rgb), 0.08);
-  border-color: var(--amber);
+  border-top-color: var(--amber);
+  border-bottom-color: var(--amber);
 }
 
 .drawer-aside-handle:focus-visible {
   background: rgba(var(--accent-rgb), 0.08);
-  border-color: var(--amber);
+  border-top-color: var(--amber);
+  border-bottom-color: var(--amber);
   outline: 2px solid var(--amber);
   outline-offset: -2px;
 }
