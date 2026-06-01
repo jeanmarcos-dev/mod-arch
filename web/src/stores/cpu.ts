@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, shallowRef, triggerRef } from 'vue';
 import { formatLog } from '../i18n/formatLog';
 import { usePreferencesStore } from './preferences';
 
@@ -431,7 +431,7 @@ export const useCpuStore = defineStore('cpu', () => {
   // per session; the picker reads order + labels + descriptions from here.
   const categories = ref<CategoryMeta[]>([]);
   const selectedProgram = ref<string | null>(null);
-  const log = ref<LogEntry[]>([]);
+  const log = shallowRef<LogEntry[]>([]);
   const connected = ref(false);
   // True after the first successful onopen of this tab session. Lets the UI
   // tell apart "still trying to connect for the first time" (cold start) from
@@ -847,6 +847,87 @@ export const useCpuStore = defineStore('cpu', () => {
     }
   }
 
+  const pendingFrames: unknown[] = [];
+  let rafHandle: number | null = null;
+  const PENDING_CAP = 20;
+  // Control frames bypass the rAF buffer so the UI reacts to load/reset/
+  // command echoes in the same paint they arrive.
+  const SYNC_TYPES = new Set<string>([
+    'snapshot',
+    'loaded',
+    'programs',
+    'reset',
+    'session_info',
+    'presence',
+    'tutor_answer',
+    'tutor_progress',
+    'error',
+    'state',
+  ]);
+
+  function applyFrame(msg: any) {
+    // Order matters: vars read the post-step register file; procs must land
+    // before subsequent events reference new PIDs.
+    if (msg && msg.type === 'tick_events' && Array.isArray(msg.events)) {
+      for (const ev of msg.events as CpuEvent[]) applyEvent(ev);
+      if (msg.vars !== undefined) {
+        applyVarsPayload(msg.vars as Record<string, VarSnapshot> | null);
+      }
+      if (Array.isArray(msg.procs)) {
+        applyEvent({ type: 'procs', procs: msg.procs } as CpuEvent);
+      }
+      if (typeof msg.tick_value === 'number') {
+        applyEvent({ type: 'tick', value: msg.tick_value } as CpuEvent);
+      }
+      if (msg.state && typeof msg.state === 'object') {
+        applyEvent({ type: 'state', ...(msg.state as object) } as CpuEvent);
+      }
+      return;
+    }
+    applyEvent(msg as CpuEvent);
+  }
+
+  function flushPendingFrames() {
+    if (pendingFrames.length === 0) return;
+    const batch = pendingFrames.splice(0, pendingFrames.length);
+    for (const msg of batch) applyFrame(msg);
+  }
+
+  function scheduleFlush() {
+    if (rafHandle !== null) return;
+    rafHandle = requestAnimationFrame(() => {
+      rafHandle = null;
+      flushPendingFrames();
+    });
+  }
+
+  function routeIncomingFrame(msg: any) {
+    const type = typeof msg?.type === 'string' ? msg.type : undefined;
+    if (type && SYNC_TYPES.has(type)) {
+      flushPendingFrames();
+      applyFrame(msg);
+      return;
+    }
+    pendingFrames.push(msg);
+    if (pendingFrames.length > PENDING_CAP) {
+      pendingFrames.splice(0, pendingFrames.length - PENDING_CAP);
+    }
+    scheduleFlush();
+  }
+
+  // rAF is paused in hidden tabs; drain on return to foreground.
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && pendingFrames.length > 0) {
+        if (rafHandle !== null) {
+          cancelAnimationFrame(rafHandle);
+          rafHandle = null;
+        }
+        flushPendingFrames();
+      }
+    });
+  }
+
   async function connect() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       return;
@@ -872,6 +953,11 @@ export const useCpuStore = defineStore('cpu', () => {
     ws.onclose = () => {
       connected.value = false;
       ws = null;
+      if (rafHandle !== null) {
+        cancelAnimationFrame(rafHandle);
+        rafHandle = null;
+      }
+      pendingFrames.length = 0;
       pushLog(formatLog.wsDisconnected(), 'red', undefined, undefined, 'global');
       scheduleReconnect();
     };
@@ -883,22 +969,7 @@ export const useCpuStore = defineStore('cpu', () => {
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
-        // The backend bundles every event produced in the same simulator tick
-        // into one frame ({type:"tick_events", events:[...]}). Applying the
-        // whole batch inside a single sync callback keeps every log.value
-        // mutation in the same reactive turn, so gridRows (and any other
-        // computed downstream) only re-runs once per tick.
-        if (msg && msg.type === 'tick_events' && Array.isArray(msg.events)) {
-          for (const ev of msg.events as CpuEvent[]) applyEvent(ev);
-          // vars piggybacks on the same atomic frame: if events landed,
-          // vars must too. This sidesteps the dropped-frame skew that a
-          // separate vars_update message had under WS backpressure.
-          if (msg.vars !== undefined) {
-            applyVarsPayload(msg.vars as Record<string, VarSnapshot> | null);
-          }
-        } else {
-          applyEvent(msg as CpuEvent);
-        }
+        routeIncomingFrame(msg);
       } catch (err) {
         pushLog(formatLog.wsJsonErr(err), 'red', undefined, undefined, 'global');
       }
@@ -1601,6 +1672,10 @@ export const useCpuStore = defineStore('cpu', () => {
     }
   }
 
+  // Must match the flash-amber keyframe length in CpuPanel.vue and
+  // ProcessesPanel.vue so the class drops when the animation ends.
+  const FLASH_DURATION_MS = 250;
+
   function flashReg(name: string, coreId: number = selectedCoreId.value) {
     const slot = ensureChangedSlot(coreId);
     slot.add(name);
@@ -1608,12 +1683,12 @@ export const useCpuStore = defineStore('cpu', () => {
     setTimeout(() => {
       slot.delete(name);
       if (isSelected(coreId)) changedRegs.delete(name);
-    }, 800);
+    }, FLASH_DURATION_MS);
   }
 
   function flashPID(pid: number) {
     flashingPIDs.add(pid);
-    setTimeout(() => flashingPIDs.delete(pid), 800);
+    setTimeout(() => flashingPIDs.delete(pid), FLASH_DURATION_MS);
   }
 
   function pushLog(
@@ -1636,6 +1711,7 @@ export const useCpuStore = defineStore('cpu', () => {
     }
     log.value.push({ ts: Date.now(), text, color, coreId, tick, scope, inKernel, kind });
     if (log.value.length > 500) log.value.splice(0, log.value.length - 500);
+    triggerRef(log);
   }
 
   // ─── Comandos públicos ──────────────────────────────────────────────────

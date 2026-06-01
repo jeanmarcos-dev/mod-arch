@@ -42,6 +42,10 @@ watch(scroller, (s) => {
 
 onBeforeUnmount(() => {
   scrollEl?.removeEventListener('scroll', handleScroll);
+  if (scrollHandle !== null) {
+    cancelAnimationFrame(scrollHandle);
+    scrollHandle = null;
+  }
 });
 
 function colorOf(c: string) {
@@ -53,12 +57,6 @@ function colorOf(c: string) {
     default:       return 'var(--amber)';
   }
 }
-
-// Visible cores from the SimBar filter. Entries without a coreId stay visible
-// regardless of the filter (global rows + legacy events with no per-core tag).
-const visibleLog = computed(() => cpu.log.filter(
-  e => e.scope === 'global' || e.coreId === undefined || cpu.isCoreVisible(e.coreId),
-));
 
 const visibleCores = computed(() =>
   cpu.cores
@@ -80,9 +78,8 @@ interface GridRow {
 }
 
 // Group entries into rows. Each tick becomes one row; entries with no tick
-// fall back to a synthetic row that follows their arrival order (so legacy
-// events without a tick stamp still show up). Global entries (loaded/reset/
-// ws_*) get their own full-width row.
+// fall back to a synthetic row that follows their arrival order. Global
+// entries (loaded/reset/ws_*) get their own full-width row.
 const gridRows = computed<GridRow[]>(() => {
   // While the alumno is looking at another pizarra tab (Code / Memory) this
   // panel is hidden with v-show. Skip the O(n) rebuild — the simulator can
@@ -94,7 +91,10 @@ const gridRows = computed<GridRow[]>(() => {
   const tickIndex = new Map<number, number>();
   let untickedSeq = 0;
 
-  for (const e of visibleLog.value) {
+  for (const e of cpu.log) {
+    if (e.scope !== 'global' && e.coreId !== undefined && !cpu.isCoreVisible(e.coreId)) {
+      continue;
+    }
     if (e.scope === 'global') {
       rows.push({
         key: `g-${untickedSeq++}`,
@@ -145,13 +145,19 @@ const gridStyle = computed(() => {
   };
 });
 
-// Follow the tail when new events arrive. Watching cpu.log.length covers
-// both the "new row appears" case and the "existing row grows taller because
-// of an extra entry in the same tick" case.
-watch(() => cpu.log.length, async () => {
+// Follow the tail when new events arrive. rAF coalesces bursts of pushes
+// into one scroll per paint.
+let scrollPending = false;
+let scrollHandle: number | null = null;
+watch(() => cpu.log.length, () => {
   if (!props.active || !stickToBottom.value) return;
-  await nextTick();
-  scroller.value?.scrollToBottom?.();
+  if (scrollPending) return;
+  scrollPending = true;
+  scrollHandle = requestAnimationFrame(() => {
+    scrollPending = false;
+    scrollHandle = null;
+    scroller.value?.scrollToBottom?.();
+  });
 });
 
 // Coming back from another tab: the body was empty while hidden, so it
