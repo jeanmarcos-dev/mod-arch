@@ -352,21 +352,21 @@ onUnmounted(() => {
             :disabled="isLocked('code')"
             @click="setMiddleTab('code')"
             :title="isLocked('code') ? t('simulator.lockedPanel.title') : t('tabs.codeC_long')"
-          ><Code2 :size="14" :stroke-width="2" /><span>{{ t('tabs.codeC') }}</span><Lock v-if="isLocked('code')" class="tab-lock" :size="10" :stroke-width="2" /></button>
+          ><Code2 :size="15" :stroke-width="activeMiddleTab === 'code' ? 2.25 : 2" /><span>{{ t('tabs.codeC') }}</span><Lock v-if="isLocked('code')" class="tab-lock" :size="10" :stroke-width="2" /></button>
           <button
             class="tab"
             :class="{ active: activeMiddleTab === 'events', locked: isLocked('events') }"
             :disabled="isLocked('events')"
             @click="setMiddleTab('events')"
             :title="isLocked('events') ? t('simulator.lockedPanel.title') : t('tabs.eventsLong')"
-          ><ListTree :size="14" :stroke-width="2" /><span>{{ t('tabs.eventLog') }}</span><Lock v-if="isLocked('events')" class="tab-lock" :size="10" :stroke-width="2" /></button>
+          ><ListTree :size="15" :stroke-width="activeMiddleTab === 'events' ? 2.25 : 2" /><span>{{ t('tabs.eventLog') }}</span><Lock v-if="isLocked('events')" class="tab-lock" :size="10" :stroke-width="2" /></button>
           <button
             class="tab"
             :class="{ active: activeMiddleTab === 'memory', locked: isLocked('memory') }"
             :disabled="isLocked('memory')"
             @click="setMiddleTab('memory')"
             :title="isLocked('memory') ? t('simulator.lockedPanel.title') : t('tabs.memoryLong')"
-          ><MemoryStick :size="14" :stroke-width="2" /><span>{{ t('tabs.memory') }}</span><Lock v-if="isLocked('memory')" class="tab-lock" :size="10" :stroke-width="2" /></button>
+          ><MemoryStick :size="15" :stroke-width="activeMiddleTab === 'memory' ? 2.25 : 2" /><span>{{ t('tabs.memory') }}</span><Lock v-if="isLocked('memory')" class="tab-lock" :size="10" :stroke-width="2" /></button>
           <button
             v-if="!rightAsideCollapsed"
             type="button"
@@ -637,7 +637,11 @@ onUnmounted(() => {
 
 .middle-tabs {
   display: flex;
-  gap: 4px;
+  gap: 2px;
+  /* Continuous baseline under the inactive tabs — the active tab's bottom
+     edge takes the panel background and "cuts" this line, so the active tab
+     and the panel below read as one continuous surface. */
+  border-bottom: 1px solid var(--border);
   /* Container query anchor so the tabs collapse to icon-only when their own
      width gets cramped — without introducing a new viewport breakpoint. */
   container-type: inline-size;
@@ -655,40 +659,45 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   padding: 0;
-  color: var(--text-dim);
+  color: var(--text-muted);
   border: 1px solid var(--border);
+  border-bottom: none;
+  margin-bottom: -1px;
   background: var(--panel-soft);
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 .aside-toggle:hover,
 .aside-toggle:focus-visible {
-  color: var(--amber);
-  border-color: var(--amber);
-  background: color-mix(in oklab, var(--accent) 10%, var(--panel-soft));
+  color: var(--accent);
+  border-color: var(--border-strong);
+  background: color-mix(in oklab, var(--accent) 8%, var(--panel-soft));
   outline: none;
 }
 
 .tab {
   flex: 1 1 0;
   min-width: 0;
+  position: relative;
   font-size: 12px;
-  letter-spacing: 1px;
-  padding: 6px 10px;
-  color: var(--text-dim);
-  border-color: var(--border);
+  letter-spacing: 1.2px;
+  padding: 8px 14px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  margin-bottom: -1px;
   background: var(--panel-soft);
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 8px;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 
 .tab:hover:not(.active):not(.locked):not(:disabled) {
   color: var(--text);
   border-color: var(--border-strong);
-  background: color-mix(in oklab, var(--accent) 6%, var(--panel-soft));
+  background: color-mix(in oklab, var(--accent) 8%, var(--panel-soft));
 }
 .tab > svg { flex-shrink: 0; }
 .tab > span {
@@ -703,14 +712,34 @@ onUnmounted(() => {
    accent on the active tab still signals which view is open. */
 @container (max-width: 360px) {
   .tab > span { display: none; }
-  .tab { padding: 6px 8px; }
+  .tab {
+    justify-content: center;
+    padding: 8px 10px;
+  }
 }
 
 .tab.active {
-  color: var(--amber);
-  border-color: var(--amber);
-  background: color-mix(in oklab, var(--accent) 14%, var(--panel-soft));
-  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.2);
+  color: var(--accent);
+  border-color: var(--border);
+  /* Same fill as the .panel below so the seam between tab and panel
+     disappears; the bottom border matches the panel bg to "punch through"
+     the contenedor's baseline. */
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--panel-bg);
+}
+
+/* Accent bar pinned to the top edge of the active tab — the single, clear
+   "this view is open" signal. The glow keeps the CRT phosphor metaphor. */
+.tab.active::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  right: -1px;
+  height: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.45);
+  pointer-events: none;
 }
 
 .tab.locked,
@@ -723,7 +752,7 @@ onUnmounted(() => {
 .tab.locked:hover,
 .mobile-tabs button.locked:hover {
   background: var(--panel-soft);
-  color: var(--text-dim);
+  color: var(--text-muted);
   border-color: var(--border);
   box-shadow: none;
 }

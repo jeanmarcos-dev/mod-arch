@@ -470,20 +470,47 @@ function jumpToRegion(addr: number) {
 
 .view-tabs {
   display: flex;
-  gap: 4px;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
 }
 
 .view-tabs button {
+  position: relative;
   font-size: 11px;
-  padding: 4px 10px;
+  padding: 5px 12px;
   letter-spacing: 0;
   text-transform: none;
+  min-height: 0;
+  background: var(--panel-soft);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  margin-bottom: -1px;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.view-tabs button:hover:not(.active) {
+  background: color-mix(in oklab, var(--accent) 8%, var(--panel-soft));
+  color: var(--text);
+  border-color: var(--border-strong);
+  box-shadow: none;
 }
 
 .view-tabs button.active {
-  background: rgba(var(--accent-rgb), 0.18);
-  color: var(--amber);
-  border-color: var(--amber);
+  background: rgba(var(--accent-rgb), 0.10);
+  color: var(--accent);
+  border-color: var(--border);
+}
+
+.view-tabs button.active::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  right: -1px;
+  height: 2px;
+  background: var(--accent);
+  pointer-events: none;
 }
 
 /* Trap frame readout. Sits between the "following" line and the hex dump
