@@ -351,7 +351,9 @@ func (k *Kernel) BindIdleCores() []cpu.Event {
 	var out []cpu.Event
 	for _, c := range k.Cores {
 		if c.CurrentPID == 0 && !c.RunningIdle {
+			n := len(out)
 			out = append(out, k.bindIdleToCore(c)...)
+			stampKernelContext(out[n:], c.ID, c.CPU.Tick)
 		}
 	}
 	return out
