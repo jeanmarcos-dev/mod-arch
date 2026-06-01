@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import {
@@ -259,6 +259,29 @@ watch(
 );
 
 onBeforeUnmount(detachPointer);
+
+const shellRef = ref<HTMLElement | null>(null);
+let topChromeObserver: ResizeObserver | null = null;
+
+function observeTopChrome() {
+  if (!shellRef.value) return;
+  const target = shellRef.value.querySelector('.sim-bar, .topbar') as HTMLElement | null;
+  if (!target) {
+    shellRef.value.style.setProperty('--shell-top-h', '48px');
+    return;
+  }
+  topChromeObserver?.disconnect();
+  topChromeObserver = new ResizeObserver(([entry]) => {
+    const h = Math.round(entry.contentRect.height);
+    shellRef.value?.style.setProperty('--shell-top-h', `${h}px`);
+  });
+  topChromeObserver.observe(target);
+  shellRef.value.style.setProperty('--shell-top-h', `${Math.round(target.getBoundingClientRect().height)}px`);
+}
+
+watch(() => route.path, () => nextTick(observeTopChrome), { flush: 'post' });
+onMounted(() => nextTick(observeTopChrome));
+onBeforeUnmount(() => topChromeObserver?.disconnect());
 </script>
 
 <template>
@@ -266,7 +289,11 @@ onBeforeUnmount(detachPointer);
        sim-relevant items, presence-driven autofollow). Owners keep the host
        shell below. The role flips on session_info events from the WS. -->
   <ViewerShell v-if="cpu.isViewer()" />
-  <div v-else :class="['shell', `shell--mode-${prefs.mode}`, { 'shell--disconnected': bannerVisible }]">
+  <div
+    v-else
+    ref="shellRef"
+    :class="['shell', `shell--mode-${prefs.mode}`, { 'shell--disconnected': bannerVisible }]"
+  >
     <ConnectionBanner />
     <MobileMenuButton />
     <Sidebar :items="items" />

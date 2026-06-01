@@ -104,6 +104,7 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
         <div
           v-if="item.group && (idx === 0 || items[idx - 1].group !== item.group)"
           class="sidebar__group"
+          :class="{ 'sidebar__group--first': idx === 0 }"
         >
           <span class="sidebar__group-label">{{ item.group }}</span>
         </div>
@@ -184,7 +185,9 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
   left: 0;
   right: 0;
   top: 0;
-  min-height: 38px;
+  /* Fixed height regardless of the simulator top bar — the sidebar header
+     must stay predictable even when SimBar wraps to two rows. */
+  min-height: 48px;
   background: rgba(var(--accent-rgb), 0.10);
   border: none;
   border-left: 2px solid var(--amber);
@@ -209,7 +212,7 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
 .sidebar--collapsed .sidebar__toggle {
   justify-content: center;
   padding: 0;
-  min-height: 28px;
+  min-height: 48px;
   background: transparent;
   border-left-color: transparent;
   border-right-color: transparent;
@@ -242,17 +245,14 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  /* Top padding reserves the 38px header strip occupied by the collapse
-     toggle so the first nav item never slides under it. */
-  padding: 38px 0 var(--space-2);
+  /* Fixed reserve for the absolute toggle button above. The sidebar must not
+     follow SimBar's dynamic height (which wraps to two rows when its content
+     overflows) or the rail would resize every time a top-bar dropdown opens. */
+  padding-top: 48px;
+  padding-bottom: var(--space-2);
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-}
-
-.sidebar--collapsed .sidebar__nav {
-  /* Collapsed toggle strip is only 28px tall — reclaim the 10px gap. */
-  padding-top: 28px;
 }
 
 .sidebar__group {
@@ -308,6 +308,10 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
 
 .sidebar--collapsed .sidebar__group::after {
   opacity: 1;
+}
+
+.sidebar--collapsed .sidebar__group--first {
+  display: none;
 }
 
 .sidebar__link {
@@ -439,18 +443,19 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
 
 .sidebar__foot {
   border-top: 1px dashed var(--border);
-  padding: var(--space-3);
+  padding: 0 var(--space-3);
   font-size: 11px;
-  min-height: 36px;
+  min-height: 28px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  justify-content: center;
+  align-items: center;
+  gap: 0;
 }
 
 .sidebar--collapsed .sidebar__foot {
-  padding: var(--space-2) 0;
-  align-items: center;
+  padding: 0;
 }
 
 /* Subtle signature line at the very bottom of the sidebar. Full wordmark
@@ -478,19 +483,7 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
   letter-spacing: 2px;
 }
 
-.sidebar__author {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  text-align: center;
-  opacity: 0.5;
-  white-space: nowrap;
-  user-select: none;
-  margin-top: -4px;
-}
-.sidebar--collapsed .sidebar__author { display: none; }
+.sidebar__author { display: none; }
 
 /* Mobile + small tablet: the rail becomes an off-canvas drawer that the
    hamburger opens. Width scales with viewport so it never crowds a 320px
