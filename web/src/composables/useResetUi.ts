@@ -4,6 +4,11 @@ import { usePreferencesStore } from '../stores/preferences';
 import { useToastStore } from '../stores/toast';
 import type { LayoutSnapshot } from '../stores/preferences';
 
+// Event name picked up by TutorLauncher to reset the FAB's local drag offset.
+// The offset lives in the component (it is intentionally ephemeral and not
+// persisted), so a CustomEvent is the lightest coupling.
+export const RESET_FAB_EVENT = 'modos:reset-fab-position';
+
 interface ResetSnapshot {
   simBar: SimBarSnapshot;
   layout: LayoutSnapshot;
@@ -23,6 +28,7 @@ export function useResetUi() {
 
     bar.reset();
     prefs.resetLayout();
+    window.dispatchEvent(new CustomEvent(RESET_FAB_EVENT));
 
     toast.pushAction(
       t('simbar.toasts.resetUiDone'),

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/jeanmarcos/modos-cpu/internal/crypto"
 	"github.com/jeanmarcos/modos-cpu/internal/store"
@@ -24,7 +26,9 @@ type SecurityConfig struct {
 	TurnstileSecret  string
 }
 
-// loadSecurityConfig reads both settings and decrypts the secret.
+// loadSecurityConfig reads both settings and decrypts the secret. Empty
+// fields fall back to TURNSTILE_SITEKEY / TURNSTILE_SECRET so a fresh deploy
+// configured via `.env` works without first touching the admin panel.
 func loadSecurityConfig(ctx context.Context, st *store.Store, encKey [32]byte) (SecurityConfig, error) {
 	var cfg SecurityConfig
 	if v, err := st.GetSetting(ctx, settingTurnstileSitekey); err == nil {
@@ -32,21 +36,25 @@ func loadSecurityConfig(ctx context.Context, st *store.Store, encKey [32]byte) (
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return cfg, fmt.Errorf("security: read sitekey: %w", err)
 	}
+
 	sealed, err := st.GetSetting(ctx, settingTurnstileSecret)
-	if errors.Is(err, store.ErrNotFound) {
-		return cfg, nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return cfg, fmt.Errorf("security: read secret: %w", err)
 	}
-	if sealed == "" {
-		return cfg, nil
+	if sealed != "" {
+		plain, err := crypto.Open(sealed, encKey)
+		if err != nil {
+			return cfg, fmt.Errorf("security: decrypt secret: %w", err)
+		}
+		cfg.TurnstileSecret = plain
 	}
-	plain, err := crypto.Open(sealed, encKey)
-	if err != nil {
-		return cfg, fmt.Errorf("security: decrypt secret: %w", err)
+
+	if cfg.TurnstileSitekey == "" {
+		cfg.TurnstileSitekey = strings.TrimSpace(os.Getenv("TURNSTILE_SITEKEY"))
 	}
-	cfg.TurnstileSecret = plain
+	if cfg.TurnstileSecret == "" {
+		cfg.TurnstileSecret = strings.TrimSpace(os.Getenv("TURNSTILE_SECRET"))
+	}
 	return cfg, nil
 }
 

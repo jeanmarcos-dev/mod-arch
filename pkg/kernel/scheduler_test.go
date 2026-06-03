@@ -202,3 +202,26 @@ func TestStampKernelContext_TargetCorePreserved(t *testing.T) {
 			sched.CoreID, sched.Tick)
 	}
 }
+
+// TestStampKernelContext_HaltTickStamped guards the Tick stamping for
+// EventHalt. Two call sites (keyboard.go, kernel_work.go doHaltPhase) emit
+// EventHalt without a Tick and rely on stampKernelContext to fill it; if the
+// stamper skips EventHalt the terminal HALT ends up with Tick=0 and the
+// EventsLog UI groups it under tick 0 next to the program's first instruction.
+// Emitters that already set Tick (sync.go) must be preserved.
+func TestStampKernelContext_HaltTickStamped(t *testing.T) {
+	evs := []cpu.Event{
+		cpu.EventHalt{CoreID: 0, PID: 4},          // unstamped — must be filled
+		cpu.EventHalt{CoreID: 0, Tick: 5, PID: 7}, // pre-stamped — must be preserved
+	}
+	out := stampKernelContext(evs, 0, 42)
+
+	unstamped := out[0].(cpu.EventHalt)
+	if unstamped.Tick != 42 {
+		t.Errorf("unstamped EventHalt: Tick=%d, want 42 (filled by stamper)", unstamped.Tick)
+	}
+	preserved := out[1].(cpu.EventHalt)
+	if preserved.Tick != 5 {
+		t.Errorf("pre-stamped EventHalt: Tick=%d, want 5 (preserved by stamper)", preserved.Tick)
+	}
+}

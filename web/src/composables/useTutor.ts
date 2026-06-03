@@ -46,13 +46,27 @@ export function useTutor() {
     // Build the multi-turn history from prior messages (newest last). The
     // server enforces both a hard cap (20 entries) and the admin-configured
     // HistoryWindowTurns, so a generous slice of 20 here is safe.
+    //
+    // For tutor turns, re-attach the inline citation labels (e.g.
+    // "[Demo: x] [Docs: y]") that the server strips before display. The LLM
+    // uses prior assistant turns as a few-shot signal for how to format new
+    // answers; without the labels in history it stops emitting them, and
+    // buildCitationsFromText on the server finds no matches — so the
+    // citation chips disappear entirely.
     const history = tutor.messages
       .filter((m) => !m.error && !m.pending && m.text.trim().length > 0)
       .slice(-20)
-      .map((m) => ({
-        role: (m.role === 'student' ? 'user' : 'assistant') as 'user' | 'assistant',
-        text: m.text,
-      }));
+      .map((m) => {
+        let text = m.text;
+        if (m.role === 'tutor' && m.citations && m.citations.length > 0) {
+          const labels = m.citations.map((c) => c.label).join(' ');
+          text = `${text} ${labels}`;
+        }
+        return {
+          role: (m.role === 'student' ? 'user' : 'assistant') as 'user' | 'assistant',
+          text,
+        };
+      });
     // Mode is controlled by the admin globally; the client just sends the
     // question and lets the server pick the system prompt.
     tutor.startAsk(trimmed, requestId);

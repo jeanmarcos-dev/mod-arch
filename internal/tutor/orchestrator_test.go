@@ -218,3 +218,65 @@ func TestAskRateLimit(t *testing.T) {
 		t.Error("third call should be rate-limited")
 	}
 }
+
+func TestStripCitationTokens(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "no tokens leaves text untouched",
+			in:   "El planificador elige el próximo proceso.",
+			want: "El planificador elige el próximo proceso.",
+		},
+		{
+			name: "single trailing demo token",
+			in:   "Round robin reparte CPU por quantum. [Demo: scheduler_round_robin]",
+			want: "Round robin reparte CPU por quantum.",
+		},
+		{
+			name: "multiple trailing tokens on their own lines",
+			in:   "Texto del tutor.\n\n[Demo: scheduler_round_robin]\n[Docs: Procesos]\n[Docs: Planificación]",
+			want: "Texto del tutor.",
+		},
+		{
+			name: "comma-separated enumeration in prose",
+			in:   "Ver [Demo: a], [Docs: b] para detalles.",
+			want: "Ver, para detalles.",
+		},
+		{
+			name: "silberschatz with page number",
+			in:   "Mode switch detallado. [Silberschatz p. 132]",
+			want: "Mode switch detallado.",
+		},
+		{
+			name: "glosario and isa tokens",
+			in:   "El EIP avanza. [Glosario: EIP] [ISA: jmp]",
+			want: "El EIP avanza.",
+		},
+		{
+			name: "markdown link must survive",
+			in:   "Consulte la [guía oficial](https://example.org/x) para más.",
+			want: "Consulte la [guía oficial](https://example.org/x) para más.",
+		},
+		{
+			name: "trailing comma and semicolon trimmed",
+			in:   "Tres ejemplos: [Demo: a], [Demo: b]; [Docs: c]",
+			want: "Tres ejemplos:",
+		},
+		{
+			name: "empty input stays empty",
+			in:   "",
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stripCitationTokens(tc.in)
+			if got != tc.want {
+				t.Errorf("stripCitationTokens(%q)\n got:  %q\n want: %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

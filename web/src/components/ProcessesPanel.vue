@@ -538,6 +538,7 @@ function regsSrcTitle(p: PCBInfo): string {
   font-weight: 600;
   letter-spacing: 0.3px;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .proc-card--kthread {
@@ -615,7 +616,7 @@ function regsSrcTitle(p: PCBInfo): string {
 .proc-card__head {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px 8px;
   padding: 5px 8px;
   cursor: pointer;
@@ -623,6 +624,7 @@ function regsSrcTitle(p: PCBInfo): string {
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .proc-card__head:hover {

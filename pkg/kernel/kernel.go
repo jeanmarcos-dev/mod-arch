@@ -641,6 +641,11 @@ func stampKernelContext(evs []cpu.Event, coreID int, tick uint64) []cpu.Event {
 				v.Tick = tick
 			}
 			evs[i] = v
+		case cpu.EventHalt:
+			if v.Tick == 0 {
+				v.Tick = tick
+			}
+			evs[i] = v
 		case cpu.EventMutexOp:
 			v.Tick = tick
 			evs[i] = v

@@ -13,6 +13,17 @@ import { useNarratorAnimation } from './useNarratorAnimation';
 // one tells the alumno "the mode flipped"; this one tells them "and these
 // are the three things the HW stashed for safekeeping".
 
+const props = withDefaults(
+  defineProps<{
+    // Gate animations to the visibility of the memory panel. When false the
+    // bus event is observed but no card is materialised: the destination
+    // anchor lives inside MemoryPanel (v-show), and its bounding rect is
+    // collapsed to (0,0) while hidden — cards would otherwise fly off-screen.
+    enabled?: boolean;
+  }>(),
+  { enabled: true },
+);
+
 const cpu = useCpuStore();
 const animator = useNarratorAnimation();
 
@@ -46,6 +57,7 @@ function hex(n: number, w = 8): string {
 let seq = 0;
 
 function launch(kind: 'push' | 'pop', ev: ModeSwitch) {
+  if (!props.enabled) return;
   if (!cpu.isCoreVisible(ev.coreId)) return;
   if (!animator.shouldFire()) return;
   const cpuEl = document.querySelector(`[data-narrator-anchor="cpu-${ev.coreId}"]`)

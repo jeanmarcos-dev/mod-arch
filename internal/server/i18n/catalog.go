@@ -48,7 +48,7 @@ var Catalog = map[string]map[string]string{
 		CodeSimulatorCoresInvalidMin: "núcleos inválido ({cores}): debe ser >= 1",
 		CodeSimulatorCoresInvalidMax: "núcleos inválido ({cores}): el máximo soportado es {max}",
 
-		CodeFullTitleTab:      "Capacidad llena · MODOS_CPU",
+		CodeFullTitleTab:      "Capacidad llena · MOD ARCH",
 		CodeFullHeading:       "▸ Capacidad temporal alcanzada",
 		CodeFullLeadStat:      "{full} / {max} sesiones",
 		CodeFullLeadActive:    "Hay {full} sesiones activas en este servidor (cap configurado: {max}). Espere unos minutos y refresque, o únase a una sesión existente como espectador:",
@@ -61,7 +61,7 @@ var Catalog = map[string]map[string]string{
 		CodeAccessDeniedHeading:  "ACCESO RESTRINGIDO",
 		CodeAccessDeniedHint:     "Si dispone de una invitación, abra el enlace que le facilitó el docente.",
 
-		CodeViewerPwTitleTab: "Acceso · MODOS-CPU",
+		CodeViewerPwTitleTab: "Acceso · MOD ARCH",
 		CodeViewerPwHeading:  "VISTA RESTRINGIDA",
 		CodeViewerPwLead:     "Esta sesión compartida requiere una contraseña para ser observada.",
 		CodeViewerPwLabel:    "Contraseña",
@@ -72,7 +72,7 @@ var Catalog = map[string]map[string]string{
 		CodeViewInvalidLead:     "Este enlace no corresponde a ninguna sesión activa. Es posible que el propietario haya desactivado el compartido o cerrado la sesión.",
 		CodeViewInvalidCreate:   "→ Crear una sesión nueva",
 
-		CodePlaceholderHeading: "▸ MODOS_CPU — backend listo",
+		CodePlaceholderHeading: "▸ MOD ARCH — backend listo",
 		CodePlaceholderLead:    "El frontend Vue aún no está embebido.",
 	},
 	"en": {
@@ -117,7 +117,7 @@ var Catalog = map[string]map[string]string{
 		CodeSimulatorCoresInvalidMin: "invalid cores ({cores}): must be >= 1",
 		CodeSimulatorCoresInvalidMax: "invalid cores ({cores}): the maximum supported is {max}",
 
-		CodeFullTitleTab:      "Capacity full · MODOS_CPU",
+		CodeFullTitleTab:      "Capacity full · MOD ARCH",
 		CodeFullHeading:       "▸ Temporary capacity reached",
 		CodeFullLeadStat:      "{full} / {max} sessions",
 		CodeFullLeadActive:    "There are {full} active sessions on this server (configured cap: {max}). Wait a few minutes and refresh, or join an existing session as a spectator:",
@@ -130,7 +130,7 @@ var Catalog = map[string]map[string]string{
 		CodeAccessDeniedHeading:  "ACCESS RESTRICTED",
 		CodeAccessDeniedHint:     "If you have an invitation, open the link the teacher gave you.",
 
-		CodeViewerPwTitleTab: "Access · MODOS-CPU",
+		CodeViewerPwTitleTab: "Access · MOD ARCH",
 		CodeViewerPwHeading:  "RESTRICTED VIEW",
 		CodeViewerPwLead:     "This shared session requires a password to be watched.",
 		CodeViewerPwLabel:    "Password",
@@ -141,7 +141,7 @@ var Catalog = map[string]map[string]string{
 		CodeViewInvalidLead:     "This link does not match any active session. The owner may have turned sharing off or closed the session.",
 		CodeViewInvalidCreate:   "→ Create a new session",
 
-		CodePlaceholderHeading: "▸ MODOS_CPU — backend ready",
+		CodePlaceholderHeading: "▸ MOD ARCH — backend ready",
 		CodePlaceholderLead:    "The Vue frontend is not embedded yet.",
 	},
 }

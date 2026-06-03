@@ -57,11 +57,16 @@ export const formatLog = {
   reset(): string {
     return `▸ ${t('logEvents.reset')}`;
   },
+  // PCB save / restore are the only events that render their leading glyph as
+  // a Lucide icon (the EventsLog reads `entry.glyph` and renders an SVG).
+  // JetBrains Mono lacks ◍/◌ at this size and the system fallback came in
+  // taller, breaking row alignment — using the icon library keeps metrics
+  // consistent with the surrounding cells.
   pcbSave(pid: number, eip: number): string {
-    return `◍ ${t('logEvents.pcbSave', { pid, eip: `0x${eip.toString(16)}` })}`;
+    return t('logEvents.pcbSave', { pid, eip: `0x${eip.toString(16)}` });
   },
   pcbRestore(pid: number, eip: number): string {
-    return `◌ ${t('logEvents.pcbRestore', { pid, eip: `0x${eip.toString(16)}` })}`;
+    return t('logEvents.pcbRestore', { pid, eip: `0x${eip.toString(16)}` });
   },
   schedule(fromPid: number, toPid: number, reason: string | undefined, readyQueue: number[]): string {
     const reasonTag = reason ? ` (${reason})` : '';

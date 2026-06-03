@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,21 @@ import (
 	"github.com/jeanmarcos/modos-cpu/internal/rag"
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
 )
+
+// citationTokenRe matches every label format declared in prompts.go:
+//   [Glosario: id]   [Demo: id]   [ISA: id]   [Docs: id]   [Silberschatz p. N]
+// The leading \s* eats spaces and newlines that precede the token so trailing
+// citation blocks collapse cleanly when stripped from the answer.
+var citationTokenRe = regexp.MustCompile(`\s*\[(?:Glosario|Demo|ISA|Docs|Silberschatz)[^\]]*\]`)
+
+// stripCitationTokens removes inline citation labels from the LLM's reply.
+// buildCitationsFromText still needs the raw text to filter the citation
+// array, so callers should keep a copy of the original before invoking this.
+func stripCitationTokens(text string) string {
+	cleaned := citationTokenRe.ReplaceAllString(text, "")
+	cleaned = strings.TrimRight(cleaned, " ,;\n\t")
+	return strings.TrimSpace(cleaned)
+}
 
 // Citation is a structured reference the UI renders as a chip. Glossary
 // citations open the GlossaryModal on ID; book citations are informative
@@ -352,6 +368,7 @@ func (s *Service) askInternal(ctx context.Context, sess *sessions.Session, quest
 	toolNames := make([]string, 0, 4)
 	var lastModel string
 	var finalContent string
+	var rawFinalContent string
 	streamer, canStream := s.llm.(llm.Streamer)
 
 	for iter := 0; iter < s.opts.MaxToolIters+1; iter++ {
@@ -369,7 +386,7 @@ func (s *Service) askInternal(ctx context.Context, sess *sessions.Session, quest
 			req.ToolChoice = ""
 		}
 
-		text, toolCalls, usage, model, err := s.callWithRetry(ctx, progress, func() (string, []llm.ToolCall, llm.Usage, string, error) {
+		text, rawText, toolCalls, usage, model, err := s.callWithRetry(ctx, progress, func() (string, string, []llm.ToolCall, llm.Usage, string, error) {
 			return s.callLLM(ctx, streamer, canStream, req, progress)
 		})
 		if err != nil {
@@ -383,6 +400,7 @@ func (s *Service) askInternal(ctx context.Context, sess *sessions.Session, quest
 
 		if len(toolCalls) == 0 {
 			finalContent = strings.TrimSpace(text)
+			rawFinalContent = strings.TrimSpace(rawText)
 			break
 		}
 
@@ -396,7 +414,8 @@ func (s *Service) askInternal(ctx context.Context, sess *sessions.Session, quest
 			Role:      llm.RoleAssistant,
 			ToolCalls: toolCalls,
 		})
-		_ = text // tool-iteration text is intentionally discarded; see comment above.
+		_ = text    // tool-iteration text is intentionally discarded; see comment above.
+		_ = rawText // same as text — raw form is only relevant on the final iteration.
 
 		for _, call := range toolCalls {
 			toolsUsed++
@@ -417,7 +436,15 @@ func (s *Service) askInternal(ctx context.Context, sess *sessions.Session, quest
 		finalContent = "El tutor consultó varias herramientas pero no logró formular una respuesta concreta. Por favor reformule la pregunta."
 	}
 
-	citations := buildCitationsFromText(finalContent, retrieved)
+	// Citations are filtered by literal label match against the raw reply —
+	// the cleaned finalContent already has those tokens stripped, so use the
+	// pre-strip text here. When rawFinalContent is empty (e.g. the defensive
+	// fallback above), fall back to finalContent (no citations will match).
+	citationSource := rawFinalContent
+	if citationSource == "" {
+		citationSource = finalContent
+	}
+	citations := buildCitationsFromText(citationSource, retrieved)
 	ans := &Answer{
 		Text:           finalContent,
 		Citations:      citations,
@@ -454,10 +481,10 @@ var retryDelays = []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Se
 func (s *Service) callWithRetry(
 	ctx context.Context,
 	progress ProgressCallback,
-	fn func() (text string, toolCalls []llm.ToolCall, usage llm.Usage, model string, err error),
-) (text string, toolCalls []llm.ToolCall, usage llm.Usage, model string, err error) {
+	fn func() (text string, rawText string, toolCalls []llm.ToolCall, usage llm.Usage, model string, err error),
+) (text string, rawText string, toolCalls []llm.ToolCall, usage llm.Usage, model string, err error) {
 	for attempt := 0; ; attempt++ {
-		text, toolCalls, usage, model, err = fn()
+		text, rawText, toolCalls, usage, model, err = fn()
 		if err == nil || !errors.Is(err, llm.ErrRateLimited) || attempt >= len(retryDelays) {
 			return
 		}
@@ -468,7 +495,7 @@ func (s *Service) callWithRetry(
 		}
 		select {
 		case <-ctx.Done():
-			return text, toolCalls, usage, model, ctx.Err()
+			return text, rawText, toolCalls, usage, model, ctx.Err()
 		case <-time.After(wait):
 		}
 	}
@@ -479,7 +506,13 @@ func (s *Service) callWithRetry(
 // calls came in, we replay the buffered text to the UI as live tokens; if
 // tool calls were emitted instead, we silently discard the buffer (those
 // deltas were the model thinking aloud about which tool to use).
-func (s *Service) callLLM(ctx context.Context, streamer llm.Streamer, canStream bool, req llm.ChatRequest, progress ProgressCallback) (text string, toolCalls []llm.ToolCall, usage llm.Usage, model string, err error) {
+//
+// rawText holds the LLM's unmodified output (with inline citation labels
+// intact); text is the cleaned version that gets streamed to the UI and
+// returned as the answer body. The raw form is needed by
+// buildCitationsFromText to filter which retrieved chunks the model actually
+// referenced.
+func (s *Service) callLLM(ctx context.Context, streamer llm.Streamer, canStream bool, req llm.ChatRequest, progress ProgressCallback) (text string, rawText string, toolCalls []llm.ToolCall, usage llm.Usage, model string, err error) {
 	// Rate-limit gate. If the bucket is empty, signal the UI before parking
 	// the goroutine on Acquire so the student sees "en cola (~Ns)" instead
 	// of a frozen spinner.
@@ -493,7 +526,7 @@ func (s *Service) callLLM(ctx context.Context, streamer llm.Streamer, canStream 
 				})
 			}
 			if err := s.bucket.Acquire(ctx); err != nil {
-				return "", nil, llm.Usage{}, "", err
+				return "", "", nil, llm.Usage{}, "", err
 			}
 		}
 	}
@@ -501,14 +534,14 @@ func (s *Service) callLLM(ctx context.Context, streamer llm.Streamer, canStream 
 	if !canStream {
 		resp, err := s.llm.Chat(ctx, req)
 		if err != nil {
-			return "", nil, llm.Usage{}, "", err
+			return "", "", nil, llm.Usage{}, "", err
 		}
-		return resp.Content, resp.ToolCalls, resp.Usage, resp.Model, nil
+		return stripCitationTokens(resp.Content), resp.Content, resp.ToolCalls, resp.Usage, resp.Model, nil
 	}
 
 	stream, err := streamer.ChatStream(ctx, req)
 	if err != nil {
-		return "", nil, llm.Usage{}, "", err
+		return "", "", nil, llm.Usage{}, "", err
 	}
 	defer stream.Close()
 
@@ -525,17 +558,19 @@ func (s *Service) callLLM(ctx context.Context, streamer llm.Streamer, canStream 
 		}
 	}
 	if e := stream.Err(); e != nil {
-		return "", nil, llm.Usage{}, "", e
+		return "", "", nil, llm.Usage{}, "", e
 	}
-	text = buf.String()
+	rawText = buf.String()
+	text = stripCitationTokens(rawText)
 
 	// Final-answer iteration: stream the accumulated text to the UI now so
 	// the student sees a typewriter effect. We do this AFTER we know there
-	// are no tool calls so intermediate "thinking" tokens never leak.
+	// are no tool calls so intermediate "thinking" tokens never leak. The
+	// cleaned text is replayed so inline citation labels never reach the UI.
 	if len(toolCalls) == 0 && progress != nil && text != "" {
 		s.replayTokens(text, progress)
 	}
-	return text, toolCalls, usage, req.Model, nil
+	return text, rawText, toolCalls, usage, req.Model, nil
 }
 
 // replayTokens emits the model's textual answer as a series of progress

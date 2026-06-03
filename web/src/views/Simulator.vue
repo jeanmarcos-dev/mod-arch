@@ -6,6 +6,7 @@ import { useCpuStore } from '../stores/cpu';
 import { useViewerMirrorStore } from '../stores/viewerMirror';
 import { useAppConfigStore } from '../stores/appConfig';
 import { usePreferencesStore, COLUMN_MIN_PX, COLUMN_MAX_PERCENT } from '../stores/preferences';
+import { useSimBarStore } from '../stores/simBar';
 import { useIsStudent } from '../composables/useIsStudent';
 import { useResizableColumn } from '../composables/useResizableColumn';
 import { useResizableRow } from '../composables/useResizableRow';
@@ -29,6 +30,7 @@ const cpu = useCpuStore();
 const mirror = useViewerMirrorStore();
 const appCfg = useAppConfigStore();
 const prefs = usePreferencesStore();
+const bar = useSimBarStore();
 const isStudent = useIsStudent();
 const { t } = useI18n();
 
@@ -258,6 +260,21 @@ const visible = computed(() => {
   };
 });
 
+// Forward "console panel is the active mobile tab" and "keyboard HW is taking
+// keystrokes" into the SimBar store so TutorLauncher can dim the FAB while
+// either condition holds. Resetting on unmount avoids a stuck-dim state if
+// the user navigates away with the console open.
+watch(
+  () => isMobile.value && visible.value.console,
+  (active) => bar.setConsoleMobileActive(active),
+  { immediate: true },
+);
+watch(
+  () => isMobile.value && visible.value.console && cpu.kbdReaders.length > 0,
+  (active) => bar.setKeyboardHwActive(active),
+  { immediate: true },
+);
+
 onMounted(() => {
   cpu.connect();
   checkMobile();
@@ -266,6 +283,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', checkMobile);
+  bar.setConsoleMobileActive(false);
+  bar.setKeyboardHwActive(false);
 });
 </script>
 
@@ -450,10 +469,15 @@ onUnmounted(() => {
          (pointer-events: none, position: absolute) and only render when their
          events arrive, so they cost nothing when idle. InterruptNarrator is
          intentionally omitted because the IDT anchors live exclusively in
-         the /interrupciones view. -->
-    <ByteFlightNarrator />
+         the /interrupciones view.
+         ByteFlight and TrapFrame are gated by visible.memory because their
+         destination anchors live inside MemoryPanel (v-show); while hidden
+         those rects collapse to (0,0) and cards would fly off-screen. PCBCopy
+         targets pcb-* anchors in the always-visible processes panel, and
+         ModeFlip handles its own visibility through suppress-banner. -->
+    <ByteFlightNarrator :enabled="visible.memory" />
     <ModeFlipNarrator :suppress-banner="activeMiddleTab === 'events'" />
-    <TrapFrameNarrator />
+    <TrapFrameNarrator :enabled="visible.memory" />
     <PCBCopyNarrator />
   </div>
 </template>

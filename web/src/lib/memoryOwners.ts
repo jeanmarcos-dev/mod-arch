@@ -86,6 +86,12 @@ function isThreadOf(p: PCBInfo): boolean {
  * collapsible "HILOS (n)" section.
  */
 export function buildOwners(procs: PCBInfo[], cores: CoreInfo[]): MemoryOwner[] {
+  // Swappers (one per core, all sharing PID 0 — see idle_task.go) are part
+  // of the kernel band, not standalone owners. They also have ParentPID=0,
+  // which would put them in byParent[0] AND make them kids of themselves,
+  // turning the DFS below into infinite recursion.
+  procs = procs.filter(p => !p.is_idle);
+
   const owners: MemoryOwner[] = [];
 
   // Find the first core running in kernel mode; surface it on the kernel chip

@@ -654,6 +654,8 @@ const es = {
       globalRowAria: 'Evento global que abarca todos los núcleos',
       kernelChipTitle: 'Modo kernel (PL0) — algún código del kernel se ejecutó aquí: scheduler, manejador de IRQ, manejador de syscall o mantenimiento. El chip K por sí solo NO implica que haya corrido el scheduler (eso lo marca el chip S).',
       schedulerChipTitle: 'El scheduler actuó en este tick — una decisión de planificación, un despertar de proceso o un guardado/restauración de PCB. El scheduler es una de muchas funciones del kernel: K marca "corrió el kernel", S marca "corrió específicamente el scheduler".',
+      followTailOn: 'Seguimiento automático activo. Haga clic para detenerlo.',
+      followTailOff: 'Seguimiento automático detenido. Haga clic para reanudarlo.',
     },
     memory: {
       title: 'MEMORIA · HEX DUMP',
@@ -770,13 +772,6 @@ const es = {
         irqTip: 'IRQ 0x21 (teclado) disparada recientemente.',
         expandTitle: 'Abrir panel inferior',
         collapseTitle: 'Cerrar panel inferior',
-        tutorTip: 'Mensajes nuevos del tutor MODARCHI.',
-      },
-      tabs: {
-        console: 'Consola',
-        modarchi: 'MODARCHI',
-        consoleTitle: 'Salida de sys_write y teclado del simulador',
-        modarchiTitle: 'Conversar con el tutor MODARCHI',
       },
       title: 'CONSOLA · sys_write fd=1',
       clickToType: '⌨ clic para escribir',

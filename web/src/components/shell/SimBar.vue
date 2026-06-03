@@ -676,6 +676,7 @@ const pauseTooltip = computed(() => {
   font-family: inherit;
   width: 28px;
   height: 28px;
+  min-height: 0;
   cursor: pointer;
   border-radius: var(--radius-sm);
   display: inline-flex;
@@ -689,6 +690,7 @@ const pauseTooltip = computed(() => {
   background: rgba(var(--accent-rgb), 0.10);
   color: var(--amber);
   border-color: var(--border-strong);
+  box-shadow: none;
 }
 .icon-btn > svg { display: block; }
 

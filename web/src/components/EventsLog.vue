@@ -1,51 +1,60 @@
 <script setup lang="ts">
 import { useCpuStore, type LogEntry } from '../stores/cpu';
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller';
+import { ArrowDownToLine, ArrowUpFromLine } from '@lucide/vue';
 
 const props = defineProps<{ active: boolean }>();
 const cpu = useCpuStore();
 const { t } = useI18n();
 
-// Ref to the DynamicScroller. Its root element is the scrollable container,
-// so we hook the scroll listener there once the component is mounted. The
-// component is generic over its items type, so we keep the ref untyped to
-// avoid fighting TS over the generic instantiation.
-type DynamicScrollerInstance = { $el: HTMLElement; scrollToBottom?: () => void };
+type DynamicScrollerInstance = { $el: HTMLElement; scrollToBottom?: () => void; forceUpdate?: () => void };
 const scroller = ref<DynamicScrollerInstance | null>(null);
-let scrollEl: HTMLElement | null = null;
 
-// Sticky autoscroll: follow new events only while the user is parked at the
-// bottom. Once they scroll up to inspect history, we stop forcing the view
-// down so they can read older ticks even as new ones keep arriving. A small
-// threshold (in px) covers the gap left by fractional pixel rounding.
-const STICK_THRESHOLD_PX = 24;
-const stickToBottom = ref(true);
+// Auto-follow tracks whether the panel sticks to the tail when new events
+// arrive. The button always jumps to the bottom on click and re-enables
+// follow; the user disables follow implicitly by scrolling up to read
+// history (handled in onScroll).
+const followTail = ref(true);
+let scrollListenerEl: HTMLElement | null = null;
 
-function handleScroll() {
-  if (!scrollEl) return;
-  const distance = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
-  stickToBottom.value = distance <= STICK_THRESHOLD_PX;
+function jumpToTail() {
+  followTail.value = true;
+  nextTick(() => {
+    scroller.value?.scrollToBottom?.();
+  });
 }
 
-watch(scroller, (s) => {
-  if (scrollEl) {
-    scrollEl.removeEventListener('scroll', handleScroll);
-    scrollEl = null;
+function isNearBottom(el: HTMLElement): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 12;
+}
+
+function onScroll(e: Event) {
+  const el = e.target as HTMLElement;
+  if (followTail.value && !isNearBottom(el)) {
+    followTail.value = false;
+  } else if (!followTail.value && isNearBottom(el)) {
+    followTail.value = true;
   }
-  if (s) {
-    scrollEl = s.$el ?? null;
-    scrollEl?.addEventListener('scroll', handleScroll, { passive: true });
+}
+
+onMounted(async () => {
+  await nextTick();
+  const el = scroller.value?.$el;
+  if (el) {
+    scrollListenerEl = el;
+    el.addEventListener('scroll', onScroll, { passive: true });
   }
 });
 
 onBeforeUnmount(() => {
-  scrollEl?.removeEventListener('scroll', handleScroll);
   if (scrollHandle !== null) {
     cancelAnimationFrame(scrollHandle);
     scrollHandle = null;
   }
+  scrollListenerEl?.removeEventListener('scroll', onScroll);
+  scrollListenerEl = null;
 });
 
 function colorOf(c: string) {
@@ -66,6 +75,10 @@ const visibleCores = computed(() =>
 );
 
 interface GridRow {
+  // Key embeds the entry count so that a row growing mid-stream (more events
+  // landing on the same tick) yields a fresh key — DynamicScroller drops the
+  // stale height cache and re-measures from scratch. Stable rows keep their
+  // key across builds and are reused as-is.
   key: string;
   tick: number | null;
   isGlobal: boolean;
@@ -81,14 +94,11 @@ interface GridRow {
 // fall back to a synthetic row that follows their arrival order. Global
 // entries (loaded/reset/ws_*) get their own full-width row.
 const gridRows = computed<GridRow[]>(() => {
-  // While the alumno is looking at another pizarra tab (Code / Memory) this
-  // panel is hidden with v-show. Skip the O(n) rebuild — the simulator can
-  // stream hundreds of events per second and recomputing for an invisible
-  // view is pure waste. We reconstruct in one pass when active flips back.
   if (!props.active) return [];
 
   const rows: GridRow[] = [];
   const tickIndex = new Map<number, number>();
+  const rowEntries: number[] = [];
   let untickedSeq = 0;
 
   for (const e of cpu.log) {
@@ -104,6 +114,7 @@ const gridRows = computed<GridRow[]>(() => {
         globalEntry: e,
         cells: new Map(),
       });
+      rowEntries.push(1);
       continue;
     }
 
@@ -114,13 +125,15 @@ const gridRows = computed<GridRow[]>(() => {
     }
     if (idx === undefined) {
       idx = rows.length;
+      const baseKey = tick !== null ? `t-${tick}` : `u-${untickedSeq++}`;
       rows.push({
-        key: tick !== null ? `t-${tick}` : `u-${untickedSeq++}`,
+        key: baseKey,
         tick,
         isGlobal: false,
         alt: tick !== null ? (tick % 2) === 1 : false,
         cells: new Map(),
       });
+      rowEntries.push(0);
       if (tick !== null) tickIndex.set(tick, idx);
     }
     const row = rows[idx];
@@ -128,6 +141,14 @@ const gridRows = computed<GridRow[]>(() => {
     const bucket = row.cells.get(coreKey);
     if (bucket) bucket.push(e);
     else row.cells.set(coreKey, [e]);
+    rowEntries[idx]++;
+  }
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row.isGlobal) {
+      row.key = `${row.key}-n${rowEntries[i]}`;
+    }
   }
 
   return rows;
@@ -146,17 +167,23 @@ const gridStyle = computed(() => {
 });
 
 // Follow the tail when new events arrive. rAF coalesces bursts of pushes
-// into one scroll per paint.
+// into one scroll per paint. forceUpdate flushes the DynamicScroller's
+// pending size measurements before we scroll so rows that grew this batch
+// (more events appended to the same tick) get laid out at their new
+// height instead of overlapping the row below.
 let scrollPending = false;
 let scrollHandle: number | null = null;
 watch(() => cpu.log.length, () => {
-  if (!props.active || !stickToBottom.value) return;
+  if (!props.active) return;
   if (scrollPending) return;
   scrollPending = true;
   scrollHandle = requestAnimationFrame(() => {
     scrollPending = false;
     scrollHandle = null;
-    scroller.value?.scrollToBottom?.();
+    scroller.value?.forceUpdate?.();
+    if (followTail.value) {
+      scroller.value?.scrollToBottom?.();
+    }
   });
 });
 
@@ -165,7 +192,7 @@ watch(() => cpu.log.length, () => {
 watch(() => props.active, async (active) => {
   if (!active) return;
   await nextTick();
-  if (stickToBottom.value) {
+  if (followTail.value) {
     scroller.value?.scrollToBottom?.();
   }
 });
@@ -195,7 +222,6 @@ watch(() => props.active, async (active) => {
           :item="row"
           :active="itemActive"
           :index="index"
-          :size-dependencies="[row.cells.size, row.isGlobal, visibleCores.length]"
         >
           <div
             v-if="row.isGlobal && row.globalEntry"
@@ -223,7 +249,7 @@ watch(() => props.active, async (active) => {
                 class="grid__entry"
                 :class="{ 'grid__entry--kernel': entry.inKernel }"
                 :style="{ color: colorOf(entry.color) }"
-              ><span v-if="entry.kind === 'scheduler'" class="grid__sched-chip" :title="t('panels.events.schedulerChipTitle')">S</span><span v-if="entry.inKernel" class="grid__kernel-chip" :title="t('panels.events.kernelChipTitle')">K</span>{{ entry.text }}</div>
+              ><span v-if="entry.kind === 'scheduler'" class="grid__sched-chip" :title="t('panels.events.schedulerChipTitle')">S</span><span v-if="entry.inKernel" class="grid__kernel-chip" :title="t('panels.events.kernelChipTitle')">K</span><ArrowDownToLine v-if="entry.glyph === 'pcbSave'" class="grid__glyph" :size="12" :stroke-width="2" aria-hidden="true" /><ArrowUpFromLine v-else-if="entry.glyph === 'pcbRestore'" class="grid__glyph" :size="12" :stroke-width="2" aria-hidden="true" />{{ entry.text }}</div>
             </div>
           </div>
         </DynamicScrollerItem>
@@ -233,6 +259,15 @@ watch(() => props.active, async (active) => {
     <div v-if="props.active && gridRows.length === 0" class="empty">
       {{ cpu.log.length === 0 ? t('panels.events.emptyLoad') : t('panels.events.emptyNoCores') }}
     </div>
+
+    <button
+      type="button"
+      class="follow-tail"
+      :class="{ 'follow-tail--active': followTail }"
+      :aria-pressed="followTail"
+      :title="followTail ? t('panels.events.followTailOn') : t('panels.events.followTailOff')"
+      @click="jumpToTail"
+    ><ArrowDownToLine :size="14" :stroke-width="2.25" /></button>
   </div>
 </template>
 
@@ -378,6 +413,18 @@ watch(() => props.active, async (active) => {
   line-height: 1.4;
 }
 
+/* Leading SVG glyph (pcb_save/restore). Kept inline with the row text and
+   capped at the text cap-height so it can't push the row taller than the
+   other entries that lead with a Unicode character. */
+.grid__glyph {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  vertical-align: -2px;
+  color: currentColor;
+}
+
 /* Full-width separator for events that have no per-core origin. */
 .grid__global {
   padding: 3px 8px;
@@ -400,6 +447,36 @@ watch(() => props.active, async (active) => {
   padding: 20px 0;
   text-align: center;
   pointer-events: none;
+}
+
+.follow-tail {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--surface-2, #131a22);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.follow-tail:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.follow-tail--active {
+  color: var(--surface-2, #131a22);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.follow-tail--active:hover {
+  background: color-mix(in oklab, var(--accent) 88%, white 12%);
+  color: var(--surface-2, #131a22);
 }
 
 @media (max-width: 768px) {

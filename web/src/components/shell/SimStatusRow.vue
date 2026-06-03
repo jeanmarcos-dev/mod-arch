@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { Activity, Wifi, WifiOff } from '@lucide/vue';
 import { useCpuStore } from '../../stores/cpu';
-import Term from '../glossary/Term.vue';
 
 const { t } = useI18n();
 
@@ -76,16 +76,28 @@ function onCoreTabDblClick(id: number) {
         >C{{ c.id }}</button>
       </span>
 
-      <span class="sim-pill sim-pill--tick">
-        <Term term="IRQ 0x20" mode="label" class="sim-pill__k">{{ t('shell.simStatusRow.tickLabel') }}</Term>
+      <button
+        type="button"
+        class="sim-pill sim-pill--tick"
+        :title="t('shell.simStatusRow.tickLabel') + ' ' + cpu.tick"
+        :aria-label="t('shell.simStatusRow.tickLabel') + ' ' + cpu.tick"
+        @click="cpu.openGlossary('IRQ 0x20')"
+      >
+        <Activity :size="14" :stroke-width="2" class="sim-pill__icon" aria-hidden="true" />
         <span class="sim-pill__v">{{ cpu.tick }}</span>
-      </span>
+      </button>
       <span
-        :class="['sim-pill', 'sim-pill--ws', cpu.connected ? 'sim-pill--ws-on' : 'sim-pill--ws-off']"
+        :class="['sim-ws', cpu.connected ? 'sim-ws--on' : 'sim-ws--off']"
+        role="img"
+        :aria-label="cpu.connected ? t('shell.simStatusRow.wsTitleOn') : t('shell.simStatusRow.wsTitleOff')"
         :title="cpu.connected ? t('shell.simStatusRow.wsTitleOn') : t('shell.simStatusRow.wsTitleOff')"
       >
-        <span class="sim-pill__k">WS</span>
-        <span class="sim-pill__v">{{ cpu.connected ? t('shell.simStatusRow.onLabel') : t('shell.simStatusRow.offLabel') }}</span>
+        <component
+          :is="cpu.connected ? Wifi : WifiOff"
+          :size="14"
+          :stroke-width="2"
+          aria-hidden="true"
+        />
       </span>
     </div>
   </div>
@@ -119,7 +131,7 @@ function onCoreTabDblClick(id: number) {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  height: 24px;
+  height: 28px;
   box-sizing: border-box;
 }
 .sim-bar__core-tab {
@@ -131,18 +143,22 @@ function onCoreTabDblClick(id: number) {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-muted);
-  min-height: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
   box-sizing: border-box;
   cursor: pointer;
   border-radius: var(--radius-sm);
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 .sim-bar__core-tab:hover:not(:disabled) {
   color: var(--core-tint, var(--amber));
   background: color-mix(in oklab, var(--core-tint, var(--amber)) 14%, transparent);
+  box-shadow: none;
 }
 .sim-bar__core-tab:focus { outline: none; }
 .sim-bar__core-tab:focus-visible {
@@ -210,19 +226,32 @@ function onCoreTabDblClick(id: number) {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0 8px;
-  height: 24px;
+  height: 28px;
+  min-height: 0;
   box-sizing: border-box;
-  font-size: 10px;
+  font-family: inherit;
+  font-size: 11px;
   letter-spacing: 0.5px;
-  background: rgba(255, 255, 255, 0.015);
+  text-transform: none;
+  background: transparent;
+  color: var(--text-dim);
   white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
-.sim-pill__k {
+.sim-pill:hover {
+  background: rgba(var(--accent-rgb), 0.10);
+  color: var(--amber);
+  border-color: var(--border-strong);
+  box-shadow: none;
+}
+.sim-pill__icon {
   color: var(--text-muted);
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  font-size: 9px;
-  font-weight: 500;
+  flex-shrink: 0;
+  display: block;
+}
+.sim-pill:hover .sim-pill__icon {
+  color: var(--amber);
 }
 .sim-pill__v {
   color: var(--text);
@@ -230,13 +259,29 @@ function onCoreTabDblClick(id: number) {
   font-variant-numeric: tabular-nums;
 }
 
-.sim-pill--tick  { min-width: 80px; }
-.sim-pill--ws    { min-width: 62px; }
+.sim-pill--tick { min-width: 60px; }
 
-.sim-pill--ws-on { border-color: var(--green); }
-.sim-pill--ws-on .sim-pill__v { color: var(--green); }
-.sim-pill--ws-off { border-color: var(--red); }
-.sim-pill--ws-off .sim-pill__v { color: var(--red); }
+.sim-ws {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+}
+.sim-ws > svg { display: block; }
+.sim-ws--on {
+  color: var(--green);
+  border-color: var(--green);
+}
+.sim-ws--off {
+  color: var(--red);
+  border-color: var(--red);
+}
 
 @media (max-width: 768px) {
   /* Inline mode normally promotes children to the parent flex row via
@@ -274,10 +319,8 @@ function onCoreTabDblClick(id: number) {
 @media (max-width: 480px) {
   /* Tighter typography only on phones — at 481–768 the chips can keep
      their regular size and breathe in the centred status cell. */
-  .sim-pill { font-size: 9px; padding: 0 6px; }
-  .sim-pill__k { font-size: 8px; }
-  .sim-pill--tick  { min-width: 64px; }
-  .sim-pill--ws    { min-width: 52px; }
+  .sim-pill { font-size: 10px; padding: 0 6px; }
+  .sim-pill--tick  { min-width: 52px; }
   .sim-bar__core-tabs { display: none; }
 }
 
@@ -293,9 +336,7 @@ function onCoreTabDblClick(id: number) {
   /* TICK and WS both stay visible on the smallest phones — they live in
      the centred status cell of the SimBar grid. If they don't fit, the
      header scrolls horizontally with the mask gradient already applied. */
-  .sim-pill { padding: 0 4px; font-size: 8.5px; }
-  .sim-pill__k { font-size: 7.5px; }
-  .sim-pill--tick { min-width: 52px; }
-  .sim-pill--ws { min-width: 46px; }
+  .sim-pill { padding: 0 4px; font-size: 9.5px; }
+  .sim-pill--tick { min-width: 44px; }
 }
 </style>

@@ -32,9 +32,14 @@ const props = withDefaults(
      * so the byte lands on the exact byte being written.
      */
     target?: (addr: number) => Element | null;
+    // Gate flights to the visibility of the memory panel. While the memory
+    // tab is hidden, mem-addr anchors still exist (v-show) but their rects
+    // collapse to (0,0) — bytes would fly to an off-screen corner.
+    enabled?: boolean;
   }>(),
   {
     sourceSelector: '[data-narrator-anchor="cpu"]',
+    enabled: true,
   },
 );
 
@@ -68,6 +73,7 @@ function sourceFor(coreId: number): Element | null {
 }
 
 function launch(kind: 'write' | 'read', addr: number, value: number, seq: number, coreId: number) {
+  if (!props.enabled) return;
   if (!cpu.isCoreVisible(coreId)) return;
   if (!animator.shouldFire()) return;
 

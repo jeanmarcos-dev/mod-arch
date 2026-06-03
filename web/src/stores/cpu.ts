@@ -348,6 +348,11 @@ export interface LogEntry {
   // "the kernel ran here" (inKernel) apart from "the scheduler ran here"
   // (kind=='scheduler') — they are not the same thing.
   kind?: 'scheduler';
+  // Leading icon rendered before the text. PCB save/restore use Lucide SVGs
+  // (see EventsLog) instead of the Unicode glyph the other events carry in
+  // their `text`, because JetBrains Mono lacks the original ◍/◌ at this
+  // size and the system fallback breaks vertical alignment.
+  glyph?: 'pcbSave' | 'pcbRestore';
 }
 
 const CORES_FILTER_KEY = 'modos-cpu:cores-filter:v1';
@@ -1288,7 +1293,7 @@ export const useCpuStore = defineStore('cpu', () => {
         const p = procs.value.find(x => x.pid === ev.pid);
         if (p) p.regs = ev.regs;
         flashPID(ev.pid);
-        pushLog(formatLog.pcbSave(ev.pid, ev.regs.EIP || 0), 'red', ev.core_id, ev.tick, undefined, 'scheduler');
+        pushLog(formatLog.pcbSave(ev.pid, ev.regs.EIP || 0), 'red', ev.core_id, ev.tick, undefined, 'scheduler', 'pcbSave');
         break;
       }
       case 'pcb_restore': {
@@ -1323,7 +1328,7 @@ export const useCpuStore = defineStore('cpu', () => {
           }
         }
         flashPID(ev.pid);
-        pushLog(formatLog.pcbRestore(ev.pid, ev.regs.EIP || 0), 'green', ev.core_id, ev.tick, undefined, 'scheduler');
+        pushLog(formatLog.pcbRestore(ev.pid, ev.regs.EIP || 0), 'green', ev.core_id, ev.tick, undefined, 'scheduler', 'pcbRestore');
         break;
       }
       case 'sched_decision': {
@@ -1698,6 +1703,7 @@ export const useCpuStore = defineStore('cpu', () => {
     tick?: number,
     scope?: 'global',
     kind?: 'scheduler',
+    glyph?: LogEntry['glyph'],
   ) {
     // Derive inKernel from the live per-core mode tracked in cores.value.
     // mode_switch events update that value before subsequent pushLog calls
@@ -1709,7 +1715,7 @@ export const useCpuStore = defineStore('cpu', () => {
       const c = cores.value.find(x => x.id === coreId);
       if (c) inKernel = c.mode === 0;
     }
-    log.value.push({ ts: Date.now(), text, color, coreId, tick, scope, inKernel, kind });
+    log.value.push({ ts: Date.now(), text, color, coreId, tick, scope, inKernel, kind, glyph });
     if (log.value.length > 500) log.value.splice(0, log.value.length - 500);
     triggerRef(log);
   }

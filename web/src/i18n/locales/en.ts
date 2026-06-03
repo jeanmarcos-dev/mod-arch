@@ -657,6 +657,8 @@ const en: MessageSchema = {
       globalRowAria: 'System-wide event spanning every core',
       kernelChipTitle: 'Kernel mode (PL0) — some kernel code ran here: scheduler, IRQ handler, syscall handler, or maintenance. The K chip alone does NOT mean the scheduler ran (see the S chip for that).',
       schedulerChipTitle: 'Scheduler acted on this tick — a planning decision, a wake, or a PCB save/restore. The scheduler is one of many kernel functions: K marks "kernel ran", S marks "the scheduler specifically".',
+      followTailOn: 'Auto-follow is on. Click to pause.',
+      followTailOff: 'Auto-follow is paused. Click to resume.',
     },
     memory: {
       title: 'MEMORY · HEX DUMP',
@@ -773,13 +775,6 @@ const en: MessageSchema = {
         irqTip: 'IRQ 0x21 (keyboard) fired recently.',
         expandTitle: 'Open bottom panel',
         collapseTitle: 'Close bottom panel',
-        tutorTip: 'New messages from MODARCHI tutor.',
-      },
-      tabs: {
-        console: 'Console',
-        modarchi: 'MODARCHI',
-        consoleTitle: 'sys_write output and simulator keyboard',
-        modarchiTitle: 'Chat with the MODARCHI tutor',
       },
       title: 'CONSOLE · sys_write fd=1',
       clickToType: '⌨ click to type',
