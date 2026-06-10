@@ -7,8 +7,8 @@ import type es from './locales/es';
 
 export type MessageSchema = typeof es;
 
-export type Locale = 'es' | 'en';
+export type Locale = 'es' | 'en' | 'pt';
 
-export const SUPPORTED_LOCALES: Locale[] = ['es', 'en'];
+export const SUPPORTED_LOCALES: Locale[] = ['es', 'en', 'pt'];
 
 export const DEFAULT_LOCALE: Locale = 'es';

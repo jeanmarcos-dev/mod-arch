@@ -3,6 +3,7 @@ import { nextTick } from 'vue';
 import { i18n, readStoredLocale, applyLocale } from './index';
 import es from './locales/es';
 import en from './locales/en';
+import pt from './locales/pt';
 import { usePreferencesStore } from '../stores/preferences';
 
 // flattenKeys walks the message tree and emits every leaf path (e.g.
@@ -29,13 +30,15 @@ describe('i18n', () => {
   });
 
   describe('locale catalogs', () => {
-    it('es and en have the same set of keys (defense against satisfies leniency)', () => {
+    it('every locale has the same set of keys (defense against satisfies leniency)', () => {
       const esKeys = flattenKeys(es).sort();
       const enKeys = flattenKeys(en).sort();
+      const ptKeys = flattenKeys(pt).sort();
       expect(enKeys).toEqual(esKeys);
+      expect(ptKeys).toEqual(esKeys);
     });
 
-    it('translates a sample key in both locales', () => {
+    it('translates a sample key in every locale', () => {
       const t = (i18n.global as unknown as {
         t: (k: string) => string;
         locale: { value: string };
@@ -44,16 +47,23 @@ describe('i18n', () => {
       const esLoad = t.t('simbar.buttons.load');
       t.locale.value = 'en';
       const enLoad = t.t('simbar.buttons.load');
+      t.locale.value = 'pt';
+      const ptLoad = t.t('simbar.buttons.load');
       expect(esLoad).toBe('CARGAR');
       expect(enLoad).toBe('LOAD');
+      expect(ptLoad).toBe('CARREGAR');
 
       t.locale.value = 'es';
       const esConsole = t.t('panels.console.noOutput');
       t.locale.value = 'en';
       const enConsole = t.t('panels.console.noOutput');
+      t.locale.value = 'pt';
+      const ptConsole = t.t('panels.console.noOutput');
       expect(esConsole).toBe('(sin output todavía)');
       expect(enConsole).toBe('(no output yet)');
+      expect(ptConsole).toBe('(sem output ainda)');
       expect(esConsole).not.toBe(enConsole);
+      expect(esConsole).not.toBe(ptConsole);
     });
   });
 
@@ -72,8 +82,13 @@ describe('i18n', () => {
       expect(readStoredLocale()).toBe('en');
     });
 
-    it('defaults to es when navigator.language is unrelated', () => {
+    it('falls back to pt when navigator.language starts with pt and storage is empty', () => {
       vi.spyOn(navigator, 'language', 'get').mockReturnValue('pt-BR');
+      expect(readStoredLocale()).toBe('pt');
+    });
+
+    it('defaults to es when navigator.language is unrelated', () => {
+      vi.spyOn(navigator, 'language', 'get').mockReturnValue('fr-FR');
       expect(readStoredLocale()).toBe('es');
     });
 

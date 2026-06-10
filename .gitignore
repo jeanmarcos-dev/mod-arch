@@ -70,3 +70,4 @@ state-dump-*.db
 # Academic paper draft (LaTeX sources, figures, bibliography). Lives in the
 # repo for convenience but is not part of the simulator itself.
 /paper/
+docs/

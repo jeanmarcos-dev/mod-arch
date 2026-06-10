@@ -31,6 +31,12 @@ var educationalDocs = []struct {
 		title:        "Reporte de defensa técnica",
 		skipHeadings: nil,
 	},
+	{
+		relPath:      "docs/ayuda-soporte.md",
+		docID:        "ayuda-soporte",
+		title:        "Cómo pedir ayuda en MODARCH",
+		skipHeadings: nil,
+	},
 }
 
 // LoadDocsAsRawDocs walks the educational markdown files anchored at repoRoot

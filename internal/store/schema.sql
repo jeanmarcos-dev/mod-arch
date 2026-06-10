@@ -30,12 +30,51 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_id        TEXT,
     created_at     INTEGER NOT NULL,
     last_active_at INTEGER NOT NULL,
+    client_ip_hash TEXT,
+    client_ip      TEXT,
+    ua_short       TEXT,
+    geo_country    TEXT,
+    referrer_host  TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_sessions_view_token ON sessions(view_token);
-CREATE INDEX IF NOT EXISTS idx_sessions_user_id    ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_view_token  ON sessions(view_token);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id     ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_last_active ON sessions(last_active_at);
+-- idx_sessions_country is created programmatically in store.go:migrate after
+-- the geo_country ALTER, so v6 databases do not race the index against a
+-- column that has not been added yet.
+
+-- Append-only audit of every session that has ended. A row is inserted right
+-- before the live row is deleted from `sessions`, capturing aggregated
+-- counters and an end_reason. Used by the admin history view, per-user
+-- activity reports and retention purges.
+CREATE TABLE IF NOT EXISTS session_history (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    original_session_id TEXT    NOT NULL,
+    user_id             TEXT,
+    mode                TEXT    NOT NULL,
+    label               TEXT    NOT NULL DEFAULT '',
+    public              INTEGER NOT NULL DEFAULT 0,
+    view_token          TEXT,
+    created_at          INTEGER NOT NULL,
+    ended_at            INTEGER NOT NULL,
+    duration_seconds    INTEGER NOT NULL,
+    end_reason          TEXT    NOT NULL,
+    client_ip_hash      TEXT,
+    client_ip           TEXT,
+    ua_short            TEXT,
+    geo_country         TEXT,
+    referrer_host       TEXT,
+    total_commands      INTEGER NOT NULL DEFAULT 0,
+    total_tutor_queries INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_history_ended  ON session_history(ended_at DESC);
+CREATE INDEX IF NOT EXISTS idx_session_history_user   ON session_history(user_id, ended_at DESC);
+CREATE INDEX IF NOT EXISTS idx_session_history_reason ON session_history(end_reason);
+CREATE INDEX IF NOT EXISTS idx_session_history_geo    ON session_history(geo_country);
 
 CREATE TABLE IF NOT EXISTS invites (
     token      TEXT PRIMARY KEY,
@@ -75,6 +114,47 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_at INTEGER NOT NULL,
     updated_by TEXT
 );
+
+-- User-submitted reports (feedback, bug, idea). Created via POST /api/reports.
+-- session_id and user_id are nullable so anonymous reports are accepted. The
+-- admin panel triages by status.
+CREATE TABLE IF NOT EXISTS user_reports (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts            INTEGER NOT NULL,
+    session_id    TEXT,
+    user_id       TEXT,
+    client_ip_hash TEXT,
+    kind          TEXT    NOT NULL,
+    title         TEXT    NOT NULL,
+    body          TEXT    NOT NULL,
+    context_json  TEXT    NOT NULL DEFAULT '{}',
+    status        TEXT    NOT NULL DEFAULT 'open',
+    resolved_at   INTEGER,
+    resolved_by   TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_reports_status ON user_reports(status, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_user_reports_kind   ON user_reports(kind, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_user_reports_user   ON user_reports(user_id, ts DESC);
+
+-- Extended student profile, one row per user. Created lazily on the first
+-- PUT /api/profile/me; nullable fields default to empty strings so the SPA
+-- can render the form without null guards on every binding.
+CREATE TABLE IF NOT EXISTS user_profiles (
+    user_id            TEXT PRIMARY KEY,
+    cohort             TEXT NOT NULL DEFAULT '',
+    institution        TEXT NOT NULL DEFAULT '',
+    career             TEXT NOT NULL DEFAULT '',
+    bio                TEXT NOT NULL DEFAULT '',
+    github             TEXT NOT NULL DEFAULT '',
+    linkedin           TEXT NOT NULL DEFAULT '',
+    preferred_language TEXT NOT NULL DEFAULT '',
+    updated_at         INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_profiles_cohort ON user_profiles(cohort);
 
 -- RAG: corpus indexado (glosario, libro). Embeddings se guardan como BLOB
 -- little-endian []float32. corpus_version permite invalidar cachés sin

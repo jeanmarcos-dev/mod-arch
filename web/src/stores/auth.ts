@@ -18,6 +18,26 @@ export interface LoginPayload {
   turnstile_token?: string;
 }
 
+export interface UserProfile {
+  user_id: string;
+  name: string;
+  email?: string;
+  avatar_url?: string;
+  cohort: string;
+  institution: string;
+  career: string;
+  bio: string;
+  github: string;
+  linkedin: string;
+  preferred_language: string;
+  updated_at?: number;
+}
+
+export type ProfileDraft = Pick<
+  UserProfile,
+  'cohort' | 'institution' | 'career' | 'bio' | 'github' | 'linkedin' | 'preferred_language'
+>;
+
 // LoginOutcome describes the server's response shape so the Login view can
 // pick the right next step. Three legitimate states:
 //   - "direct":  SMTP off, the session was attached immediately, user is set.
@@ -80,8 +100,41 @@ export const useAuthStore = defineStore('auth', () => {
     } finally {
       user.value = null;
       pendingEmail.value = null;
+      profile.value = null;
     }
   }
 
-  return { user, lastError, pendingEmail, fetchMe, login, logout };
+  // Profile (E2): the extended student identity. fetchProfile loads the
+  // current user's profile on demand; saveProfile pushes a draft. Both update
+  // the cached `profile` ref so any consumer reacts to the latest data.
+  const profile = ref<UserProfile | null>(null);
+
+  async function fetchProfile(): Promise<UserProfile | null> {
+    try {
+      const res = await apiFetch('/api/profile/me');
+      if (!res.ok) {
+        profile.value = null;
+        return null;
+      }
+      const data = (await res.json()) as UserProfile;
+      profile.value = data;
+      return data;
+    } catch (err) {
+      lastError.value = (err as Error).message;
+      return null;
+    }
+  }
+
+  async function saveProfile(draft: ProfileDraft): Promise<UserProfile | null> {
+    try {
+      const data = await apiJSON<UserProfile>('PUT', '/api/profile/me', draft);
+      profile.value = data;
+      return data;
+    } catch (err) {
+      lastError.value = (err as Error).message;
+      return null;
+    }
+  }
+
+  return { user, lastError, pendingEmail, profile, fetchMe, login, logout, fetchProfile, saveProfile };
 });

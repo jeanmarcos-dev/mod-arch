@@ -83,6 +83,7 @@ func (s *Server) handleTutorAsk(cmd Command, sess *sessions.Session, c *sim.Clie
 			return
 		}
 
+		sess.IncTutorCounter()
 		c.Send <- map[string]any{
 			"type":           "tutor_answer",
 			"request_id":     cmd.RequestID,

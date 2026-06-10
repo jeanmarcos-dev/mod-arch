@@ -800,11 +800,18 @@ func buildCitations(retrieved []rag.ScoredChunk) []Citation {
 	return out
 }
 
-// buildCitationsFromText narrows buildCitations to the chunks whose label
-// (e.g. "[Demo: two_counters]") appears literally in the LLM's reply. Without
-// this filter the UI shows every retrieved chunk as a citation, even when the
-// model never referenced it — which hides which sources actually grounded the
-// answer and turns retrieval noise into apparent evidence.
+// buildCitationsFromText returns the chunks the retriever surfaced for this
+// turn, deduplicated by label. Showing every retrieved chunk is intentional:
+// the embedding-similarity retriever already filtered to semantically relevant
+// material, so each chunk genuinely grounds the answer even when the LLM did
+// not echo the literal [Glosario: …] token in its reply. Filtering by literal
+// match relied on the model obeying the citation contract — many models don't,
+// and the result was answers that quoted a glossary term verbatim but showed
+// no chip linking back to its definition.
+//
+// The text argument is kept for the empty-reply early-return; the caller still
+// passes the raw response (with citation tokens) in case future logic wants to
+// re-introduce text-based ranking.
 func buildCitationsFromText(text string, retrieved []rag.ScoredChunk) []Citation {
 	if strings.TrimSpace(text) == "" {
 		return nil
@@ -816,10 +823,8 @@ func buildCitationsFromText(text string, retrieved []rag.ScoredChunk) []Citation
 		if seen[c.Label] {
 			continue
 		}
-		if strings.Contains(text, c.Label) {
-			out = append(out, c)
-			seen[c.Label] = true
-		}
+		out = append(out, c)
+		seen[c.Label] = true
 	}
 	return out
 }

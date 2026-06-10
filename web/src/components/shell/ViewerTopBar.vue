@@ -124,7 +124,7 @@ async function onLeave() {
 }
 
 .viewer-bar__brand {
-  font-family: var(--font-display);
+  font-family: var(--font-brand);
   letter-spacing: 3px;
   color: var(--amber);
   text-shadow: var(--shadow-glow-amber);
@@ -203,13 +203,18 @@ async function onLeave() {
   letter-spacing: 0.5px;
   color: var(--text-dim);
   background: rgba(255, 213, 79, 0.08);
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
   border-radius: var(--radius-sm);
   padding: 0 10px;
   height: 28px;
   min-width: 0;
   max-width: 220px;
   overflow: hidden;
+  cursor: default;
+}
+
+.viewer-bar__host + .viewer-bar__btn--leave {
+  margin-left: var(--space-3);
 }
 .viewer-bar__host-icon { color: var(--yellow); flex-shrink: 0; }
 .viewer-bar__host-label {

@@ -43,10 +43,11 @@ type Server struct {
 	logger   *slog.Logger
 	staticFS fs.FS
 
-	fullTmpl   *template.Template
-	admin      adminConfig
-	loginLimit *RateLimiter
-	authLimit  *RateLimiter
+	fullTmpl    *template.Template
+	admin       adminConfig
+	loginLimit  *RateLimiter
+	authLimit   *RateLimiter
+	reportLimit *RateLimiter
 
 	// tutorRegistry holds the active tutor service. Wrapping it in a
 	// registry lets the admin /reload endpoint swap the service in place
@@ -66,6 +67,11 @@ const (
 	loginLimitMax        = 5
 	loginLimitWindow     = 15 * time.Minute
 	rateLimitCleanupTick = 5 * time.Minute
+	// Reports: 10/hour per IP is generous for legit feedback and tight enough
+	// to keep a bored attacker from flooding the triage queue. Per the spec
+	// the limit is intentionally not role-aware in v1.
+	reportLimitMax    = 10
+	reportLimitWindow = time.Hour
 )
 
 // Config holds the Server construction parameters.
@@ -88,8 +94,9 @@ func New(cfg Config) *Server {
 		staticFS:   cfg.StaticFS,
 		fullTmpl:   mustParseTemplate("full", "templates/full.html"),
 		admin:      loadAdminConfig(),
-		loginLimit: NewRateLimiter(context.Background(), loginLimitMax, loginLimitWindow, rateLimitCleanupTick),
-		authLimit:  NewRateLimiter(context.Background(), loginLimitMax, loginLimitWindow, rateLimitCleanupTick),
+		loginLimit:  NewRateLimiter(context.Background(), loginLimitMax, loginLimitWindow, rateLimitCleanupTick),
+		authLimit:   NewRateLimiter(context.Background(), loginLimitMax, loginLimitWindow, rateLimitCleanupTick),
+		reportLimit: NewRateLimiter(context.Background(), reportLimitMax, reportLimitWindow, rateLimitCleanupTick),
 		tutorRegistry: cfg.TutorRegistry,
 		tutorBuild:    cfg.TutorBuild,
 		encKey:        crypto.DeriveKey([]byte(os.Getenv("SESSION_SECRET"))),
@@ -239,7 +246,7 @@ func (s *Server) consumePrivInvite(w http.ResponseWriter, r *http.Request, token
 		s.logger.Info("invite consume failed", "token", token, "err", err)
 		return false
 	}
-	sess, err := s.manager.Create(sessions.ModePrivileged)
+	sess, err := s.manager.CreateWithClient(sessions.ModePrivileged, clientInfoFrom(r))
 	if err != nil {
 		// MaxPrivileged reached despite a valid invite — rare; log and bail.
 		s.logger.Warn("privileged create failed despite valid invite", "err", err)
@@ -285,7 +292,7 @@ func (s *Server) getOrCreateSession(w http.ResponseWriter, r *http.Request) (*se
 	if ok, _ := s.canCreateSession(r.Context()); !ok {
 		return nil, ErrAccessDenied
 	}
-	sess, err := s.manager.Create(sessions.ModeFull)
+	sess, err := s.manager.CreateWithClient(sessions.ModeFull, clientInfoFrom(r))
 	if err != nil {
 		return nil, err
 	}
@@ -317,14 +324,11 @@ func (s *Server) resolveSessionAndRole(r *http.Request) (*sessions.Session, sess
 	return nil, sessions.RoleNone
 }
 
+// handleHealth is an unauthenticated liveness probe. It intentionally returns
+// only {"ok": true} — session counts and capacity are operational state that
+// belongs behind /api/admin, not in a public endpoint.
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	full, priv := s.manager.Count()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":         true,
-		"sessions":   full,
-		"privileged": priv,
-		"max_public": s.manager.MaxPublic(),
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // handleSession bootstraps the owner session for SPA clients that did not
@@ -581,7 +585,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	s.Routes(mux)
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           WithClientCtx([]byte(os.Getenv("SESSION_SECRET")), NoopGeoResolver{}, RevealIPEnabled())(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

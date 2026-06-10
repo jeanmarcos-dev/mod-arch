@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { Copy, Share2, X, Check } from '@lucide/vue';
+import { Copy, Share2, X, Check, Save } from '@lucide/vue';
 import Card from '../../components/ui/Card.vue';
 import Btn from '../../components/ui/Btn.vue';
 import Field from '../../components/ui/Field.vue';
-import { useAuthStore } from '../../stores/auth';
+import { useAuthStore, type ProfileDraft } from '../../stores/auth';
 import { useCpuStore } from '../../stores/cpu';
 import { useToastStore } from '../../stores/toast';
 
@@ -17,6 +17,65 @@ const toast = useToastStore();
 const router = useRouter();
 
 const hasUser = computed(() => Boolean(auth.user));
+
+// Profile draft state mirrors the server response one field at a time so the
+// "Save" button can light up only when the user actually changed something.
+const draft = reactive<ProfileDraft>({
+  cohort: '',
+  institution: '',
+  career: '',
+  bio: '',
+  github: '',
+  linkedin: '',
+  preferred_language: '',
+});
+const profileSaving = ref(false);
+const profileJustSaved = ref(false);
+
+function syncDraftFromServer() {
+  const p = auth.profile;
+  if (!p) return;
+  draft.cohort = p.cohort;
+  draft.institution = p.institution;
+  draft.career = p.career;
+  draft.bio = p.bio;
+  draft.github = p.github;
+  draft.linkedin = p.linkedin;
+  draft.preferred_language = p.preferred_language;
+}
+watch(() => auth.profile, syncDraftFromServer, { immediate: true });
+
+const profileDirty = computed(() => {
+  const p = auth.profile;
+  if (!p) return Object.values(draft).some((v) => v !== '');
+  return (
+    draft.cohort !== p.cohort ||
+    draft.institution !== p.institution ||
+    draft.career !== p.career ||
+    draft.bio !== p.bio ||
+    draft.github !== p.github ||
+    draft.linkedin !== p.linkedin ||
+    draft.preferred_language !== p.preferred_language
+  );
+});
+
+const avatarURL = computed(() => auth.profile?.avatar_url ?? '');
+
+async function saveProfile() {
+  if (!profileDirty.value || profileSaving.value) return;
+  profileSaving.value = true;
+  try {
+    const result = await auth.saveProfile({ ...draft });
+    if (result) {
+      profileJustSaved.value = true;
+      setTimeout(() => { profileJustSaved.value = false; }, 1500);
+    } else {
+      toast.err(auth.lastError ?? t('profile.extended.errorSave'));
+    }
+  } finally {
+    profileSaving.value = false;
+  }
+}
 
 // Local alias state shadows sessionInfo.label so we can render an inline
 // editor without losing the user's keystrokes when a WebSocket update lands.
@@ -36,8 +95,9 @@ const aliasDirty = computed(
 const isShared = computed(() => Boolean(cpu.sessionInfo.view_token));
 const isOwner = computed(() => cpu.sessionInfo.role === 'owner');
 
-onMounted(() => {
-  if (!auth.user) auth.fetchMe();
+onMounted(async () => {
+  if (!auth.user) await auth.fetchMe();
+  if (auth.user) await auth.fetchProfile();
 });
 
 async function logout() {
@@ -98,6 +158,48 @@ async function copyViewURL() {
       <div v-else class="profile__empty">
         <p>{{ t('profile.emptyHint') }}</p>
         <Btn @click="router.push('/login')">{{ t('profile.identify') }}</Btn>
+      </div>
+    </Card>
+
+    <Card v-if="hasUser" :title="t('profile.extended.title')" :elevation="1" class="profile__card">
+      <div class="profile-extended">
+        <div v-if="avatarURL" class="profile-extended__avatar">
+          <img :src="avatarURL" :alt="t('profile.extended.avatarAlt')" width="80" height="80" />
+        </div>
+        <p class="profile__hint">{{ t('profile.extended.hint') }}</p>
+
+        <div class="profile-extended__grid">
+          <Field :label="t('profile.extended.cohort')" v-slot="{ id }">
+            <input :id="id" v-model="draft.cohort" maxlength="80" :placeholder="t('profile.extended.cohortPlaceholder')" />
+          </Field>
+          <Field :label="t('profile.extended.institution')" v-slot="{ id }">
+            <input :id="id" v-model="draft.institution" maxlength="120" :placeholder="t('profile.extended.institutionPlaceholder')" />
+          </Field>
+          <Field :label="t('profile.extended.career')" v-slot="{ id }">
+            <input :id="id" v-model="draft.career" maxlength="120" :placeholder="t('profile.extended.careerPlaceholder')" />
+          </Field>
+          <Field :label="t('profile.extended.language')" v-slot="{ id }">
+            <input :id="id" v-model="draft.preferred_language" maxlength="16" :placeholder="t('profile.extended.languagePlaceholder')" />
+          </Field>
+          <Field :label="t('profile.extended.github')" v-slot="{ id }">
+            <input :id="id" v-model="draft.github" maxlength="80" placeholder="usuario" />
+          </Field>
+          <Field :label="t('profile.extended.linkedin')" v-slot="{ id }">
+            <input :id="id" v-model="draft.linkedin" maxlength="80" placeholder="usuario" />
+          </Field>
+        </div>
+
+        <Field :label="t('profile.extended.bio')" :help="t('profile.extended.bioHelp')" v-slot="{ id }">
+          <textarea :id="id" v-model="draft.bio" maxlength="500" rows="4" class="profile-extended__bio"></textarea>
+        </Field>
+
+        <div class="profile__actions">
+          <Btn :disabled="!profileDirty || profileSaving" :loading="profileSaving" @click="saveProfile">
+            <Check v-if="profileJustSaved" :size="13" :stroke-width="2" />
+            <Save v-else :size="13" :stroke-width="2" />
+            <span>{{ profileJustSaved ? t('profile.extended.saved') : t('profile.extended.save') }}</span>
+          </Btn>
+        </div>
       </div>
     </Card>
 
@@ -246,5 +348,45 @@ async function copyViewURL() {
   flex: 1;
   font-family: var(--font-code);
   font-size: 12px;
+}
+
+.profile-extended {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.profile-extended__avatar img {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  image-rendering: pixelated;
+}
+
+.profile-extended__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+@media (max-width: 600px) {
+  .profile-extended__grid { grid-template-columns: 1fr; }
+}
+
+.profile-extended__bio {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+  min-height: 80px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.profile-extended__bio:focus {
+  outline: none;
+  border-color: var(--amber);
 }
 </style>

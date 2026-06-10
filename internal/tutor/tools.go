@@ -91,7 +91,18 @@ func DefaultTools() []Tool {
 					"required": []string{"last_n"},
 				},
 			},
-			Handler: handleGetRecentEvents,
+			Handler:    handleGetRecentEvents,
+			Eager:      true,
+			EagerLabel: "EVENTOS RECIENTES",
+			// Pre-load the last 15 events on every turn. A page fault, a
+			// context switch or a syscall is almost always what the student
+			// is asking about; making this eager removes the round-trip and
+			// guarantees the model has the data even when its question is
+			// vague ("why did this happen?").
+			EagerArgs: func(_ SnapshotView) json.RawMessage {
+				b, _ := json.Marshal(map[string]int{"last_n": 15})
+				return b
+			},
 		},
 		{
 			Def: llm.ToolDef{
@@ -224,6 +235,17 @@ func handleGetRecentEvents(_ context.Context, sess *sessions.Session, args json.
 		return nil, fmt.Errorf("no session")
 	}
 	events := sess.Sim.RecentEvents(in.Types, in.LastN)
+	// page_fault events store the faulting address as `addr`, but textbooks
+	// and the glossary refer to it as CR2 (the x86 control register that
+	// holds the linear address on a page-fault exception). Mirror the value
+	// under both names so the model can cite either spelling truthfully.
+	for _, e := range events {
+		if t, _ := e["type"].(string); t == "page_fault" {
+			if addr, ok := e["addr"]; ok {
+				e["cr2"] = addr
+			}
+		}
+	}
 	return map[string]any{"events": events, "count": len(events)}, nil
 }
 

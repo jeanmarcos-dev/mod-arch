@@ -24,13 +24,26 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jeanmarcos/modos-cpu/internal/sim"
 	"github.com/jeanmarcos/modos-cpu/internal/store"
 )
+
+// ClientInfo carries the per-request tracking metadata that the server
+// captures via middleware and hands off when creating a Session. Keeping it
+// in this package avoids a circular dependency back to server.
+type ClientInfo struct {
+	IPHash       string
+	IPPlain      string
+	UAShort      string
+	GeoCountry   string
+	ReferrerHost string
+}
 
 // Manager errors signaling capacity caps.
 var (
@@ -148,11 +161,46 @@ type Session struct {
 	lastActiveAt time.Time
 	presence     Presence
 
+	// Tracking metadata captured at session creation. Sticky for the session
+	// lifetime so the row written to session_history reflects the original
+	// client even after the connection drops and reconnects.
+	clientIPHash string
+	clientIP     string
+	uaShort      string
+	geoCountry   string
+	referrerHost string
+
+	// Live counters incremented on every command and tutor query. Flushed to
+	// session_history when the session terminates. Lost on process crash —
+	// acceptable tradeoff vs. per-command DB writes.
+	cmdCounter   atomic.Int64
+	tutorCounter atomic.Int64
+
 	// viewers tracks the cancel func of every live viewer WS so the owner
 	// can drop them all in one shot when share is deactivated. Keyed by an
 	// incrementing seq so the handler can self-remove on disconnect.
 	viewerSeq int
 	viewers   map[int]func()
+}
+
+// IncCommandCounter is incremented once per user-initiated WS command (not
+// pings/heartbeats). Lock-free; safe to call from the hot path.
+func (s *Session) IncCommandCounter() { s.cmdCounter.Add(1) }
+
+// IncTutorCounter is incremented after each successful tutor Ask().
+func (s *Session) IncTutorCounter() { s.tutorCounter.Add(1) }
+
+// ClientInfo returns the tracking metadata captured for this session.
+func (s *Session) ClientInfo() ClientInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return ClientInfo{
+		IPHash:       s.clientIPHash,
+		IPPlain:      s.clientIP,
+		UAShort:      s.uaShort,
+		GeoCountry:   s.geoCountry,
+		ReferrerHost: s.referrerHost,
+	}
 }
 
 // Presence returns the latest presence snapshot from the owner. Zero value
@@ -421,6 +469,11 @@ func (m *Manager) newSessionFromRow(row store.SessionRow) *Session {
 		public:       row.Public,
 		userID:       row.UserID,
 		lastActiveAt: time.Unix(row.LastActiveAt, 0),
+		clientIPHash: row.ClientIPHash,
+		clientIP:     row.ClientIP,
+		uaShort:      row.UAShort,
+		geoCountry:   row.GeoCountry,
+		referrerHost: row.ReferrerHost,
 	}
 }
 
@@ -443,6 +496,14 @@ func (m *Manager) InviteTTL() time.Duration { return m.inviteTTL }
 
 // Create instantiates a new Session with its own Simulator.
 func (m *Manager) Create(mode Mode) (*Session, error) {
+	return m.CreateWithClient(mode, ClientInfo{})
+}
+
+// CreateWithClient is like Create but attaches client tracking metadata
+// (hashed IP, short UA, country, referrer) captured by the HTTP middleware.
+// The metadata sticks for the session lifetime and is flushed to
+// session_history at termination.
+func (m *Manager) CreateWithClient(mode Mode, info ClientInfo) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	full, priv := m.countLocked()
@@ -461,6 +522,11 @@ func (m *Manager) Create(mode Mode) (*Session, error) {
 		mgr:          m,
 		public:       true,
 		lastActiveAt: now,
+		clientIPHash: info.IPHash,
+		clientIP:     info.IPPlain,
+		uaShort:      info.UAShort,
+		geoCountry:   info.GeoCountry,
+		referrerHost: info.ReferrerHost,
 	}
 	if m.store != nil {
 		err := m.store.CreateSession(context.Background(), store.SessionRow{
@@ -470,6 +536,11 @@ func (m *Manager) Create(mode Mode) (*Session, error) {
 			Public:       true,
 			CreatedAt:    now.Unix(),
 			LastActiveAt: now.Unix(),
+			ClientIPHash: info.IPHash,
+			ClientIP:     info.IPPlain,
+			UAShort:      info.UAShort,
+			GeoCountry:   info.GeoCountry,
+			ReferrerHost: info.ReferrerHost,
 		})
 		if err != nil {
 			m.logger.Warn("store: persist session failed", "id", sess.ID, "err", err)
@@ -589,7 +660,7 @@ func (m *Manager) KillOtherUserSessions(userID, keepID string) []string {
 	}
 	m.mu.RUnlock()
 	for _, id := range victims {
-		m.Kill(id)
+		m.terminate(id, store.EndReasonReplaced)
 	}
 	if len(victims) > 0 {
 		m.logger.Info("user session policy",
@@ -598,8 +669,21 @@ func (m *Manager) KillOtherUserSessions(userID, keepID string) []string {
 	return victims
 }
 
-// Kill removes a Session and stops its Simulator.
+// Kill removes a Session by ID with reason "admin_kill" (the public-facing
+// administrative termination). Most callers want this; internal lifecycle
+// paths (idle cleanup, login replacement) use Terminate with a specific
+// reason.
 func (m *Manager) Kill(id string) {
+	m.terminate(id, store.EndReasonAdminKill)
+}
+
+// Terminate ends a session and tags it with a specific end_reason in
+// session_history. Idempotent: calling on an unknown id is a no-op.
+func (m *Manager) Terminate(id, reason string) {
+	m.terminate(id, reason)
+}
+
+func (m *Manager) terminate(id, reason string) {
 	m.mu.Lock()
 	sess, ok := m.sessions[id]
 	if !ok {
@@ -615,11 +699,43 @@ func (m *Manager) Kill(id string) {
 		sess.Sim.StopRun() // idempotent
 	}
 	if m.store != nil {
+		m.archiveSession(sess, reason)
 		if err := m.store.DeleteSession(context.Background(), id); err != nil {
 			m.logger.Warn("store: delete session failed", "id", id, "err", err)
 		}
 	}
-	m.logger.Info("session killed", "id", id)
+	m.logger.Info("session ended", "id", id, "reason", reason)
+}
+
+// archiveSession copies the session's final state into session_history before
+// the live row is deleted. Logged-but-not-fatal: archive failure should not
+// block termination.
+func (m *Manager) archiveSession(sess *Session, reason string) {
+	endedAt := time.Now()
+	sess.mu.RLock()
+	row := store.SessionHistoryRow{
+		OriginalSessionID: sess.ID,
+		UserID:            sess.userID,
+		Mode:              sess.Mode.String(),
+		Label:             sess.label,
+		Public:            sess.public,
+		ViewToken:         sess.viewToken,
+		CreatedAt:         sess.CreatedAt.Unix(),
+		EndedAt:           endedAt.Unix(),
+		EndReason:         reason,
+		ClientIPHash:      sess.clientIPHash,
+		ClientIP:          sess.clientIP,
+		UAShort:           sess.uaShort,
+		GeoCountry:        sess.geoCountry,
+		ReferrerHost:      sess.referrerHost,
+	}
+	sess.mu.RUnlock()
+	row.DurationSeconds = max(row.EndedAt-row.CreatedAt, 0)
+	row.TotalCommands = sess.cmdCounter.Load()
+	row.TotalTutorQueries = sess.tutorCounter.Load()
+	if err := m.store.InsertSessionHistory(context.Background(), row); err != nil {
+		m.logger.Warn("store: archive session failed", "id", sess.ID, "err", err)
+	}
 }
 
 // Count returns how many active sessions exist of each mode.
@@ -887,7 +1003,7 @@ func (m *Manager) CleanupOnce() (killedSessions, prunedInvites int) {
 	}
 	m.mu.RUnlock()
 	for _, id := range deadIDs {
-		m.Kill(id)
+		m.terminate(id, store.EndReasonIdle)
 		killedSessions++
 	}
 
@@ -931,7 +1047,9 @@ func (m *Manager) flushStoreCleanup(ctx context.Context, now time.Time, live []l
 }
 
 // StartCleanup launches a goroutine that calls CleanupOnce every interval
-// until ctx is canceled. Returns immediately.
+// until ctx is canceled. A separate hourly tick runs the retention purge for
+// session_history and audit_log per the operator-configured limits. Returns
+// immediately.
 func (m *Manager) StartCleanup(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = 60 * time.Second
@@ -948,4 +1066,76 @@ func (m *Manager) StartCleanup(ctx context.Context, interval time.Duration) {
 			}
 		}
 	}()
+	go func() {
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+		// Kick off an initial sweep shortly after boot so an operator pushing
+		// a new retention setting doesn't have to wait an hour for it to take
+		// effect.
+		first := time.NewTimer(2 * time.Minute)
+		defer first.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-first.C:
+				m.RunRetention()
+			case <-t.C:
+				m.RunRetention()
+			}
+		}
+	}()
+}
+
+// Retention setting keys read by RunRetention. Set to "0" to disable a
+// specific purge.
+const (
+	SettingRetentionHistoryDays = "retention.session_history_days"
+	SettingRetentionAuditDays   = "retention.audit_log_days"
+
+	defaultRetentionHistoryDays = 180
+	defaultRetentionAuditDays   = 365
+)
+
+// RunRetention purges session_history and audit_log rows older than the
+// admin-configured windows. Safe to call concurrently with CleanupOnce; both
+// operate on different tables.
+func (m *Manager) RunRetention() {
+	if m.store == nil {
+		return
+	}
+	ctx := context.Background()
+	historyDays := readSettingDays(ctx, m.store, SettingRetentionHistoryDays, defaultRetentionHistoryDays)
+	if historyDays > 0 {
+		cutoff := time.Now().Unix() - int64(historyDays)*86400
+		if n, err := m.store.PurgeSessionHistoryBefore(ctx, cutoff); err != nil {
+			m.logger.Warn("retention: purge session_history failed", "err", err)
+		} else if n > 0 {
+			m.logger.Info("retention: purged session_history", "rows", n, "days", historyDays)
+		}
+	}
+	auditDays := readSettingDays(ctx, m.store, SettingRetentionAuditDays, defaultRetentionAuditDays)
+	if auditDays > 0 {
+		cutoff := time.Now().Unix() - int64(auditDays)*86400
+		if n, err := m.store.PurgeAuditLogBefore(ctx, cutoff); err != nil {
+			m.logger.Warn("retention: purge audit_log failed", "err", err)
+		} else if n > 0 {
+			m.logger.Info("retention: purged audit_log", "rows", n, "days", auditDays)
+		}
+	}
+}
+
+// readSettingDays parses a numeric retention window setting. Missing or
+// malformed values fall back to the supplied default. A value of "0" disables
+// the purge.
+func readSettingDays(ctx context.Context, st *store.Store, key string, fallback int) int {
+	v, err := st.GetSetting(ctx, key)
+	if err != nil || v == "" {
+		return fallback
+	}
+	var n int
+	if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n < 0 {
+		return fallback
+	}
+	return n
 }

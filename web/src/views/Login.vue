@@ -8,6 +8,7 @@ import { useAppConfigStore } from '../stores/appConfig';
 import Btn from '../components/ui/Btn.vue';
 import Card from '../components/ui/Card.vue';
 import Field from '../components/ui/Field.vue';
+import LogoModarch from '../components/brand/LogoModarch.vue';
 
 const { t } = useI18n();
 const auth = useAuthStore();
@@ -75,7 +76,7 @@ function continueAnonymous() {
   <div class="login-page">
     <Card class="login-page__card" :elevation="2">
       <header class="login-page__header">
-        <h1>{{ t('topbar.brand') }}</h1>
+        <LogoModarch class="login-page__logo" :size="320" />
         <p class="login-page__hint">
           {{ t('login.hint') }}
         </p>
@@ -181,23 +182,22 @@ function continueAnonymous() {
 @media (max-width: 480px) {
   .login-page { padding: var(--space-3); }
   .login-page__header { margin-bottom: var(--space-3); }
-  .login-page__header h1 { font-size: 15px; letter-spacing: 4px; }
 }
 
 .login-page__header {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  align-items: center;
+  gap: var(--space-3);
   margin-bottom: var(--space-5);
 }
 
-.login-page__header h1 {
-  font-family: var(--font-display);
-  font-size: 18px;
-  letter-spacing: 6px;
-  color: var(--amber);
-  text-shadow: var(--shadow-glow-amber);
-  font-weight: normal;
+.login-page__logo {
+  max-width: 100%;
+}
+
+.login-page__header .login-page__hint {
+  text-align: center;
 }
 
 .login-page__hint {

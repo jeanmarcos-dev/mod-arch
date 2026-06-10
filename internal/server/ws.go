@@ -353,6 +353,7 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 		}
 		return
 	}
+	sess.IncCommandCounter()
 	switch cmd.Cmd {
 	case "load":
 		if s.demoBlockedForSession(sess, cmd.Program) {

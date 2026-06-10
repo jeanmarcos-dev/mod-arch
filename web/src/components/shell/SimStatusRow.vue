@@ -76,29 +76,31 @@ function onCoreTabDblClick(id: number) {
         >C{{ c.id }}</button>
       </span>
 
-      <button
-        type="button"
-        class="sim-pill sim-pill--tick"
-        :title="t('shell.simStatusRow.tickLabel') + ' ' + cpu.tick"
-        :aria-label="t('shell.simStatusRow.tickLabel') + ' ' + cpu.tick"
-        @click="cpu.openGlossary('IRQ 0x20')"
-      >
-        <Activity :size="14" :stroke-width="2" class="sim-pill__icon" aria-hidden="true" />
-        <span class="sim-pill__v">{{ cpu.tick }}</span>
-      </button>
-      <span
-        :class="['sim-ws', cpu.connected ? 'sim-ws--on' : 'sim-ws--off']"
-        role="img"
-        :aria-label="cpu.connected ? t('shell.simStatusRow.wsTitleOn') : t('shell.simStatusRow.wsTitleOff')"
-        :title="cpu.connected ? t('shell.simStatusRow.wsTitleOn') : t('shell.simStatusRow.wsTitleOff')"
-      >
-        <component
-          :is="cpu.connected ? Wifi : WifiOff"
-          :size="14"
-          :stroke-width="2"
-          aria-hidden="true"
-        />
-      </span>
+      <div class="sim-status-row__info-cluster">
+        <button
+          type="button"
+          class="sim-pill sim-pill--tick"
+          :title="t('shell.simStatusRow.tickLabel') + ' ' + cpu.tick"
+          :aria-label="t('shell.simStatusRow.tickLabel') + ' ' + cpu.tick"
+          @click="cpu.openGlossary('IRQ 0x20')"
+        >
+          <Activity :size="14" :stroke-width="2" class="sim-pill__icon" aria-hidden="true" />
+          <span class="sim-pill__v">{{ cpu.tick }}</span>
+        </button>
+        <span
+          :class="['sim-ws', cpu.connected ? 'sim-ws--on' : 'sim-ws--off']"
+          role="img"
+          :aria-label="cpu.connected ? t('shell.simStatusRow.wsTitleOn') : t('shell.simStatusRow.wsTitleOff')"
+          :title="cpu.connected ? t('shell.simStatusRow.wsTitleOn') : t('shell.simStatusRow.wsTitleOff')"
+        >
+          <component
+            :is="cpu.connected ? Wifi : WifiOff"
+            :size="14"
+            :stroke-width="2"
+            aria-hidden="true"
+          />
+        </span>
+      </div>
     </div>
   </div>
 </template>
@@ -114,9 +116,15 @@ function onCoreTabDblClick(id: number) {
 }
 
 /* Inline mode: the root disappears from the layout (display: contents) so
-   the header chips participate directly in the parent flex row. */
+   the header chips participate directly in the parent flex row. The base
+   `.sim-status-row` declares min-height + padding for standalone usage; in
+   inline mode the parent controls spacing, so neutralise both — otherwise
+   on mobile (where this rule flips to display: flex) the wrapper stretches
+   the grid row beyond 28px and pulls TICK/WS off the hamburger's baseline. */
 .sim-status-row--inline {
   display: contents;
+  min-height: 0;
+  padding: 0;
 }
 
 .sim-status-row__header {
@@ -218,12 +226,19 @@ function onCoreTabDblClick(id: number) {
   cursor: default;
 }
 
+.sim-status-row__info-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .sim-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
   border-radius: var(--radius-sm);
   padding: 0 8px;
   height: 28px;
@@ -236,22 +251,13 @@ function onCoreTabDblClick(id: number) {
   background: transparent;
   color: var(--text-dim);
   white-space: nowrap;
-  cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
-}
-.sim-pill:hover {
-  background: rgba(var(--accent-rgb), 0.10);
-  color: var(--amber);
-  border-color: var(--border-strong);
-  box-shadow: none;
+  cursor: default;
+  transition: color var(--transition-fast);
 }
 .sim-pill__icon {
   color: var(--text-muted);
   flex-shrink: 0;
   display: block;
-}
-.sim-pill:hover .sim-pill__icon {
-  color: var(--amber);
 }
 .sim-pill__v {
   color: var(--text);
@@ -259,7 +265,12 @@ function onCoreTabDblClick(id: number) {
   font-variant-numeric: tabular-nums;
 }
 
-.sim-pill--tick { min-width: 60px; }
+.sim-pill--tick {
+  min-width: 60px;
+  cursor: pointer;
+}
+.sim-pill--tick:hover { color: var(--amber); }
+.sim-pill--tick:hover .sim-pill__icon { color: var(--amber); }
 
 .sim-ws {
   display: inline-flex;
@@ -268,19 +279,19 @@ function onCoreTabDblClick(id: number) {
   width: 28px;
   height: 28px;
   box-sizing: border-box;
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
   border-radius: var(--radius-sm);
   background: transparent;
-  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+  transition: color var(--transition-fast), border-color var(--transition-fast);
 }
 .sim-ws > svg { display: block; }
 .sim-ws--on {
   color: var(--green);
-  border-color: var(--green);
+  border-color: color-mix(in oklab, var(--green) 40%, transparent);
 }
 .sim-ws--off {
   color: var(--red);
-  border-color: var(--red);
+  border-color: color-mix(in oklab, var(--red) 40%, transparent);
 }
 
 @media (max-width: 768px) {

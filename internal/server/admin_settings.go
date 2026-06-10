@@ -20,6 +20,8 @@ type settingsResponse struct {
 	DisabledPanels         []string `json:"disabled_panels"`
 	DisabledDemos          []string `json:"disabled_demos"`
 	DefaultRoute           string   `json:"default_route"`
+	AllowedDomains         []string `json:"allowed_domains"`
+	AllowedEmails          []string `json:"allowed_emails"`
 }
 
 // handleAdminGetSettings returns the access-related settings as a flat object
@@ -38,6 +40,7 @@ func (s *Server) handleAdminGetSettings(w http.ResponseWriter, r *http.Request) 
 		required = true
 	}
 	hash, _ := st.GetSetting(r.Context(), SettingViewerPasswordHash)
+	allow := s.loadEmailAllowlist(r.Context())
 	writeJSON(w, http.StatusOK, settingsResponse{
 		AccessMode:             mode,
 		ViewerPasswordRequired: required && hash != "",
@@ -46,7 +49,18 @@ func (s *Server) handleAdminGetSettings(w http.ResponseWriter, r *http.Request) 
 		DisabledPanels:         readStringArraySetting(r.Context(), st, SettingUIDisabledPanels),
 		DisabledDemos:          readStringArraySetting(r.Context(), st, SettingUIDisabledDemos),
 		DefaultRoute:           readDefaultRoute(r.Context(), st),
+		AllowedDomains:         nonNilStringSlice(allow.Domains),
+		AllowedEmails:          nonNilStringSlice(allow.Emails),
 	})
+}
+
+// nonNilStringSlice keeps the JSON encoder from emitting "null" for empty
+// lists. The SPA expects a plain array on both keys.
+func nonNilStringSlice(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }
 
 // handleAdminSetSetting accepts {key, value} and applies one of the known
@@ -109,6 +123,10 @@ func (s *Server) applySetting(r *http.Request, st *store.Store, key, value strin
 		return applyUIArraySetting(r, st, key, value, isValidDemoName, actor, now)
 	case SettingUIDefaultRoute:
 		return applyUIDefaultRoute(r, st, value, actor, now)
+	case SettingAllowedDomains:
+		return persistSetting(r, st, key, joinList(parseList(value, normalizeDomain)), actor, now)
+	case SettingAllowedEmails:
+		return persistSetting(r, st, key, joinList(parseList(value, normalizeEmail)), actor, now)
 	default:
 		return http.StatusBadRequest, "clave desconocida"
 	}
@@ -296,18 +314,51 @@ type auditResponse struct {
 	Meta   string `json:"meta,omitempty"`
 }
 
-// handleAdminListAudit returns the most recent entries, newest first.
+// handleAdminListAudit returns audit entries newest first. Without query
+// params it preserves the legacy shape (a bare JSON array of up to 100 rows)
+// so the existing SPA keeps working untouched. When any pagination/filter
+// param is present it returns the richer {rows, page, page_size, total}
+// envelope used by the new paginated view.
 func (s *Server) handleAdminListAudit(w http.ResponseWriter, r *http.Request) {
 	st := s.manager.Store()
 	if st == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "persistencia deshabilitada"})
 		return
 	}
-	rows, err := st.ListAudit(r.Context(), 100)
+	q := r.URL.Query()
+	wantsPagination := q.Has("page") || q.Has("page_size") ||
+		q.Has("actor") || q.Has("action") || q.Has("from") || q.Has("to")
+	if !wantsPagination {
+		rows, err := st.ListAudit(r.Context(), 100)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "no se pudo leer el audit log"})
+			return
+		}
+		writeJSON(w, http.StatusOK, auditRowsToJSON(rows))
+		return
+	}
+	filter := store.AuditFilter{
+		Actor:    q.Get("actor"),
+		Action:   q.Get("action"),
+		From:     parseInt64Param(q.Get("from")),
+		To:       parseInt64Param(q.Get("to")),
+		Page:     parseIntParam(q.Get("page"), 1),
+		PageSize: parseIntParam(q.Get("page_size"), 50),
+	}
+	rows, total, err := st.ListAuditPaginated(r.Context(), filter)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "no se pudo leer el audit log"})
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"rows":      auditRowsToJSON(rows),
+		"page":      filter.Page,
+		"page_size": filter.PageSize,
+		"total":     total,
+	})
+}
+
+func auditRowsToJSON(rows []store.AuditEntry) []auditResponse {
 	out := make([]auditResponse, 0, len(rows))
 	for _, e := range rows {
 		out = append(out, auditResponse{
@@ -315,7 +366,7 @@ func (s *Server) handleAdminListAudit(w http.ResponseWriter, r *http.Request) {
 			Action: e.Action, Target: e.Target, Meta: e.MetaJSON,
 		})
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out
 }
 
 // handleAdminCreateUser inserts a fresh user row from admin input. At least

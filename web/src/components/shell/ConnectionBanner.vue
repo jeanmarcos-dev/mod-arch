@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { X } from '@lucide/vue';
 import { useCpuStore } from '../../stores/cpu';
 import { useConnectionBanner } from '../../composables/useConnectionBanner';
+import LoaderModarch from '../brand/LoaderModarch.vue';
 
 const { t } = useI18n();
 const cpu = useCpuStore();
@@ -53,7 +54,14 @@ const attemptsLine = computed(() => {
       role="alert"
       aria-live="polite"
     >
-      <span class="conn-banner__dot" aria-hidden="true" />
+      <LoaderModarch
+        v-if="phase === 'connecting'"
+        class="conn-banner__loader"
+        size="24px"
+        compact
+        aria-hidden="true"
+      />
+      <span v-else class="conn-banner__dot" aria-hidden="true" />
       <span class="conn-banner__title">{{ title }}</span>
       <span class="conn-banner__detail">{{ statusLine }}{{ attemptsLine }}</span>
       <button
@@ -108,6 +116,11 @@ const attemptsLine = computed(() => {
   background: var(--red-soft, #ff7a7a);
   box-shadow: 0 0 8px var(--red-soft, #ff7a7a);
   animation: conn-banner-pulse 1.1s ease-in-out infinite;
+}
+
+.conn-banner__loader {
+  flex-shrink: 0;
+  color: var(--cyan, #6ad4ff);
 }
 
 .conn-banner--connecting .conn-banner__dot {

@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360" role="img" aria-label="MODARCH" font-family="'JetBrains Mono', ui-monospace, monospace">
+  <defs>
+    <filter id="m-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="1.2" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="m-glow-soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="2.4" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <radialGradient id="m-bg" cx="50%" cy="40%" r="65%">
+      <stop offset="0%"   stop-color="#0d1218"/>
+      <stop offset="100%" stop-color="#07090e"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="720" height="360" rx="14" fill="url(#m-bg)"/>
+
+  <g fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" filter="url(#m-glow)">
+    <path d="M 270 80 L 220 80 L 220 58 L 110 58" stroke="#7fffaa"/>
+    <path d="M 450 80 L 500 80 L 500 58 L 610 58" stroke="#ffb547"/>
+    <path d="M 270 180 L 220 180 L 220 222 L 110 222" stroke="#7fffaa"/>
+    <path d="M 450 180 L 500 180 L 500 222 L 610 222" stroke="#ffb547"/>
+  </g>
+
+  <g>
+    <rect x="60" y="42" width="50" height="32" rx="3" fill="none" stroke="#7fffaa" stroke-width="2" filter="url(#m-glow)"/>
+    <g stroke="#7fffaa" stroke-width="2" stroke-linecap="round" filter="url(#m-glow)">
+      <line x1="72" y1="51" x2="98" y2="51"/>
+      <line x1="72" y1="58" x2="98" y2="58"/>
+      <line x1="72" y1="65" x2="98" y2="65"/>
+    </g>
+
+    <rect x="610" y="42" width="50" height="32" rx="3" fill="none" stroke="#ffb547" stroke-width="2" filter="url(#m-glow)"/>
+    <g stroke="#ffb547" stroke-width="2" stroke-linecap="round" filter="url(#m-glow)">
+      <line x1="622" y1="51" x2="648" y2="51"/>
+      <line x1="622" y1="58" x2="648" y2="58"/>
+      <line x1="622" y1="65" x2="648" y2="65"/>
+    </g>
+
+    <rect x="60" y="206" width="50" height="32" rx="3" fill="none" stroke="#7fffaa" stroke-width="2" filter="url(#m-glow)"/>
+    <g stroke="#7fffaa" stroke-width="2" stroke-linecap="round" filter="url(#m-glow)">
+      <line x1="72" y1="215" x2="98" y2="215"/>
+      <line x1="72" y1="222" x2="98" y2="222"/>
+      <line x1="72" y1="229" x2="98" y2="229"/>
+    </g>
+
+    <rect x="610" y="206" width="50" height="32" rx="3" fill="none" stroke="#ffb547" stroke-width="2" filter="url(#m-glow)"/>
+    <g stroke="#ffb547" stroke-width="2" stroke-linecap="round" filter="url(#m-glow)">
+      <line x1="622" y1="215" x2="648" y2="215"/>
+      <line x1="622" y1="222" x2="648" y2="222"/>
+      <line x1="622" y1="229" x2="648" y2="229"/>
+    </g>
+  </g>
+
+  <g font-size="11" font-weight="700" letter-spacing="1.5" filter="url(#m-glow)">
+    <text x="85" y="92" text-anchor="middle" fill="#7fffaa">MEM</text>
+    <text x="85" y="200" text-anchor="middle" fill="#7fffaa">STACK</text>
+    <text x="635" y="92" text-anchor="middle" fill="#ffb547">SCHED</text>
+    <text x="635" y="200" text-anchor="middle" fill="#ffb547">IO</text>
+  </g>
+
+  <g stroke="#c98a37" stroke-width="3" stroke-linecap="round" filter="url(#m-glow)">
+    <line x1="300" y1="26" x2="300" y2="40"/>
+    <line x1="340" y1="26" x2="340" y2="40"/>
+    <line x1="380" y1="26" x2="380" y2="40"/>
+    <line x1="420" y1="26" x2="420" y2="40"/>
+    <line x1="300" y1="220" x2="300" y2="234"/>
+    <line x1="340" y1="220" x2="340" y2="234"/>
+    <line x1="380" y1="220" x2="380" y2="234"/>
+    <line x1="420" y1="220" x2="420" y2="234"/>
+  </g>
+
+  <rect x="270" y="40" width="180" height="180" rx="6" fill="rgba(0,0,0,0.0)" stroke="#ffb547" stroke-width="3" filter="url(#m-glow)"/>
+  <circle cx="284" cy="54" r="3" fill="none" stroke="#ffb547" stroke-width="1.4" opacity="0.7"/>
+
+  <g font-size="16" font-weight="500" fill="#ffb547" filter="url(#m-glow)">
+    <text x="298" y="76">R0</text>
+    <text x="298" y="106">R1</text>
+    <text x="298" y="136">R2</text>
+    <text x="298" y="166" font-size="20">:</text>
+    <text x="298" y="196">Rn</text>
+  </g>
+  <g fill="#ffb547" filter="url(#m-glow)">
+    <rect x="340" y="68"  width="90" height="6" rx="1"/>
+    <rect x="340" y="98"  width="90" height="6" rx="1"/>
+    <rect x="340" y="128" width="90" height="6" rx="1"/>
+    <rect x="340" y="188" width="90" height="6" rx="1"/>
+  </g>
+
+  <g filter="url(#m-glow-soft)">
+    <text x="360" y="312" text-anchor="middle" font-family="'Major Mono Display', 'JetBrains Mono', monospace" font-size="44" font-weight="400" letter-spacing="14" fill="#e8e3d4">MODARCH</text>
+  </g>
+</svg>

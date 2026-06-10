@@ -6,6 +6,7 @@ import { useAdminStore } from '../../stores/admin';
 import Btn from '../../components/ui/Btn.vue';
 import Card from '../../components/ui/Card.vue';
 import Field from '../../components/ui/Field.vue';
+import LogoModarch from '../../components/brand/LogoModarch.vue';
 
 const { t } = useI18n();
 const admin = useAdminStore();
@@ -35,7 +36,7 @@ async function submit() {
   <div class="admin-login">
     <Card class="admin-login__card" :elevation="2">
       <header class="admin-login__header">
-        <h1>{{ t('admin.login.heading') }}</h1>
+        <LogoModarch class="admin-login__logo" :size="260" />
         <p class="admin-login__hint">{{ t('admin.login.hint') }}</p>
       </header>
 
@@ -104,22 +105,28 @@ async function submit() {
 .admin-login__header {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  align-items: center;
+  gap: var(--space-2);
   margin-bottom: var(--space-5);
+}
+
+.admin-login__logo {
+  max-width: 100%;
 }
 
 .admin-login__header h1 {
   font-family: var(--font-display);
-  font-size: 16px;
-  letter-spacing: 4px;
-  color: var(--amber);
-  text-shadow: var(--shadow-glow-amber);
+  font-size: 13px;
+  letter-spacing: 3px;
+  color: var(--text-dim);
   font-weight: normal;
+  margin: 0;
 }
 
 .admin-login__hint {
   color: var(--text-dim);
   font-size: 12px;
+  text-align: center;
 }
 
 .admin-login__form {

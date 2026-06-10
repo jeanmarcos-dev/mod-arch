@@ -13,7 +13,8 @@ var ErrNotFound = errors.New("store: not found")
 // SessionRow is the persistent state of a Session. The runtime *sim.Simulator
 // is intentionally NOT persisted: its memory and register state are volatile
 // by design. What survives a restart is identity (id, mode), display state
-// (label, public flag, view_token) and timestamps.
+// (label, public flag, view_token), timestamps and client tracking metadata
+// captured at session creation.
 type SessionRow struct {
 	ID           string
 	Mode         string
@@ -23,17 +24,31 @@ type SessionRow struct {
 	UserID       string // empty when no user is attached
 	CreatedAt    int64  // unix seconds
 	LastActiveAt int64  // unix seconds
+	ClientIPHash string // SHA-256(ip + SESSION_SECRET), truncated hex
+	ClientIP     string // raw IP, only populated when ADMIN_REVEAL_IP=true at session create
+	UAShort      string // parsed "Browser N / OS" form
+	GeoCountry   string // ISO 3166-1 alpha-2 code; empty if geo lookup disabled
+	ReferrerHost string // host portion of HTTP Referer at session create
 }
+
+// sessionColumns lists the columns selected by every session read path. Kept
+// as a constant so SELECT statements and the scanner stay in lockstep.
+const sessionColumns = `id, mode, label, public, view_token, user_id, created_at, last_active_at,
+client_ip_hash, client_ip, ua_short, geo_country, referrer_host`
 
 // CreateSession inserts a new row. Caller is responsible for setting
 // CreatedAt and LastActiveAt to the same value.
 func (s *Store) CreateSession(ctx context.Context, r SessionRow) error {
 	_, err := s.db.ExecContext(ctx, `
-        INSERT INTO sessions(id, mode, label, public, view_token, user_id, created_at, last_active_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        INSERT INTO sessions(id, mode, label, public, view_token, user_id, created_at, last_active_at,
+                             client_ip_hash, client_ip, ua_short, geo_country, referrer_host)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.Mode, r.Label, boolToInt(r.Public),
 		nullableString(r.ViewToken), nullableString(r.UserID),
-		r.CreatedAt, r.LastActiveAt)
+		r.CreatedAt, r.LastActiveAt,
+		nullableString(r.ClientIPHash), nullableString(r.ClientIP),
+		nullableString(r.UAShort), nullableString(r.GeoCountry),
+		nullableString(r.ReferrerHost))
 	if err != nil {
 		return fmt.Errorf("store: insert session: %w", err)
 	}
@@ -43,8 +58,7 @@ func (s *Store) CreateSession(ctx context.Context, r SessionRow) error {
 // GetSession looks up a row by primary key.
 func (s *Store) GetSession(ctx context.Context, id string) (*SessionRow, error) {
 	return s.scanSession(ctx,
-		`SELECT id, mode, label, public, view_token, user_id, created_at, last_active_at
-         FROM sessions WHERE id = ?`, id)
+		`SELECT `+sessionColumns+` FROM sessions WHERE id = ?`, id)
 }
 
 // GetSessionByViewToken resolves a row by its share token (UNIQUE indexed).
@@ -53,16 +67,14 @@ func (s *Store) GetSessionByViewToken(ctx context.Context, token string) (*Sessi
 		return nil, ErrNotFound
 	}
 	return s.scanSession(ctx,
-		`SELECT id, mode, label, public, view_token, user_id, created_at, last_active_at
-         FROM sessions WHERE view_token = ?`, token)
+		`SELECT `+sessionColumns+` FROM sessions WHERE view_token = ?`, token)
 }
 
 // ListSessions returns every persisted session. Used at Manager startup to
 // rehydrate the in-memory map.
 func (s *Store) ListSessions(ctx context.Context) ([]SessionRow, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, mode, label, public, view_token, user_id, created_at, last_active_at
-         FROM sessions`)
+		`SELECT `+sessionColumns+` FROM sessions`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list sessions: %w", err)
 	}
@@ -82,8 +94,7 @@ func (s *Store) ListSessions(ctx context.Context) ([]SessionRow, error) {
 // activity first. Used by the student-facing "Mis sesiones" page.
 func (s *Store) ListSessionsByUserID(ctx context.Context, userID string) ([]SessionRow, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, mode, label, public, view_token, user_id, created_at, last_active_at
-         FROM sessions WHERE user_id = ? ORDER BY last_active_at DESC`, userID)
+		`SELECT `+sessionColumns+` FROM sessions WHERE user_id = ? ORDER BY last_active_at DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list sessions by user: %w", err)
 	}
@@ -209,18 +220,29 @@ type scanner interface {
 
 func scanSessionRow(sc scanner) (*SessionRow, error) {
 	var (
-		r         SessionRow
-		publicInt int
-		viewToken sql.NullString
-		userID    sql.NullString
+		r            SessionRow
+		publicInt    int
+		viewToken    sql.NullString
+		userID       sql.NullString
+		ipHash       sql.NullString
+		ipPlain      sql.NullString
+		uaShort      sql.NullString
+		geoCountry   sql.NullString
+		referrerHost sql.NullString
 	)
 	if err := sc.Scan(&r.ID, &r.Mode, &r.Label, &publicInt, &viewToken, &userID,
-		&r.CreatedAt, &r.LastActiveAt); err != nil {
+		&r.CreatedAt, &r.LastActiveAt,
+		&ipHash, &ipPlain, &uaShort, &geoCountry, &referrerHost); err != nil {
 		return nil, err
 	}
 	r.Public = publicInt != 0
 	r.ViewToken = viewToken.String
 	r.UserID = userID.String
+	r.ClientIPHash = ipHash.String
+	r.ClientIP = ipPlain.String
+	r.UAShort = uaShort.String
+	r.GeoCountry = geoCountry.String
+	r.ReferrerHost = referrerHost.String
 	return &r, nil
 }
 

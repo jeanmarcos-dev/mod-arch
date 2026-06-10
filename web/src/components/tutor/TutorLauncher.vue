@@ -263,9 +263,9 @@ function onBackdropClick() {
             <Minus :size="14" :stroke-width="2.5" />
           </button>
           <div class="gate-icon"><TutorBotIcon :size="32" :stroke-width="1.4" /></div>
-          <h3 class="gate-title">MODARCHI protegido</h3>
+          <h3 class="gate-title">ARCHIUS protegido</h3>
           <p class="gate-text">
-            Para conversar con MODARCHI sobre Sistemas Operativos debe
+            Para conversar con ARCHIUS sobre Sistemas Operativos debe
             iniciar sesión con su correo institucional.
           </p>
           <button class="gate-cta" @click="goToLogin">
@@ -298,9 +298,9 @@ function onBackdropClick() {
                 <Minus :size="16" :stroke-width="2.5" />
               </button>
               <div class="gate-icon"><TutorBotIcon :size="44" :stroke-width="1.4" /></div>
-              <h3 class="gate-title">MODARCHI protegido</h3>
+              <h3 class="gate-title">ARCHIUS protegido</h3>
               <p class="gate-text">
-                Para conversar con MODARCHI sobre Sistemas Operativos debe
+                Para conversar con ARCHIUS sobre Sistemas Operativos debe
                 iniciar sesión con su correo institucional.
               </p>
               <button class="gate-cta" @click="goToLogin">
@@ -340,6 +340,15 @@ function onBackdropClick() {
   pointer-events: auto;
 }
 
+/* Mobile pins the FAB flush to the bottom-right corner — there is no
+   ConsoleDrawerHandle below the viewport on phones, so the 52px reserve is
+   wasted space and leaves the FAB hovering away from the edge. */
+@media (max-width: 768px) {
+  .tutor-host {
+    bottom: 12px;
+  }
+}
+
 /* Mobile-only dim state: a foreground tool (drawer, picker, console,
    keyboard HW) is taking the bottom area. We hide the FAB outright so
    it doesn't float over the active tool's input affordances; the user
@@ -360,6 +369,9 @@ function onBackdropClick() {
   bottom: 0;
   width: 3.25rem;
   height: 3.25rem;
+  /* Claim the touch gesture so the browser's pan/scroll handler does not
+     swallow it before the drag handlers see pointermove. */
+  touch-action: none;
   border-radius: var(--radius-sm);
   background: radial-gradient(circle at 30% 30%, rgba(var(--accent-rgb), 0.35), rgba(var(--accent-rgb), 0.05) 70%);
   border: 1px solid rgba(var(--accent-rgb), 0.5);

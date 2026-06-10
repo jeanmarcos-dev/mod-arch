@@ -23,6 +23,9 @@ func (s *Server) registerAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/auth/me", s.handleAuthMe)
 	mux.HandleFunc("GET /api/auth/sessions", s.handleAuthMySessions)
 	mux.HandleFunc("POST /api/auth/logout", s.requireCSRF(s.handleAuthLogout))
+	mux.HandleFunc("GET /api/profile/me", s.handleProfileGet)
+	mux.HandleFunc("PUT /api/profile/me", s.requireCSRF(s.handleProfilePut))
+	mux.HandleFunc("POST /api/reports", s.limitByIP(s.reportLimit, s.requireCSRF(s.handlePostReport)))
 	mux.HandleFunc("GET /auth/magic", s.handleAuthMagic)
 	// Public bootstrap config (only fields safe for anonymous callers).
 	mux.HandleFunc("GET /api/config", s.handlePublicConfig)
@@ -68,6 +71,13 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		i18n.WriteError(w, r, http.StatusBadRequest, i18n.CodeAuthValidationFailed, map[string]string{"reason": err.Error()})
 		return
+	}
+	if email != "" {
+		allow := s.loadEmailAllowlist(r.Context())
+		if !allow.Permits(email) {
+			i18n.WriteError(w, r, http.StatusForbidden, i18n.CodeAuthEmailNotAllowed, nil)
+			return
+		}
 	}
 	sid, err := cleanStudentID(req.StudentID)
 	if err != nil {
@@ -350,6 +360,12 @@ func (s *Server) handleAuthMagic(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.logger.Warn("auth: consume magic link failed", "err", err)
 		http.Error(w, "error interno", http.StatusInternalServerError)
+		return
+	}
+	// Re-check the allowlist on consume so a setting tightened between
+	// issuance and click does not let an old link bypass current policy.
+	if allow := s.loadEmailAllowlist(r.Context()); !allow.Permits(email) {
+		http.Error(w, "este correo ya no está autorizado", http.StatusForbidden)
 		return
 	}
 	user, err := st.GetUserByEmail(r.Context(), email)

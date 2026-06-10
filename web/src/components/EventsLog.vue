@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n';
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller';
 import { ArrowDownToLine, ArrowUpFromLine } from '@lucide/vue';
+import LoaderModarch from './brand/LoaderModarch.vue';
 
 const props = defineProps<{ active: boolean }>();
 const cpu = useCpuStore();
@@ -200,7 +201,7 @@ watch(() => props.active, async (active) => {
 
 <template>
   <div class="panel log" data-pizarra-anchor="events-panel" :style="gridStyle">
-    <div class="grid__head-row">
+    <div v-if="gridRows.length > 0" class="grid__head-row">
       <div class="grid__head grid__head--tick">{{ t('panels.events.tickColumn') }}</div>
       <div
         v-for="c in visibleCores"
@@ -257,7 +258,8 @@ watch(() => props.active, async (active) => {
     </DynamicScroller>
 
     <div v-if="props.active && gridRows.length === 0" class="empty">
-      {{ cpu.log.length === 0 ? t('panels.events.emptyLoad') : t('panels.events.emptyNoCores') }}
+      <LoaderModarch class="empty__watermark" size="260px" compact aria-hidden="true" />
+      <span class="empty__text">{{ cpu.log.length === 0 ? t('panels.events.emptyLoad') : t('panels.events.emptyNoCores') }}</span>
     </div>
 
     <button
@@ -439,14 +441,26 @@ watch(() => props.active, async (active) => {
 
 .empty {
   position: absolute;
-  top: 32px;
-  left: 0;
-  right: 0;
-  color: var(--text-muted);
-  font-style: italic;
-  padding: 20px 0;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: 20px;
   text-align: center;
   pointer-events: none;
+}
+
+.empty__watermark {
+  opacity: 0.12;
+  max-width: 60%;
+  max-height: 50%;
+}
+
+.empty__text {
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .follow-tail {
@@ -455,6 +469,9 @@ watch(() => props.active, async (active) => {
   bottom: 12px;
   width: 26px;
   height: 26px;
+  /* Neutralize the global `button { min-height: 32px }` so the box stays
+     square (26x26) instead of stretching vertically. */
+  min-height: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -488,6 +505,12 @@ watch(() => props.active, async (active) => {
   }
   .grid__cell {
     padding: 1px 4px;
+  }
+  /* Move the jump-to-bottom button to the left edge so it stops competing
+     with the tutor FAB, which is pinned to the bottom-right of the viewport. */
+  .follow-tail {
+    right: auto;
+    left: 14px;
   }
 }
 </style>

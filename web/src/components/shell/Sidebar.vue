@@ -16,10 +16,20 @@ interface NavItem {
   locked?: boolean;
 }
 
-const props = defineProps<{
-  /** Items to render. Sections precede tools; both share the same shape. */
-  items: NavItem[];
-}>();
+const props = withDefaults(
+  defineProps<{
+    /** Items to render. Sections precede tools; both share the same shape. */
+    items: NavItem[];
+    /** SVG size for icons when the sidebar is expanded. */
+    iconSize?: number;
+    /** SVG size for icons when the sidebar is collapsed to the rail. */
+    iconSizeCollapsed?: number;
+  }>(),
+  {
+    iconSize: 16,
+    iconSizeCollapsed: 14,
+  },
+);
 
 const prefs = usePreferencesStore();
 const route = useRoute();
@@ -124,7 +134,7 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
           @click="(e) => onLinkClick(item, e)"
         >
           <span class="sidebar__icon" aria-hidden="true">
-            <component :is="item.icon" :size="collapsed ? 14 : 16" :stroke-width="2" />
+            <component :is="item.icon" :size="collapsed ? props.iconSizeCollapsed : props.iconSize" :stroke-width="2" />
           </span>
           <span class="sidebar__label">
             {{ item.label }}
@@ -381,8 +391,8 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
 .sidebar--collapsed .sidebar__lock { display: none; }
 
 .sidebar__icon {
-  width: 22px;
-  height: 20px;
+  width: var(--sidebar-icon-box-w, 22px);
+  height: var(--sidebar-icon-box-h, 20px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -463,11 +473,11 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
    is in collapsed mode so it still anchors the brand without overflowing
    the narrow column. */
 .sidebar__brand {
-  font-family: var(--font-display);
+  font-family: var(--font-brand);
   font-size: 9px;
   letter-spacing: 4px;
   text-transform: uppercase;
-  color: var(--amber);
+  color: var(--accent);
   text-shadow: var(--shadow-glow-amber);
   opacity: 0.55;
   white-space: nowrap;

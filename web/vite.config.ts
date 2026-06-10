@@ -15,8 +15,20 @@ export default defineConfig({
       // static SPA paths and `admin.fetchMeStatus()` would return HTML, so
       // the AdminShell would never render.
       '/admin/api': backendHost,
-      '/admin/login': backendHost,
-      '/admin/logout': backendHost,
+      // /admin/login and /admin/logout are dual-purpose: POST hits the Go
+      // backend (form submit / logout action), GET is the SPA route that
+      // mounts Login.vue. Bypass GET so Vite serves index.html on direct
+      // navigation or F5; without this, refreshing /admin/login proxies the
+      // GET to the backend (which only handles POST) and the browser ends up
+      // with an empty body — the SPA never gets a chance to render.
+      '/admin/login': {
+        target: backendHost,
+        bypass: (req) => (req.method === 'GET' ? req.url : undefined),
+      },
+      '/admin/logout': {
+        target: backendHost,
+        bypass: (req) => (req.method === 'GET' ? req.url : undefined),
+      },
       '/v': backendHost,
     },
   },

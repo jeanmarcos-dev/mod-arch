@@ -53,6 +53,12 @@
   /* Density multiplier for table rows / list items. Tightening this token
      gives a "compact" mode without touching individual components. */
   --row-density: 1;
+
+  /* Brand wordmark font is theme-agnostic on purpose: the MODARCH logotype
+     keeps its CRT amber typography across every theme (only the color
+     adapts via --accent / --amber). Themes override --font-display freely
+     without touching the brand identity. */
+  --font-brand: 'Major Mono Display', monospace;
 }
 
 /* ──────────────── Theme: amber (default) ────────────────

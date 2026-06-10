@@ -15,6 +15,7 @@ import {
 import { useViewerMirrorStore } from '../stores/viewerMirror';
 import VarPopover from './VarPopover.vue';
 import ColumnResizer from './shell/ColumnResizer.vue';
+import LoaderModarch from './brand/LoaderModarch.vue';
 
 const cpu = useCpuStore();
 const mirror = useViewerMirrorStore();
@@ -744,16 +745,14 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="panel code-asm" data-pizarra-anchor="code-panel">
-    <div class="panel-title">
-      <span class="title-text">{{ t('panels.codeAsm.title') }}</span>
-      <span class="title-hint" v-if="sortedProcs.length > 1">
-        <MousePointerClick :size="12" :stroke-width="2" />
-        {{ t('panels.codeAsm.titleHint') }}
-      </span>
+    <div v-if="sortedProcs.length > 1" class="panel-hint">
+      <MousePointerClick :size="12" :stroke-width="2" />
+      {{ t('panels.codeAsm.titleHint') }}
     </div>
 
     <div v-if="tgidGroups.length === 0" class="empty">
-      {{ t('panels.codeAsm.empty') }}
+      <LoaderModarch class="empty__watermark" size="260px" compact aria-hidden="true" />
+      <span class="empty__text">{{ t('panels.codeAsm.empty') }}</span>
     </div>
 
     <template v-else>
@@ -1041,29 +1040,38 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.panel-title {
+.panel-hint {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 10px;
-}
-
-.title-text { color: var(--amber); }
-
-.title-hint {
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) 0;
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: var(--text-dim);
   font-style: italic;
-  text-transform: none;
-  letter-spacing: 0;
 }
 
 .empty {
-  color: var(--text-muted);
-  font-style: italic;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
   padding: 24px;
   text-align: center;
+  pointer-events: none;
+}
+
+.empty__watermark {
+  opacity: 0.12;
+  max-width: 60%;
+  max-height: 50%;
+}
+
+.empty__text {
+  color: var(--text-muted);
+  font-style: italic;
   font-size: 13px;
 }
 

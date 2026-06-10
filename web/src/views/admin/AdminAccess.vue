@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useAdminStore } from '../../stores/admin';
 import { useToastStore } from '../../stores/toast';
@@ -12,6 +12,32 @@ const admin = useAdminStore();
 const toast = useToastStore();
 
 const newViewerPassword = ref('');
+
+// Local draft of the allowlist textareas. We keep them as plain newline-
+// separated strings so the operator can paste, edit, then save; the backend
+// is the one that normalizes and dedupes.
+const domainsDraft = ref('');
+const emailsDraft = ref('');
+const domainsDirty = computed(() => domainsDraft.value !== (admin.settings?.allowed_domains.join('\n') ?? ''));
+const emailsDirty = computed(() => emailsDraft.value !== (admin.settings?.allowed_emails.join('\n') ?? ''));
+
+// Reset the drafts whenever the canonical settings change (initial load or
+// after a save round-trip), so the textarea always shows what the server
+// actually stored.
+watch(
+  () => admin.settings,
+  (s) => {
+    if (!s) return;
+    domainsDraft.value = s.allowed_domains.join('\n');
+    emailsDraft.value = s.allowed_emails.join('\n');
+  },
+  { immediate: true },
+);
+
+const allowlistEnabled = computed(() => {
+  const s = admin.settings;
+  return !!s && (s.allowed_domains.length > 0 || s.allowed_emails.length > 0);
+});
 
 async function run(fn: () => Promise<void>, okMsg: string) {
   try { await fn(); toast.ok(okMsg); }
@@ -39,6 +65,28 @@ async function setViewerPassword() {
 async function clearViewerPassword() {
   if (!confirm(t('admin.access.confirmClear'))) return;
   await run(() => admin.setSetting('viewer_password', ''), t('admin.access.okPwCleared'));
+}
+
+async function saveDomains() {
+  await run(
+    () => admin.setSetting('access.allowed_domains', domainsDraft.value),
+    t('admin.access.okAllowlistSaved'),
+  );
+}
+
+async function saveEmails() {
+  await run(
+    () => admin.setSetting('access.allowed_emails', emailsDraft.value),
+    t('admin.access.okAllowlistSaved'),
+  );
+}
+
+async function clearAllowlist() {
+  if (!confirm(t('admin.access.confirmAllowlistClear'))) return;
+  await run(async () => {
+    await admin.setSetting('access.allowed_domains', '');
+    await admin.setSetting('access.allowed_emails', '');
+  }, t('admin.access.okAllowlistCleared'));
 }
 </script>
 
@@ -112,6 +160,59 @@ async function clearViewerPassword() {
         <p class="access-block__hint">
           {{ t('admin.access.viewerPwHint') }}
         </p>
+      </section>
+
+      <section class="access-block access-block--wide">
+        <h3 class="access-block__label">
+          {{ t('admin.access.allowlistTitle') }}
+          <span v-if="allowlistEnabled" class="badge badge--on">{{ t('admin.access.allowlistOn') }}</span>
+          <span v-else class="badge badge--off">{{ t('admin.access.allowlistOff') }}</span>
+        </h3>
+        <p class="access-block__hint">{{ t('admin.access.allowlistHint') }}</p>
+
+        <div class="allowlist-grid">
+          <div class="allowlist-col">
+            <label class="allowlist-label" for="allowlist-domains">
+              {{ t('admin.access.allowlistDomainsLabel') }}
+              <span class="dim">({{ admin.settings.allowed_domains.length }})</span>
+            </label>
+            <textarea
+              id="allowlist-domains"
+              v-model="domainsDraft"
+              :placeholder="t('admin.access.allowlistDomainsPlaceholder')"
+              rows="5"
+              class="allowlist-textarea"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <Btn :disabled="!domainsDirty" @click="saveDomains">
+              {{ t('admin.access.allowlistSaveDomains') }}
+            </Btn>
+          </div>
+
+          <div class="allowlist-col">
+            <label class="allowlist-label" for="allowlist-emails">
+              {{ t('admin.access.allowlistEmailsLabel') }}
+              <span class="dim">({{ admin.settings.allowed_emails.length }})</span>
+            </label>
+            <textarea
+              id="allowlist-emails"
+              v-model="emailsDraft"
+              :placeholder="t('admin.access.allowlistEmailsPlaceholder')"
+              rows="5"
+              class="allowlist-textarea"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <Btn :disabled="!emailsDirty" @click="saveEmails">
+              {{ t('admin.access.allowlistSaveEmails') }}
+            </Btn>
+          </div>
+        </div>
+
+        <div class="access-pw__actions" v-if="allowlistEnabled">
+          <Btn variant="danger" @click="clearAllowlist">{{ t('admin.access.allowlistClear') }}</Btn>
+        </div>
       </section>
     </div>
   </Card>
@@ -214,5 +315,61 @@ async function clearViewerPassword() {
 .access-pw__actions {
   display: flex;
   gap: var(--space-2);
+}
+
+.access-block--wide {
+  grid-column: 1 / -1;
+}
+
+.access-block__label .badge {
+  margin-left: var(--space-2);
+  padding: 1px 8px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+}
+.badge--on { color: var(--green); }
+.badge--off { color: var(--text-dim); }
+
+.allowlist-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+@media (max-width: 800px) {
+  .allowlist-grid { grid-template-columns: 1fr; }
+}
+
+.allowlist-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.allowlist-label {
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.allowlist-label .dim {
+  margin-left: var(--space-1);
+}
+
+.allowlist-textarea {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+  min-height: 100px;
+}
+.allowlist-textarea:focus {
+  outline: none;
+  border-color: var(--amber);
 }
 </style>

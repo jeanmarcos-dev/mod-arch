@@ -183,9 +183,9 @@ onMounted(load);
     <Card title="Reglas anti-abuso ya activas" :elevation="0">
       <ul class="bullets">
         <li>Rate limit por IP en <code>POST /api/auth/login</code> (5 intentos / 15 min).</li>
-        <li>Rate limit por sesión en MODARCHI (20 preguntas / hora).</li>
+        <li>Rate limit por sesión en ARCHIUS (20 preguntas / hora).</li>
         <li>Token bucket global del LLM configurable en <code>/admin/tutor/config</code>.</li>
-        <li>El panel de MODARCHI exige usuario autenticado.</li>
+        <li>El panel de ARCHIUS exige usuario autenticado.</li>
       </ul>
     </Card>
   </div>

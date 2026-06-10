@@ -165,6 +165,11 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/api/users", s.requireModRole(s.handleAdminListUsers))
 	mux.HandleFunc("POST /admin/api/users/{id}/kick", s.requireModRole(s.requireCSRF(s.handleAdminKickUser)))
 	mux.HandleFunc("GET /admin/api/audit", s.requireModRole(s.handleAdminListAudit))
+	mux.HandleFunc("GET /admin/api/sessions/history", s.requireModRole(s.handleAdminListSessionHistory))
+	mux.HandleFunc("GET /admin/api/users/{id}/activity", s.requireModRole(s.handleAdminUserActivity))
+	mux.HandleFunc("GET /admin/api/users/{id}/profile", s.requireModRole(s.handleAdminProfileGet))
+	mux.HandleFunc("GET /admin/api/reports", s.requireModRole(s.handleAdminListReports))
+	mux.HandleFunc("PATCH /admin/api/reports/{id}/status", s.requireModRole(s.requireCSRF(s.handleAdminUpdateReportStatus)))
 
 	// Admin-only surface: anything that changes governance (labels, sharing,
 	// invites, access settings) plus role transitions.

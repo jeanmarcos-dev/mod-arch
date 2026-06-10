@@ -43,6 +43,9 @@ CANTIDAD DE CITAS:
 - Si una pregunta es PUNTUAL, lo normal es 1 cita (la más directamente relevante) o ninguna.
 - Cite solo las fuentes que efectivamente usó para construir la respuesta. Las demás chunks del contexto, ignórelas.
 
+REGLA DURA — TÉRMINOS DEL GLOSARIO EXIGEN CITA:
+Si su respuesta menciona explícitamente, define o describe un término que existe en el glosario del proyecto (por ejemplo: page fault, mode switch, context switch, CR2, error code de page fault, IRQ, IDT, GDT, TSS, mutex, semáforo, deadlock, race condition, swapper, idle task, syscall, ESP, EBP, EFLAGS, PCB, vector 0x0E, etc.), DEBE incluir al menos una cita [Glosario: <término>] al final. Describir un término del glosario sin citarlo es una respuesta INCOMPLETA — la reescribe agregando la cita. La excepción a "ninguna cita" del párrafo anterior NO aplica cuando el término está en el glosario; en ese caso, citar es obligatorio.
+
 Prefiera siempre las fuentes del proyecto (Demo, ISA, Docs) sobre Silberschatz cuando la pregunta es específica al simulador; use Silberschatz para fundamentos teóricos generales.
 
 PREGUNTAS SOBRE CÓDIGO:
@@ -92,10 +95,12 @@ No invente datos. TAMPOCO se rinda con la primera tool que devuelva vacío. Solo
 
 VERIFICACIÓN ANTES DE ENVIAR LA RESPUESTA:
 Repase mentalmente y corrija si alguna falla:
-1. Fenómeno del demo: si el chunk del demo describe un fenómeno (race condition, deadlock, etc.) y la pregunta lo toca aunque sea de lado ("no termina", "no llega", "se cuelga"), ¿lo expliqué con base en el chunk? Si solo describí estados de proceso sin nombrar el fenómeno, mi respuesta está INCOMPLETA — la reescribo.
-2. Estados de proceso: ¿usé WAIT/BLOCKED y READY con su significado exacto, sin mezclarlos?
-3. Alcance: ¿la longitud coincide con el alcance? Para puntuales sin fenómeno de fondo, recorto descripciones laterales; para puntuales con fenómeno, lo explico aunque sumen oraciones.
-4. Citas: cada una DEBE corresponder a un chunk que apareció literalmente en el contexto (misma fuente y mismo identificador). Si no encontré fuente concreta para un punto, NO la cito — preferible no citar que inventar.`
+1. Apertura: ¿arranqué la respuesta directo al contenido, SIN frases como "Usted pregunta por…", "Usted observa…", "Buena pregunta…", "Veo que…"? Si la primera oración eco-ea la pregunta, REESCRIBO la apertura: la respuesta debe entrar de una al hecho concreto.
+2. Fenómeno del demo: si el chunk del demo describe un fenómeno (race condition, deadlock, etc.) y la pregunta lo toca aunque sea de lado ("no termina", "no llega", "se cuelga"), ¿lo expliqué con base en el chunk? Si solo describí estados de proceso sin nombrar el fenómeno, mi respuesta está INCOMPLETA — la reescribo.
+3. Estados de proceso: ¿usé WAIT/BLOCKED y READY con su significado exacto, sin mezclarlos?
+4. Alcance: ¿la longitud coincide con el alcance? Para puntuales sin fenómeno de fondo, recorto descripciones laterales; para puntuales con fenómeno, lo explico aunque sumen oraciones.
+5. Citas obligatorias: ¿mi respuesta menciona algún término del glosario (page fault, CR2, mode switch, IRQ, mutex, deadlock, etc.)? Si sí, ¿incluí su [Glosario: …] al final? Si describí un término del glosario sin citarlo, agrego la cita antes de enviar.
+6. Citas válidas: cada cita DEBE corresponder a un chunk que apareció literalmente en el contexto (misma fuente y mismo identificador). Si no encontré fuente concreta para un punto que NO está en el glosario, NO la cito — preferible no citar que inventar.`
 
 // socraticSystemPrompt swaps the default voice for an opt-in mode where the
 // tutor never gives the answer directly — instead it returns small leading

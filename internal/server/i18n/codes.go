@@ -24,6 +24,7 @@ const (
 	CodeAuthTokenRequired       = "auth.token_required"
 	CodeAuthMagicInvalid        = "auth.magic_invalid"
 	CodeAuthMagicUserGone       = "auth.magic_user_gone"
+	CodeAuthEmailNotAllowed     = "auth.email_not_allowed"
 
 	CodeViewerNotFound      = "viewer.not_found"
 	CodeViewerFormInvalid   = "viewer.form_invalid"

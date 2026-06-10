@@ -6,6 +6,7 @@ import { Share2, Square, UserRound, LogOut } from '@lucide/vue';
 import { useCpuStore } from '../../stores/cpu';
 import { useAuthStore } from '../../stores/auth';
 import ShareModal from '../ShareModal.vue';
+import ReportButton from '../ReportButton.vue';
 
 const cpu = useCpuStore();
 const auth = useAuthStore();
@@ -69,6 +70,8 @@ async function doLogout() { await auth.logout(); }
       <span>{{ isShared ? t('topbar.sharing') : t('topbar.share') }}</span>
     </button>
 
+    <ReportButton v-if="!onAdminRoute" />
+
     <slot name="actions" />
 
     <ShareModal :open="shareOpen" @close="shareOpen = false" />
@@ -88,7 +91,7 @@ async function doLogout() { await auth.logout(); }
 }
 
 .mini-bar__brand {
-  font-family: var(--font-display);
+  font-family: var(--font-brand);
   letter-spacing: 3px;
   color: var(--amber);
   text-shadow: var(--shadow-glow-amber);
@@ -102,11 +105,15 @@ async function doLogout() { await auth.logout(); }
   align-items: center;
   gap: 6px;
   background: rgba(var(--accent-rgb), 0.06);
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
   border-radius: var(--radius-sm);
   padding: 0 6px 0 8px;
   height: 28px;
   color: var(--text);
+  cursor: default;
+  /* Breathing room before the actionable share/report/slot buttons so the
+     read-only user chip reads as a distinct cluster from the actions. */
+  margin-right: var(--space-2);
 }
 .mini-bar__user-icon { color: var(--amber); }
 .mini-bar__user-name { font-size: 11px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

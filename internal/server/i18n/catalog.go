@@ -25,6 +25,7 @@ var Catalog = map[string]map[string]string{
 		CodeAuthTokenRequired:       "token requerido",
 		CodeAuthMagicInvalid:        "el enlace es inválido o expiró",
 		CodeAuthMagicUserGone:       "el usuario asociado ya no existe",
+		CodeAuthEmailNotAllowed:     "este correo no está autorizado para acceder a esta instancia",
 
 		CodeViewerNotFound:      "vista no encontrada",
 		CodeViewerFormInvalid:   "form inválido",
@@ -94,6 +95,7 @@ var Catalog = map[string]map[string]string{
 		CodeAuthTokenRequired:       "token required",
 		CodeAuthMagicInvalid:        "the link is invalid or expired",
 		CodeAuthMagicUserGone:       "the associated user no longer exists",
+		CodeAuthEmailNotAllowed:     "this email is not authorized to access this instance",
 
 		CodeViewerNotFound:      "view not found",
 		CodeViewerFormInvalid:   "invalid form",
@@ -144,11 +146,81 @@ var Catalog = map[string]map[string]string{
 		CodePlaceholderHeading: "▸ MOD ARCH — backend ready",
 		CodePlaceholderLead:    "The Vue frontend is not embedded yet.",
 	},
+	"pt": {
+		CodeWSViewerReadonly: "modo espectador somente leitura: o proprietário é quem controla a sessão",
+		CodeWSHostOnly:       "comando reservado ao anfitrião da sessão",
+		CodeWSUnknownCommand: "comando desconhecido: {cmd}",
+		CodeWSJSONError:      "json: {err}",
+
+		CodeAuthInvalidJSON:         "JSON inválido",
+		CodeAuthValidationFailed:    "{reason}",
+		CodeAuthAntibotFailed:       "a verificação antibot falhou",
+		CodeAuthAntibotUnavailable:  "não foi possível verificar o desafio antibot",
+		CodeAuthUserCreateFailed:    "não foi possível criar o usuário",
+		CodeAuthNoSessionQuota:      "não há vagas para novas sessões",
+		CodeAuthSMTPFailed:          "não foi possível enviar o e-mail de verificação. Tente novamente em alguns minutos ou entre em contato com o administrador.",
+		CodeAuthUnauthenticated:     "não autenticado",
+		CodeAuthPersistenceDisabled: "persistência desabilitada",
+		CodeAuthInternalError:       "erro interno",
+		CodeAuthTokenRequired:       "token obrigatório",
+		CodeAuthMagicInvalid:        "o link é inválido ou expirou",
+		CodeAuthMagicUserGone:       "o usuário associado já não existe",
+		CodeAuthEmailNotAllowed:     "este e-mail não está autorizado a acessar esta instância",
+
+		CodeViewerNotFound:      "visualização não encontrada",
+		CodeViewerFormInvalid:   "formulário inválido",
+		CodeViewerEmptyPassword: "informe uma senha",
+		CodeViewerBadPassword:   "senha incorreta",
+
+		CodeAccessInviteRequired: "é necessário um convite válido para acessar esta instância",
+		CodeAccessInstanceClosed: "o acesso a esta instância está fechado",
+
+		CodeRateLimitTooMany: "tentativas em excesso; tente novamente em alguns minutos",
+
+		CodeAdminInvalidJSON:           "JSON inválido",
+		CodeAdminInvalidAccessMode:     "valor inválido para access_mode",
+		CodeAdminInvalidBool:           "valor inválido (true|false)",
+		CodeAdminUnknownKey:            "chave desconhecida",
+		CodeAdminInviteMissingTarget:   "informe o e-mail ou o ID do estudante",
+		CodeAdminInviteInvalidRole:     "role inválido",
+		CodeAdminInviteNothingToUpdate: "nada para atualizar",
+		CodeAdminI18nUnsupportedLocale: "locale não suportado",
+
+		CodeSimulatorCoresInvalidMin: "número de núcleos inválido ({cores}): precisa ser >= 1",
+		CodeSimulatorCoresInvalidMax: "número de núcleos inválido ({cores}): o máximo suportado é {max}",
+
+		CodeFullTitleTab:      "Capacidade lotada · MOD ARCH",
+		CodeFullHeading:       "▸ Capacidade temporária atingida",
+		CodeFullLeadStat:      "{full} / {max} sessões",
+		CodeFullLeadActive:    "Há {full} sessões ativas neste servidor (limite configurado: {max}). Aguarde alguns minutos e atualize, ou entre em uma sessão existente como espectador:",
+		CodeFullSessionMeta:   "{viewers} viewers · criada há {age} min",
+		CodeFullSessionAction: "VER →",
+		CodeFullEmpty:         "Por enquanto nenhum proprietário ativou o compartilhamento, portanto não há sessões públicas para acompanhar. Atualize esta página quando alguém ativar, ou tente mais tarde para criar a sua própria sessão.",
+		CodeFullFooter:        "◆ Demo SO · UCV",
+
+		CodeAccessDeniedTitleTab: "Acesso restrito",
+		CodeAccessDeniedHeading:  "ACESSO RESTRITO",
+		CodeAccessDeniedHint:     "Se você tiver um convite, abra o link que o(a) professor(a) forneceu.",
+
+		CodeViewerPwTitleTab: "Acesso · MOD ARCH",
+		CodeViewerPwHeading:  "VISUALIZAÇÃO RESTRITA",
+		CodeViewerPwLead:     "Esta sessão compartilhada exige uma senha para ser acompanhada.",
+		CodeViewerPwLabel:    "Senha",
+		CodeViewerPwSubmit:   "ENTRAR",
+
+		CodeViewInvalidTitleTab: "Link inválido",
+		CodeViewInvalidHeading:  "▸ Link de espectador inválido",
+		CodeViewInvalidLead:     "Este link não corresponde a nenhuma sessão ativa. É possível que o proprietário tenha desativado o compartilhamento ou encerrado a sessão.",
+		CodeViewInvalidCreate:   "→ Criar uma nova sessão",
+
+		CodePlaceholderHeading: "▸ MOD ARCH — backend pronto",
+		CodePlaceholderLead:    "O frontend Vue ainda não está embutido.",
+	},
 }
 
 // SupportedLocales is the closed set of locales we ship translations for.
 // Anything else falls back to the default.
-var SupportedLocales = []string{"es", "en"}
+var SupportedLocales = []string{"es", "en", "pt"}
 
 // DefaultLocale is the locale used when the request signals nothing else.
 const DefaultLocale = "es"

@@ -37,6 +37,8 @@ export interface AccessSettings {
   disabled_panels: string[];
   disabled_demos: string[];
   default_route: string;
+  allowed_domains: string[];
+  allowed_emails: string[];
 }
 
 export interface UserSessionBrief {
@@ -65,6 +67,128 @@ export interface AuditRow {
   action: string;
   target?: string;
   meta?: string;
+}
+
+export interface SessionHistoryRow {
+  id: number;
+  original_session_id: string;
+  user_id?: string;
+  user_label?: string;
+  mode: string;
+  label?: string;
+  public: boolean;
+  view_token?: string;
+  created_at: number;
+  ended_at: number;
+  duration_seconds: number;
+  end_reason: 'idle' | 'admin_kill' | 'replaced' | 'shutdown' | 'user_logout' | string;
+  client_ip_hash?: string;
+  client_ip?: string;
+  ua_short?: string;
+  geo_country?: string;
+  referrer_host?: string;
+  total_commands: number;
+  total_tutor_queries: number;
+}
+
+export interface SessionHistoryFilter {
+  user_id?: string;
+  end_reason?: string;
+  country?: string;
+  from?: number;
+  to?: number;
+}
+
+export interface SessionHistoryPage {
+  rows: SessionHistoryRow[];
+  page: number;
+  page_size: number;
+  total: number;
+  filters: SessionHistoryFilter;
+}
+
+export interface ActivityByDay {
+  Day: string;
+  Sessions: number;
+  ActiveSeconds: number;
+  TutorQueries: number;
+}
+
+export interface ActivityByCountry {
+  Country: string;
+  Sessions: number;
+}
+
+export interface UserActivity {
+  user_id: string;
+  user_label?: string;
+  window: { from: number; to: number };
+  total_sessions: number;
+  total_active_seconds: number;
+  avg_session_minutes: number;
+  last_seen_at: number;
+  last_seen_country?: string;
+  total_commands: number;
+  total_tutor_queries: number;
+  by_day: ActivityByDay[];
+  by_country: ActivityByCountry[];
+}
+
+export interface ReportRow {
+  ID: number;
+  TS: number;
+  SessionID: string;
+  UserID: string;
+  ClientIPHash: string;
+  Kind: 'feedback' | 'bug' | 'idea' | string;
+  Title: string;
+  Body: string;
+  ContextJSON: string;
+  Status: 'open' | 'reviewing' | 'resolved' | 'dismissed' | string;
+  ResolvedAt: number;
+  ResolvedBy: string;
+}
+
+export interface ReportFilter {
+  kind?: string;
+  status?: string;
+  user_id?: string;
+}
+
+export interface ReportPage {
+  rows: ReportRow[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface AdminProfileView {
+  user_id: string;
+  name: string;
+  email?: string;
+  avatar_url?: string;
+  cohort: string;
+  institution: string;
+  career: string;
+  bio: string;
+  github: string;
+  linkedin: string;
+  preferred_language: string;
+  updated_at?: number;
+}
+
+export interface AuditFilter {
+  actor?: string;
+  action?: string;
+  from?: number;
+  to?: number;
+}
+
+export interface AuditPage {
+  rows: AuditRow[];
+  page: number;
+  page_size: number;
+  total: number;
 }
 
 export interface SmtpView {
@@ -116,6 +240,9 @@ export const useAdminStore = defineStore('admin', () => {
   const settings = ref<AccessSettings | null>(null);
   const users = ref<UserRow[]>([]);
   const audit = ref<AuditRow[]>([]);
+  const auditPage = ref<AuditPage | null>(null);
+  const sessionHistory = ref<SessionHistoryPage | null>(null);
+  const userActivity = ref<Record<string, UserActivity>>({});
   const lastError = ref<string | null>(null);
 
   // Capability derivatives. Admins do everything; moderators are limited to
@@ -305,6 +432,101 @@ export const useAdminStore = defineStore('admin', () => {
     await send<{ ok: boolean }>('POST', '/admin/api/smtp/test', { to });
   }
 
+  // Session history (E4): paginated browse of expired/closed sessions. The
+  // returned page is also cached on the store so the view can reactively
+  // re-render when filters change.
+  function buildQuery(params: Record<string, string | number | undefined>): string {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v === undefined || v === null || v === '') continue;
+      qs.set(k, String(v));
+    }
+    const s = qs.toString();
+    return s ? `?${s}` : '';
+  }
+
+  async function loadSessionHistory(
+    filter: SessionHistoryFilter = {},
+    page = 1,
+    pageSize = 50,
+  ): Promise<SessionHistoryPage> {
+    const qs = buildQuery({ ...filter, page, page_size: pageSize });
+    const result = await send<SessionHistoryPage>('GET', `/admin/api/sessions/history${qs}`);
+    sessionHistory.value = result;
+    return result;
+  }
+
+  async function loadUserActivity(
+    id: string,
+    range?: { from?: number; to?: number },
+  ): Promise<UserActivity> {
+    const qs = buildQuery({ from: range?.from, to: range?.to });
+    const act = await send<UserActivity>('GET', `/admin/api/users/${id}/activity${qs}`);
+    userActivity.value = { ...userActivity.value, [id]: act };
+    return act;
+  }
+
+  // userProfile (E2): cached lookup for the admin's user activity panel so
+  // each navigation does not re-fetch.
+  const userProfile = ref<Record<string, AdminProfileView>>({});
+
+  async function loadUserProfile(id: string): Promise<AdminProfileView | null> {
+    try {
+      const p = await send<AdminProfileView>('GET', `/admin/api/users/${id}/profile`);
+      userProfile.value = { ...userProfile.value, [id]: p };
+      return p;
+    } catch {
+      return null;
+    }
+  }
+
+  // Reports (E3): paginated list + status mutation. The page is cached on the
+  // store so the AdminReports view stays reactive across filter changes.
+  const reportsPage = ref<ReportPage | null>(null);
+
+  async function loadReports(
+    filter: ReportFilter = {},
+    page = 1,
+    pageSize = 50,
+  ): Promise<ReportPage> {
+    const qs = buildQuery({ ...filter, page, page_size: pageSize });
+    const result = await send<ReportPage>('GET', `/admin/api/reports${qs}`);
+    reportsPage.value = result;
+    return result;
+  }
+
+  async function updateReportStatus(id: number, status: ReportRow['Status']) {
+    await send<{ ok: boolean; status: string }>(
+      'PATCH',
+      `/admin/api/reports/${id}/status`,
+      { status },
+    );
+    if (reportsPage.value) {
+      // Optimistic local patch: avoid a full refetch round-trip for one row.
+      const row = reportsPage.value.rows.find((r) => r.ID === id);
+      if (row) {
+        row.Status = status;
+        if (status === 'resolved' || status === 'dismissed') {
+          row.ResolvedAt = Math.floor(Date.now() / 1000);
+        } else {
+          row.ResolvedAt = 0;
+          row.ResolvedBy = '';
+        }
+      }
+    }
+  }
+
+  async function loadAuditPage(
+    filter: AuditFilter = {},
+    page = 1,
+    pageSize = 50,
+  ): Promise<AuditPage> {
+    const qs = buildQuery({ ...filter, page, page_size: pageSize });
+    const result = await send<AuditPage>('GET', `/admin/api/audit${qs}`);
+    auditPage.value = result;
+    return result;
+  }
+
   return {
     user,
     userId,
@@ -316,6 +538,9 @@ export const useAdminStore = defineStore('admin', () => {
     settings,
     users,
     audit,
+    auditPage,
+    sessionHistory,
+    userActivity,
     lastError,
     isAdmin,
     isModerator,
@@ -341,5 +566,13 @@ export const useAdminStore = defineStore('admin', () => {
     fetchSmtpSettings,
     saveSmtpSettings,
     testSmtp,
+    loadSessionHistory,
+    loadUserActivity,
+    loadAuditPage,
+    userProfile,
+    loadUserProfile,
+    reportsPage,
+    loadReports,
+    updateReportStatus,
   };
 });

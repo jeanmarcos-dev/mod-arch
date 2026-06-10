@@ -1,6 +1,7 @@
 import { createI18n } from 'vue-i18n';
 import es from './locales/es';
 import en from './locales/en';
+import pt from './locales/pt';
 import { DEFAULT_LOCALE, SUPPORTED_LOCALES, type Locale, type MessageSchema } from './schema';
 
 const STORAGE_KEY = 'modos-cpu:prefs:v1';
@@ -24,6 +25,7 @@ export function readStoredLocale(): Locale {
   } catch { /* corrupt entry → fall through to detection */ }
   if (typeof navigator !== 'undefined') {
     const nav = (navigator.language || '').toLowerCase();
+    if (nav.startsWith('pt')) return 'pt';
     if (nav.startsWith('en')) return 'en';
   }
   return DEFAULT_LOCALE;
@@ -42,7 +44,7 @@ export const i18n = createI18n({
   globalInjection: true,
   locale: readStoredLocale(),
   fallbackLocale: DEFAULT_LOCALE,
-  messages: { es, en },
+  messages: { es, en, pt },
 });
 
 // setI18nLocale is the canonical mutation point for runtime switches. The

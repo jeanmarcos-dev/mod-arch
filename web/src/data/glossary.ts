@@ -6,6 +6,7 @@
 // in the sequence a student is likely to learn them.
 
 import { GLOSSARY_EN } from './glossary.en';
+import { GLOSSARY_PT } from './glossary.pt';
 
 export interface GlossaryEntry {
   term: string;
@@ -23,10 +24,15 @@ export interface GlossaryEntry {
 // the locale is 'es' (or any unknown locale) the original entry is returned
 // as-is so the Spanish data file keeps being the source of truth.
 export function localizeEntry(entry: GlossaryEntry, locale: string): GlossaryEntry {
-  if (locale !== 'en') return entry;
-  const en = GLOSSARY_EN[entry.term];
-  if (!en) return entry;
-  return { ...entry, short: en.short, detail: en.detail };
+  if (locale === 'en') {
+    const en = GLOSSARY_EN[entry.term];
+    return en ? { ...entry, short: en.short, detail: en.detail } : entry;
+  }
+  if (locale === 'pt') {
+    const pt = GLOSSARY_PT[entry.term];
+    return pt ? { ...entry, short: pt.short, detail: pt.detail } : entry;
+  }
+  return entry;
 }
 
 export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
@@ -106,6 +112,13 @@ export const GLOSSARY_ENTRIES: GlossaryEntry[] = [
     category: 'Registros',
     short: 'Segment selectors (Code / Data / Stack).',
     detail: 'Selectores de 16 bits que indexan entradas de la GDT (o de la LDT cuando el bit TI=1; este simulador no usa LDT). Los bits 0-1 son el RPL (Requested Privilege Level). En user mode CS = 0x1B (0x18 | 3), en kernel CS = 0x08. IRET lee el CS que va a popear para decidir si vuelve a user o queda en kernel.',
+  },
+  {
+    term: 'CR2 — Control Register 2',
+    category: 'Registros',
+    short: 'Dirección lineal que provocó el último page fault.',
+    detail: 'Cuando la MMU dispara un page fault (vector 0x0E), el HW carga en CR2 la dirección virtual que el proceso intentó tocar. El kernel lee CR2 dentro del handler para decidir qué hacer: resolver la página si la falla es legítima (demand-paging, copy-on-write), o matar al proceso si el acceso es inválido. En este simulador CR2 aparece en el panel de eventos y en el payload del evento page_fault con el nombre canónico `cr2` (también disponible como `addr`).',
+    aliases: ['cr2', 'control register 2'],
   },
 
   // ─── Flags individuales ─────────────────────────────────────────────────
@@ -488,6 +501,13 @@ El badge del panel de consola lee "KBuf {used}/{cap}" con cap = 16, que es un to
     short: 'El acceso de memoria es inválido y la MMU lo rechaza.',
     detail: 'Causas típicas: el proceso en PL3 intenta tocar memoria del kernel, escribe en una página de solo lectura (como user_code), o accede a una dirección fuera de su región asignada. En kernels reales el page fault NO es siempre fatal — también se usa para resolución on-demand: paginación demand-paging, copy-on-write tras un fork, mapeo lazy de heap. El kernel decide caso por caso: resolver (mapeando la página) o matar al proceso. En este simulador todo page fault es fatal: el proceso pasa a ZOMBIE con BlockedOn="page_fault". El dispatch del HW va por el vector 0x0E (ver esa entrada en Interrupciones).',
     aliases: ['page fault', 'pagefault'],
+  },
+  {
+    term: 'Error code (page fault)',
+    category: 'Memoria',
+    short: 'Bitmask de 32 bits que describe la causa del page fault.',
+    detail: 'Sigue el layout del Intel SDM Vol 3 §6.15: bit 0 (P) = 1 si fue violación de permisos, 0 si la página no estaba mapeada; bit 1 (W) = 1 si el acceso era de escritura, 0 si era lectura; bit 2 (U) = 1 si la falla vino de PL3 (user), 0 si de PL0 (kernel); bit 4 (I-D) = 1 si fue un fetch de instrucción. Ejemplo: error_code = 7 = 0b111 → bits P, W, U activos → escritura desde user a una página presente pero protegida. En x86 real el HW pushea este código al stack tras el frame; este simulador lo escribe en AddrErrCodeMirror para que el handler lo lea con un `mov` sin manejar layouts asimétricos.',
+    aliases: ['error_code', 'pf error code', 'error code'],
   },
 
   // ─── Syscalls ───────────────────────────────────────────────────────────

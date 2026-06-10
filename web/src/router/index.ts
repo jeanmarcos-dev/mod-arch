@@ -40,6 +40,9 @@ const AdminTutorMetrics = () => import('../views/admin/AdminTutorMetrics.vue');
 const AdminTutorConfig = () => import('../views/admin/AdminTutorConfig.vue');
 const AdminSecurity = () => import('../views/admin/AdminSecurity.vue');
 const AdminSimulator = () => import('../views/admin/AdminSimulator.vue');
+const AdminSessionHistory = () => import('../views/admin/AdminSessionHistory.vue');
+const AdminUserActivity = () => import('../views/admin/AdminUserActivity.vue');
+const AdminReports = () => import('../views/admin/AdminReports.vue');
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -84,11 +87,14 @@ export const router = createRouter({
       children: [
         { path: '', name: 'admin-dashboard', component: AdminOverview, meta: { titleKey: 'router.titles.adminDashboard' } },
         { path: 'sesiones', name: 'admin-sessions', component: AdminSessions, meta: { titleKey: 'router.titles.adminSessions' } },
+        { path: 'historial', name: 'admin-session-history', component: AdminSessionHistory, meta: { titleKey: 'router.titles.adminSessionHistory' } },
         { path: 'usuarios', name: 'admin-users', component: AdminUsers, meta: { titleKey: 'router.titles.adminUsers' } },
+        { path: 'usuarios/:id/actividad', name: 'admin-user-activity', component: AdminUserActivity, meta: { titleKey: 'router.titles.adminUserActivity' } },
         { path: 'invitaciones', name: 'admin-invites', component: AdminInvites, meta: { titleKey: 'router.titles.adminInvites' } },
         { path: 'accesos', name: 'admin-access', component: AdminAccess, meta: { titleKey: 'router.titles.adminAccess' } },
         { path: 'smtp', name: 'admin-smtp', component: AdminSmtp, meta: { titleKey: 'router.titles.adminSmtp' } },
         { path: 'auditoria', name: 'admin-audit', component: AdminAudit, meta: { titleKey: 'router.titles.adminAudit' } },
+        { path: 'reportes', name: 'admin-reports', component: AdminReports, meta: { titleKey: 'router.titles.adminReports' } },
         { path: 'tutor', name: 'admin-tutor-metrics', component: AdminTutorMetrics, meta: { titleKey: 'router.titles.adminTutorMetricsLong' } },
         { path: 'tutor/config', name: 'admin-tutor-config', component: AdminTutorConfig, meta: { titleKey: 'router.titles.adminTutorConfigLong' } },
         { path: 'seguridad', name: 'admin-security', component: AdminSecurity, meta: { titleKey: 'router.titles.adminSecurity' } },

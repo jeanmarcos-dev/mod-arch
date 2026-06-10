@@ -20,9 +20,10 @@ const themes: ThemeOption[] = [
   { id: 'accesible', labelKey: 'accesibleLabel', descKey: 'accesibleDesc', swatch: '#0049b0' },
 ];
 
-const locales: { id: Locale; labelKey: 'es' | 'en' }[] = [
+const locales: { id: Locale; labelKey: 'es' | 'en' | 'pt' }[] = [
   { id: 'es', labelKey: 'es' },
   { id: 'en', labelKey: 'en' },
+  { id: 'pt', labelKey: 'pt' },
 ];
 </script>
 

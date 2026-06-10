@@ -27,6 +27,7 @@ import MobileMenuButton from '../components/shell/MobileMenuButton.vue';
 import GlossaryModal from '../components/GlossaryModal.vue';
 import ConsoleDrawer from '../components/console/ConsoleDrawer.vue';
 import TutorLauncher from '../components/tutor/TutorLauncher.vue';
+import ReportModal from '../components/ReportModal.vue';
 import { useBreakpoint } from '../composables/useBreakpoint';
 import WhiteboardCursor from '../components/whiteboard/WhiteboardCursor.vue';
 import WhiteboardClickRipple from '../components/whiteboard/WhiteboardClickRipple.vue';
@@ -318,6 +319,7 @@ onBeforeUnmount(() => topChromeObserver?.disconnect());
     />
 
     <TutorLauncher />
+    <ReportModal />
 
     <!-- Whiteboard overlay: paints the owner's pointer for viewers. Cheap
          to keep mounted (renders nothing until an owner_pointer arrives). -->

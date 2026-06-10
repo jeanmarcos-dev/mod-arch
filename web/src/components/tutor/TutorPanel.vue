@@ -45,7 +45,7 @@ onMounted(scrollToBottom);
   <aside
     class="tutor-panel"
     :class="{ 'is-expanded': isExpanded }"
-    aria-label="Tutor MODARCHI"
+    aria-label="Tutor ARCHIUS"
   >
     <header class="head">
       <div class="title">
@@ -54,7 +54,7 @@ onMounted(scrollToBottom);
           <span class="status-led" aria-hidden="true" />
         </div>
         <div class="title-text">
-          <span class="title-main">MODARCHI</span>
+          <span class="title-main">ARCHIUS</span>
           <span class="title-sub">su guía en MODARCH</span>
         </div>
       </div>

@@ -7,21 +7,26 @@ import (
 	"testing"
 )
 
-// TestCatalogParity guards against a one-sided edit: every code present in ES
-// must be present in EN, and vice versa. Adding a new entry to one locale
-// without the other will fail this test before it ships.
+// TestCatalogParity guards against a one-sided edit: every code present in
+// any locale must be present in every other locale. Adding a new entry to
+// one locale without the others will fail this test before it ships.
 func TestCatalogParity(t *testing.T) {
 	t.Helper()
-	es := keys(Catalog["es"])
-	en := keys(Catalog["en"])
-	sort.Strings(es)
-	sort.Strings(en)
-	if len(es) != len(en) {
-		t.Fatalf("locale key counts differ: es=%d en=%d", len(es), len(en))
-	}
-	for i := range es {
-		if es[i] != en[i] {
-			t.Fatalf("missing translation at index %d: es=%q en=%q", i, es[i], en[i])
+	base := keys(Catalog[DefaultLocale])
+	sort.Strings(base)
+	for lang, table := range Catalog {
+		if lang == DefaultLocale {
+			continue
+		}
+		got := keys(table)
+		sort.Strings(got)
+		if len(got) != len(base) {
+			t.Fatalf("locale key counts differ: %s=%d %s=%d", DefaultLocale, len(base), lang, len(got))
+		}
+		for i := range base {
+			if got[i] != base[i] {
+				t.Fatalf("missing translation in %q at index %d: %s=%q %s=%q", lang, i, DefaultLocale, base[i], lang, got[i])
+			}
 		}
 	}
 }

@@ -26,7 +26,17 @@ var schemaSQL string
 //     bumping user_version.
 // v6: tutor_metrics — one row per Ask() with latency, tools used, cache
 //     hits. Drives the admin dashboard.
-const SchemaVersion = 6
+// v7: session tracking columns (client_ip_hash, client_ip, ua_short,
+//     geo_country, referrer_host) on sessions, plus the session_history
+//     append-only table. Enables per-user activity reports and persists
+//     session metadata past expiry.
+// v8: user_profiles table — extended student identity (cohort, institution,
+//     career, bio, github, linkedin, preferred_language). One row per user,
+//     ON DELETE CASCADE so soft-deleting a user removes its profile too.
+// v9: user_reports table — feedback/bug/idea submissions from students,
+//     persisted for admin triage. Anonymous reports are accepted; user_id
+//     nullifies on user delete so the report survives soft-delete.
+const SchemaVersion = 9
 
 // Store is the database handle. Methods on Store are safe for concurrent use:
 // SQLite serializes writes internally and the connection pool handles reads.
@@ -143,6 +153,34 @@ func (s *Store) migrate(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, rebuild); err != nil {
 			return fmt.Errorf("store: rebuild users v3→v4: %w", err)
 		}
+	}
+
+	// v6 → v7: session tracking columns on the existing sessions table.
+	// schema.sql declares them on CREATE so fresh databases are covered; old
+	// databases need explicit ALTERs. Each column is nullable so existing rows
+	// stay valid. The matching idx_sessions_country index is created after the
+	// ALTERs, not inside schema.sql, so a v6 → v7 upgrade does not race the
+	// index against a column that has not been added yet.
+	for _, col := range []struct{ name, ddl string }{
+		{"client_ip_hash", "ALTER TABLE sessions ADD COLUMN client_ip_hash TEXT"},
+		{"client_ip", "ALTER TABLE sessions ADD COLUMN client_ip TEXT"},
+		{"ua_short", "ALTER TABLE sessions ADD COLUMN ua_short TEXT"},
+		{"geo_country", "ALTER TABLE sessions ADD COLUMN geo_country TEXT"},
+		{"referrer_host", "ALTER TABLE sessions ADD COLUMN referrer_host TEXT"},
+	} {
+		has, err := columnExists(ctx, tx, "sessions", col.name)
+		if err != nil {
+			return fmt.Errorf("store: probe sessions.%s: %w", col.name, err)
+		}
+		if has {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, col.ddl); err != nil {
+			return fmt.Errorf("store: add sessions.%s: %w", col.name, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_sessions_country ON sessions(geo_country)`); err != nil {
+		return fmt.Errorf("store: create idx_sessions_country: %w", err)
 	}
 
 	// Indexes come AFTER the column-add / table rebuild so old databases

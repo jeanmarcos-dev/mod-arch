@@ -2,12 +2,11 @@
 import { computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { Gauge, Monitor, Users, Mail, Lock, Send, ScrollText, ExternalLink, LogOut, ShieldUser, BotMessageSquare, SlidersHorizontal, ShieldCheck, MonitorCog } from '@lucide/vue';
+import { Gauge, Monitor, Users, Mail, Lock, Send, ScrollText, ExternalLink, LogOut, ShieldUser, BotMessageSquare, SlidersHorizontal, ShieldCheck, MonitorCog, Clock, Inbox } from '@lucide/vue';
 import { useAdminStore } from '../stores/admin';
 import { useToastStore } from '../stores/toast';
 import Sidebar from '../components/shell/Sidebar.vue';
 import Topbar from '../components/shell/Topbar.vue';
-import ThemeSwitcher from '../components/shell/ThemeSwitcher.vue';
 import Toast from '../components/ui/Toast.vue';
 
 const { t, locale } = useI18n();
@@ -28,23 +27,30 @@ watch(
   { immediate: true },
 );
 
-// Items moderators can reach: dashboard + read tables + the kick action lives
-// inside /sesiones and /usuarios. Admin-only items (Invitaciones, Accesos)
-// are filtered out so the sidebar reflects the same gating the API enforces.
+// Items grouped into thematic sections. Moderators see a subset: anything
+// admin-only is filtered out so the sidebar reflects the same gating the API
+// enforces. Each item carries its `group` so the Sidebar renders the section
+// header above the first item in that group.
 const items = computed(() => {
-  const grp = t('shell.groups.admin');
+  const groupOverview = t('shell.groups.admin');
+  const groupPeople = t('shell.groups.adminPeople');
+  const groupSessions = t('shell.groups.adminSessions');
+  const groupContent = t('shell.groups.adminContent');
+  const groupConfig = t('shell.groups.adminConfig');
   const baseAll = [
-    { to: '/admin', label: t('router.titles.adminDashboard'), icon: Gauge, group: grp },
-    { to: '/admin/sesiones', label: t('router.titles.adminSessions'), icon: Monitor, group: grp },
-    { to: '/admin/usuarios', label: t('router.titles.adminUsers'), icon: Users, group: grp },
-    { to: '/admin/invitaciones', label: t('router.titles.adminInvites'), icon: Mail, group: grp },
-    { to: '/admin/accesos', label: t('router.titles.adminAccess'), icon: Lock, group: grp },
-    { to: '/admin/smtp', label: t('router.titles.adminSmtp'), icon: Send, group: grp },
-    { to: '/admin/auditoria', label: t('router.titles.adminAudit'), icon: ScrollText, group: grp },
-    { to: '/admin/tutor', label: t('router.titles.adminTutorMetrics'), icon: BotMessageSquare, group: grp },
-    { to: '/admin/tutor/config', label: t('router.titles.adminTutorConfig'), icon: SlidersHorizontal, group: grp },
-    { to: '/admin/seguridad', label: t('router.titles.adminSecurity'), icon: ShieldCheck, group: grp },
-    { to: '/admin/simulador', label: t('router.titles.adminSimulator'), icon: MonitorCog, group: grp },
+    { to: '/admin', label: t('router.titles.adminDashboard'), icon: Gauge, group: groupOverview },
+    { to: '/admin/usuarios', label: t('router.titles.adminUsers'), icon: Users, group: groupPeople },
+    { to: '/admin/invitaciones', label: t('router.titles.adminInvites'), icon: Mail, group: groupPeople },
+    { to: '/admin/sesiones', label: t('router.titles.adminSessions'), icon: Monitor, group: groupSessions },
+    { to: '/admin/historial', label: t('router.titles.adminSessionHistory'), icon: Clock, group: groupSessions },
+    { to: '/admin/auditoria', label: t('router.titles.adminAudit'), icon: ScrollText, group: groupSessions },
+    { to: '/admin/tutor', label: t('router.titles.adminTutorMetrics'), icon: BotMessageSquare, group: groupContent },
+    { to: '/admin/tutor/config', label: t('router.titles.adminTutorConfig'), icon: SlidersHorizontal, group: groupContent },
+    { to: '/admin/reportes', label: t('router.titles.adminReports'), icon: Inbox, group: groupContent },
+    { to: '/admin/simulador', label: t('router.titles.adminSimulator'), icon: MonitorCog, group: groupContent },
+    { to: '/admin/accesos', label: t('router.titles.adminAccess'), icon: Lock, group: groupConfig },
+    { to: '/admin/smtp', label: t('router.titles.adminSmtp'), icon: Send, group: groupConfig },
+    { to: '/admin/seguridad', label: t('router.titles.adminSecurity'), icon: ShieldCheck, group: groupConfig },
   ];
   if (admin.isModerator) {
     return baseAll.filter(item =>
@@ -86,11 +92,15 @@ onUnmounted(() => {
 
 <template>
   <div class="admin-shell">
-    <Sidebar :items="items" />
+    <Sidebar
+      :items="items"
+      :icon-size="20"
+      :icon-size-collapsed="18"
+      style="--sidebar-icon-box-w: 26px; --sidebar-icon-box-h: 24px;"
+    />
     <div class="admin-shell__main">
       <Topbar>
         <template #actions>
-          <ThemeSwitcher />
           <RouterLink to="/" class="admin-shell__link" :title="t('shell.adminTopbar.simulatorHint')">
             <ExternalLink :size="14" :stroke-width="2" />
             <span>{{ t('shell.adminTopbar.simulator') }}</span>

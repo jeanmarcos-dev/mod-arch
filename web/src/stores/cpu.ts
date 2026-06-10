@@ -1247,7 +1247,6 @@ export const useCpuStore = defineStore('cpu', () => {
         applyVarsPayload(ev.vars);
         break;
       case 'reset':
-        pushLog(formatLog.reset(), 'cyan', undefined, undefined, 'global');
         changedRegs.clear();
         for (const k of Object.keys(changedRegsByCore)) delete changedRegsByCore[Number(k)];
         procs.value = [];

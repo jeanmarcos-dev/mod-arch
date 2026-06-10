@@ -18,6 +18,7 @@ import {
   Settings,
 } from '@lucide/vue';
 import { useCpuStore, type CoreInfo } from '../../stores/cpu';
+import ReportButton from '../ReportButton.vue';
 import { useSimBarStore } from '../../stores/simBar';
 import { useDraggable } from '../../composables/useDraggable';
 import { useBreakpoint } from '../../composables/useBreakpoint';
@@ -216,6 +217,8 @@ const pauseTooltip = computed(() => {
           <Pin :size="13" :stroke-width="2" />
           <span>{{ t('simbar.dock') }}</span>
         </button>
+
+        <ReportButton class="sim-bar__report-btn" @pointerdown.stop @dblclick.stop />
       </header>
 
       <div class="sim-bar__row sim-bar__row--main">
@@ -311,6 +314,7 @@ const pauseTooltip = computed(() => {
             :title="t('simbar.undockHint')"
             @click="bar.float()"
           ><PinOff :size="14" :stroke-width="2" /></button>
+          <ReportButton class="sim-bar__report-btn" />
         </div>
       </div>
 
@@ -407,6 +411,12 @@ const pauseTooltip = computed(() => {
 }
 .sim-bar--dragging .sim-bar__handle { cursor: grabbing; }
 
+/* Push the actionable icon buttons away from the read-only TICK/WS cluster
+   so the floating header reads as two distinct groups instead of one strip. */
+.sim-bar__handle .sim-status-row__info-cluster + .icon-btn {
+  margin-left: var(--space-3);
+}
+
 .sim-bar__title {
   font-family: var(--font-display);
   letter-spacing: 3px;
@@ -443,6 +453,13 @@ const pauseTooltip = computed(() => {
 }
 .sim-bar__dock-btn > svg { flex-shrink: 0; }
 
+/* Larger left margin sets the support button apart from the simulator
+   controls cluster without a separator pipe (1px lines fight the parent gap
+   and end up looking off-center on subpixel grids). */
+.sim-bar__report-btn {
+  margin-left: var(--space-3);
+}
+
 /* ─── Main row (controls + status + accordion) ─────────────────────── */
 .sim-bar__row {
   padding: var(--space-1) var(--space-3);
@@ -460,7 +477,12 @@ const pauseTooltip = computed(() => {
   gap: var(--space-2) var(--space-3);
   min-height: 48px;
   position: relative;
-  padding-right: 120px; /* reserve room for the absolute tools + cores + PinOff cluster (docked only) */
+  /* Reserve room for the absolute tools + cores + PinOff + report cluster
+     (docked only). Math: 4 × 28px buttons + 3 × 8px gaps + 12px margin before
+     the report button + 12px right-offset = 172px, plus a 16px breathing gap
+     so the read-only TICK/WS chips read as a distinct cluster from the
+     actionable buttons on the right. */
+  padding-right: 188px;
 }
 
 /* In floating mode the cores-btn + dock cluster live in the header, so the

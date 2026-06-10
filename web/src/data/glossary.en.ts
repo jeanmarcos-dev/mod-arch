@@ -55,6 +55,10 @@ export const GLOSSARY_EN: Record<string, { short: string; detail: string }> = {
     short: 'Segment selectors (Code / Data / Stack).',
     detail: '16-bit selectors that index entries in the GDT (or LDT when TI=1; this simulator does not use LDT). Bits 0-1 are the RPL (Requested Privilege Level). In user mode CS = 0x1B (0x18 | 3); in kernel CS = 0x08. IRET reads the CS it is about to pop to decide whether to drop back to user or stay in kernel.',
   },
+  'CR2 — Control Register 2': {
+    short: 'Linear address that triggered the last page fault.',
+    detail: 'When the MMU raises a page fault (vector 0x0E), the HW loads CR2 with the virtual address the process tried to touch. The kernel reads CR2 inside the handler to decide what to do: resolve the page if the fault is legitimate (demand paging, copy-on-write), or kill the process if the access is invalid. In this simulator CR2 shows up in the events panel and in the page_fault event payload under the canonical name `cr2` (also available as `addr`).',
+  },
 
   // ─── Flags ──────────────────────────────────────────────────────────────
   'ZF — Zero Flag': {
@@ -292,6 +296,10 @@ The console badge reads "KBuf {used}/{cap}" with cap = 16, which is a purely did
   'Page fault': {
     short: 'The memory access is invalid and the MMU rejects it.',
     detail: 'Typical causes: the PL3 process tries to touch kernel memory, writes to a read-only page (like user_code), or accesses an address outside its allocated region. In real kernels a page fault is NOT always fatal — it is also used for on-demand resolution: demand paging, copy-on-write after a fork, lazy heap mapping. The kernel decides case by case: resolve (mapping the page) or kill the process. In this simulator every page fault is fatal: the process becomes ZOMBIE with BlockedOn="page_fault". The HW dispatch goes through vector 0x0E (see that entry in Interrupts).',
+  },
+  'Error code (page fault)': {
+    short: '32-bit bitmask describing the cause of the page fault.',
+    detail: 'Follows the Intel SDM Vol 3 §6.15 layout: bit 0 (P) = 1 for a permission violation, 0 if the page was not present; bit 1 (W) = 1 for a write access, 0 for a read; bit 2 (U) = 1 if the fault came from PL3 (user), 0 from PL0 (kernel); bit 4 (I-D) = 1 if it was an instruction fetch. Example: error_code = 7 = 0b111 → P, W, U bits set → write from user to a page present but protected. On real x86 the HW pushes this code on the stack after the frame; this simulator writes it to AddrErrCodeMirror so the handler reads it with a `mov` and skips asymmetric layouts.',
   },
 
   // ─── Syscalls ───────────────────────────────────────────────────────────

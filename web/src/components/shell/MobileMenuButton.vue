@@ -39,6 +39,10 @@ const shiftedDown = computed(() => bannerVisible.value);
   left: 8px;
   width: 28px;
   height: 28px;
+  /* Neutralise the global mobile-touch override (`button { min-height: 44px }`
+     in style.css) that would otherwise stretch the hamburger to 44px and push
+     it into the row below. */
+  min-height: 0;
   align-items: center;
   justify-content: center;
   background: var(--surface-2);

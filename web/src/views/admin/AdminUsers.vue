@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Users, ShieldCheck, ShieldUser, GraduationCap, UserPlus, Pencil, Trash2, Lock } from '@lucide/vue';
+import { Users, ShieldCheck, ShieldUser, GraduationCap, UserPlus, Pencil, Trash2, Lock, Activity } from '@lucide/vue';
+import { useRouter } from 'vue-router';
 import { useAdminStore, type UserRow, type UserRole, ENV_ADMIN_USER_ID } from '../../stores/admin';
 import { useToastStore } from '../../stores/toast';
 import Card from '../../components/ui/Card.vue';
@@ -13,6 +14,11 @@ import { formatTimestamp } from './util';
 const { t } = useI18n();
 const admin = useAdminStore();
 const toast = useToastStore();
+const router = useRouter();
+
+function viewActivity(id: string) {
+  router.push({ name: 'admin-user-activity', params: { id } });
+}
 
 const columns = computed<Column<UserRow>[]>(() => [
   { id: 'name', label: t('admin.users.colName') },
@@ -226,6 +232,16 @@ async function deleteUser(row: UserRow) {
               </li>
             </ul>
           </div>
+          <Btn
+            variant="ghost"
+            size="sm"
+            :disabled="row.id === ENV_ADMIN_USER_ID"
+            :title="t('admin.users.actionActivityHint')"
+            @click="viewActivity(row.id)"
+          >
+            <Activity :size="12" :stroke-width="2" />
+            <span>{{ t('admin.users.actionActivity') }}</span>
+          </Btn>
           <Btn
             variant="ghost"
             size="sm"
