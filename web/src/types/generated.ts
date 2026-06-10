@@ -22,6 +22,86 @@ export interface FocusInput {
   is_mobile?: boolean;
 }
 
+export interface SnapshotEvent {
+  type: 'snapshot';
+  regs: Record<string, number>;
+  segments: Record<string, number>;
+  mode: number;
+  halted: boolean;
+  tick: number;
+  timer_quantum: number;
+  current_pid: number;
+  ready_queue: number[];
+  wait_queue: Record<string, any>[];
+  procs: Record<string, any>[];
+  sources: Record<number, string>;
+  source_maps?: Record<number, Record<string, any[]>>;
+  vars?: Record<number, Record<string, any>>;
+  cores: any[];
+  num_cores: number;
+  running: boolean;
+  paused?: boolean;
+  hz: number;
+  clockHz: number;
+  speedMul: number;
+  tickIntervalMs: number;
+}
+
+export interface CoreSnapshot {
+  id: number;
+  regs: Record<string, number>;
+  segments: Record<string, number>;
+  mode: number;
+  halted: boolean;
+  tick: number;
+  current_pid: number;
+  running_idle?: boolean;
+  idle_ticks?: number;
+}
+
+export interface LoadedEvent {
+  type: 'loaded';
+  name: string;
+  pids: number[];
+  procs: Record<string, any>[];
+  sources: Record<number, string>;
+  source_maps?: Record<number, Record<string, any[]>>;
+  var_meta?: Record<number, Record<string, any>>;
+}
+
+export interface SessionInfoEvent {
+  type: 'session_info';
+  id: string;
+  mode: string;
+  role: string;
+  label: string;
+  view_token: string;
+  user_id?: string;
+  user_name?: string;
+  user_email?: string;
+  presence: any;
+}
+
+export interface TickEventsEvent {
+  type: 'tick_events';
+  ticks: any[];
+}
+
+export interface TickEvent {
+  tick: number;
+  events: any[];
+}
+
+export interface PresenceEvent {
+  type: 'presence';
+  section: string;
+  cores: number[];
+  mode?: string;
+  narrators?: boolean;
+  focus?: any;
+  at?: number;
+}
+
 export interface Command {
   cmd: string;
   program?: string;
