@@ -2,6 +2,14 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { apiFetch } from '../lib/api';
 
+export interface TelemetryMetrics {
+  active_ws_connections: number;
+  total_ws_connections: number;
+  llm_queries: number;
+  llm_errors: number;
+  avg_llm_latency_ms: number;
+}
+
 export interface AdminStats {
   full: number;
   privileged: number;
@@ -235,6 +243,7 @@ export const useAdminStore = defineStore('admin', () => {
   const role = ref<UserRole | null>(null);
   const viaEnv = ref<boolean>(false);
   const stats = ref<AdminStats | null>(null);
+  const metrics = ref<TelemetryMetrics | null>(null);
   const sessions = ref<SessionRow[]>([]);
   const invites = ref<InviteRow[]>([]);
   const settings = ref<AccessSettings | null>(null);
@@ -527,6 +536,12 @@ export const useAdminStore = defineStore('admin', () => {
     return result;
   }
 
+
+  async function loadMetrics() {
+    const data = await send<TelemetryMetrics>('GET', '/admin/api/metrics');
+    metrics.value = data;
+  }
+
   return {
     user,
     userId,
@@ -574,5 +589,7 @@ export const useAdminStore = defineStore('admin', () => {
     reportsPage,
     loadReports,
     updateReportStatus,
+    metrics,
+    loadMetrics,
   };
 });

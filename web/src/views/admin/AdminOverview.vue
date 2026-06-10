@@ -24,6 +24,7 @@ const topCountries = ref<Array<{ code: string; count: number }>>([]);
 async function loadWidgets() {
   try {
     const page = await admin.loadSessionHistory({}, 1, 25);
+    await admin.loadMetrics();
     recent.value = page.rows.slice(0, 5);
     const counts = new Map<string, number>();
     for (const row of page.rows) {
@@ -70,6 +71,21 @@ onMounted(loadWidgets);
     </p>
 
     <div v-if="admin.stats" class="overview__stats">
+      <Card v-if="admin.metrics" :surface="2" :padded="false">
+        <div class="stat">
+          <Globe :size="14" :stroke-width="2" class="stat__icon" />
+          <span class="stat__label">WS Connections</span>
+          <span class="stat__value">{{ admin.metrics.active_ws_connections }}</span>
+        </div>
+      </Card>
+      <Card v-if="admin.metrics" :surface="2" :padded="false">
+        <div class="stat">
+          <BotMessageSquare :size="14" :stroke-width="2" class="stat__icon" />
+          <span class="stat__label">LLM Latency (ms)</span>
+          <span class="stat__value">{{ Math.round(admin.metrics.avg_llm_latency_ms) }}</span>
+        </div>
+      </Card>
+
       <Card :surface="2" :padded="false">
         <div class="stat">
           <Monitor :size="14" :stroke-width="2" class="stat__icon" />

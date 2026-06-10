@@ -1,6 +1,8 @@
 package server
 
 import (
+	"github.com/jeanmarcos/modos-cpu/internal/telemetry"
+
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -181,6 +183,7 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /admin/api/invites/{token}", s.requireAdminAPI(s.requireCSRF(s.handleAdminRevokeInvite)))
 
 	mux.HandleFunc("GET /admin/api/settings", s.requireAdminAPI(s.handleAdminGetSettings))
+	mux.HandleFunc("GET /admin/api/metrics", s.requireAdminAPI(s.handleAdminMetrics))
 	mux.HandleFunc("PUT /admin/api/settings", s.requireAdminAPI(s.requireCSRF(s.handleAdminSetSetting)))
 
 	// Demo catalog: read-only listing used by the admin "habilitar demos" UI.
@@ -559,4 +562,11 @@ func (s *Server) handleAdminListSessions(w http.ResponseWriter, _ *http.Request)
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handleAdminMetrics returns the current telemetry snapshot for the dashboard.
+func (s *Server) handleAdminMetrics(w http.ResponseWriter, r *http.Request) {
+	m := telemetry.Snapshot()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(m)
 }

@@ -1,6 +1,8 @@
 package tutor
 
 import (
+	"github.com/jeanmarcos/modos-cpu/internal/telemetry"
+
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -387,7 +389,10 @@ func (s *Service) askInternal(ctx context.Context, sess *sessions.Session, quest
 		}
 
 		text, rawText, toolCalls, usage, model, err := s.callWithRetry(ctx, progress, func() (string, string, []llm.ToolCall, llm.Usage, string, error) {
-			return s.callLLM(ctx, streamer, canStream, req, progress)
+			t0 := time.Now()
+			t, rt, tc, u, m, e := s.callLLM(ctx, streamer, canStream, req, progress)
+			telemetry.TrackLLMQuery(t0, e)
+			return t, rt, tc, u, m, e
 		})
 		if err != nil {
 			s.logger.Warn("tutor: llm call failed, falling back to retriever-only",
@@ -820,6 +825,9 @@ func buildCitationsFromText(text string, retrieved []rag.ScoredChunk) []Citation
 	out := make([]Citation, 0, len(all))
 	seen := make(map[string]bool)
 	for _, c := range all {
+		if !strings.Contains(text, c.Label) {
+			continue
+		}
 		if seen[c.Label] {
 			continue
 		}
