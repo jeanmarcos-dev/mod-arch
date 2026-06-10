@@ -1,6 +1,10 @@
 package server
 
 import (
+	"github.com/jeanmarcos/modos-cpu/internal/telemetry"
+
+	"fmt"
+
 	"context"
 	"encoding/json"
 	"net/http"
@@ -135,6 +139,75 @@ type Command struct {
 // the ones that actually changed — the server merges the deltas into the
 // stored Focus snapshot. The structure mirrors sessions.Focus 1:1 except
 // each field is decoded server-side before propagation.
+
+// Validate enforces strict constraints on incoming payloads to protect the
+// server from malformed, missing, or maliciously sized inputs.
+func (c *Command) Validate() error {
+	switch c.Cmd {
+	case "load":
+		if len(c.Program) == 0 || len(c.Program) > 200 {
+			return fmt.Errorf("invalid program name length")
+		}
+	case "set_speed":
+		if c.Speed < 0 || c.Speed > 100 {
+			return fmt.Errorf("speed must be between 0 and 100")
+		}
+	case "set_clock_hz":
+		if c.ClockHz <= 0 || c.ClockHz > 1000 {
+			return fmt.Errorf("clockHz must be between 1 and 1000")
+		}
+	case "set_speed_mul":
+		if c.SpeedMul < 0.1 || c.SpeedMul > 20.0 {
+			return fmt.Errorf("speedMul must be between 0.1 and 20.0")
+		}
+	case "set_num_cores":
+		if c.Cores < 1 || c.Cores > 32 {
+			return fmt.Errorf("cores must be between 1 and 32")
+		}
+	case "timer_quantum":
+		if c.Quantum < 1 || c.Quantum > 10000 {
+			return fmt.Errorf("quantum must be between 1 and 10000")
+		}
+	case "push_key":
+		if len(c.Key) == 0 || len(c.Key) > 10 {
+			return fmt.Errorf("invalid key string length")
+		}
+	case "set_alias":
+		if len(c.Alias) > 100 {
+			return fmt.Errorf("alias too long")
+		}
+	case "pointer", "click":
+		if len(c.PointerAnchor) > 50 || len(c.PointerRoute) > 100 {
+			return fmt.Errorf("pointer strings too long")
+		}
+		if c.PointerOffsetX < -1.0 || c.PointerOffsetX > 2.0 || c.PointerOffsetY < -1.0 || c.PointerOffsetY > 2.0 {
+			return fmt.Errorf("pointer offsets out of bounds")
+		}
+	case "glossary_hover":
+		if len(c.Term) > 100 {
+			return fmt.Errorf("glossary term too long")
+		}
+	case "ask":
+		if len(c.Question) == 0 || len(c.Question) > 3000 {
+			return fmt.Errorf("question length must be between 1 and 3000 chars")
+		}
+		if len(c.RequestID) > 100 {
+			return fmt.Errorf("request ID too long")
+		}
+		if c.TutorMode != "" && c.TutorMode != "direct" && c.TutorMode != "socratic" {
+			return fmt.Errorf("invalid tutor mode")
+		}
+	case "presence":
+		if len(c.Section) > 50 || len(c.Mode) > 50 {
+			return fmt.Errorf("presence strings too long")
+		}
+		if len(c.VisibleCore) > 32 {
+			return fmt.Errorf("too many visible cores")
+		}
+	}
+	return nil
+}
+
 type FocusInput struct {
 	MiddleTab        *string `json:"middle_tab,omitempty"`
 	MobileTab        *string `json:"mobile_tab,omitempty"`
@@ -156,6 +229,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess.Touch()
+
+	defer telemetry.TrackWSConnection()()
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns: allowedWSOrigins(),
@@ -273,6 +348,14 @@ func (s *Server) wsReadLoop(ctx context.Context, conn *websocket.Conn, sess *ses
 				"code":    i18n.CodeWSJSONError,
 				"message": i18n.T(i18n.DefaultLocale, i18n.CodeWSJSONError, map[string]string{"err": err.Error()}),
 				"params":  map[string]string{"err": err.Error()},
+			}
+			continue
+		}
+		if err := cmd.Validate(); err != nil {
+			c.Send <- map[string]any{
+				"type":    "error",
+				"code":    "validation_error",
+				"message": err.Error(),
 			}
 			continue
 		}
