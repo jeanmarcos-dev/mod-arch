@@ -136,7 +136,7 @@ func (k *Kernel) scheduleNext(core *Core) []cpu.Event {
 		cpu.EventProcessState{PID: nextPID, State: string(StateRun)},
 	)
 
-	return stampKernelContext(out, core.ID, core.CPU.Tick)
+	return stampKernelContext(out, core.ID, k.Clock)
 }
 
 // loadCPUFromPCB initializes a core from the state stored in a PCB. Only used
@@ -188,7 +188,7 @@ func (k *Kernel) switchTo(core *Core, pid int) []cpu.Event {
 		cpu.EventPCBRestore{CoreID: core.ID, PID: pid, Regs: pcbRegsSnapshot(pcb)},
 		cpu.EventCoreAssign{CoreID: core.ID, PID: pid},
 		cpu.EventProcessState{PID: pid, State: string(StateRun)},
-	}, core.ID, core.CPU.Tick)
+	}, core.ID, k.Clock)
 }
 
 func readKernelDWORD(c *cpu.CPU, addr uint32) uint32 {
@@ -251,7 +251,7 @@ func (k *Kernel) DispatchIdleCores() []cpu.Event {
 				out = append(out, cpu.EventCoreRelease{
 					CoreID: c.ID, PID: 0, Reason: "idle preempted",
 				})
-				stampKernelContext(out[n:], c.ID, c.CPU.Tick)
+				stampKernelContext(out[n:], c.ID, k.Clock)
 				c.RunningIdle = false
 				c.CurrentPID = 0
 				c.CPU.Halted = true
@@ -310,7 +310,7 @@ func (k *Kernel) DispatchIdleCores() []cpu.Event {
 		// PCBRestore and the first user instruction.
 		if oldMode != idle.CPU.Mode {
 			out = append(out, cpu.EventModeSwitch{
-				CoreID: idle.ID, Tick: idle.CPU.Tick,
+				CoreID: idle.ID, Tick: k.Clock,
 				From: oldMode, To: idle.CPU.Mode,
 				Kind: "SW", Cause: "dispatch",
 				NewCS:  idle.CPU.R.CS,
@@ -319,7 +319,7 @@ func (k *Kernel) DispatchIdleCores() []cpu.Event {
 				NewESP: idle.CPU.R.ESP,
 			})
 		}
-		stampKernelContext(out[n:], idle.ID, idle.CPU.Tick)
+		stampKernelContext(out[n:], idle.ID, k.Clock)
 	}
 
 	// Idle fallback pass: every core that still has no work gets the
@@ -353,7 +353,7 @@ func (k *Kernel) BindIdleCores() []cpu.Event {
 		if c.CurrentPID == 0 && !c.RunningIdle {
 			n := len(out)
 			out = append(out, k.bindIdleToCore(c)...)
-			stampKernelContext(out[n:], c.ID, c.CPU.Tick)
+			stampKernelContext(out[n:], c.ID, k.Clock)
 		}
 	}
 	return out
@@ -435,12 +435,12 @@ func (k *Kernel) runInitReapCycle(idle *Core, init *PCB) []cpu.Event {
 
 	init.State = StateBlocked
 	init.BlockedOn = initBlockedReason
-	init.BlockedSince = idle.CPU.Tick
+	init.BlockedSince = k.Clock
 	init.Core = -1
 	out = append(out, cpu.EventProcessState{
 		PID: init.PID, State: string(StateBlocked), Reason: initBlockedReason,
 	})
 	// Idle core stays idle — the outer loop in DispatchIdleCores will
 	// reuse it for the next ready PID, if any.
-	return stampKernelContext(out, idle.ID, idle.CPU.Tick)
+	return stampKernelContext(out, idle.ID, k.Clock)
 }

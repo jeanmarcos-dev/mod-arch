@@ -356,7 +356,7 @@ func TestVarsUpdateBroadcastInOrder(t *testing.T) {
 	// Attach a generous-buffer client AFTER LoadProgram so its load-time
 	// snapshot/vars_update do not crowd the channel for the step assertions.
 	cli := NewClient(RoleOwner)
-	cli.Send = make(chan map[string]any, 1024)
+	cli.Send = make(chan any, 1024)
 	s.clientMu.Lock()
 	s.clients[cli] = struct{}{}
 	s.clientMu.Unlock()
@@ -370,21 +370,22 @@ func TestVarsUpdateBroadcastInOrder(t *testing.T) {
 	// this test was making vars ride the same atomic frame as the events
 	// instead of a separate message that the Send buffer could drop while
 	// keeping the events.
-	var varsFrame map[string]any
+	var varsFrame TickEventsEvent
+	varsFrame.Tick = 99999
 	for done := false; !done; {
 		select {
 		case msg := <-cli.Send:
-			if msg["type"] == "tick_events" && msg["vars"] != nil {
-				varsFrame = msg
+			if ev, ok := msg.(TickEventsEvent); ok && ev.Vars != nil {
+				varsFrame = ev
 			}
 		default:
 			done = true
 		}
 	}
-	if varsFrame == nil {
+	if varsFrame.Tick == 99999 {
 		t.Fatal("no tick_events frame with vars piggyback received after StepOnce")
 	}
-	vars := varsFrame["vars"].(map[string]any)
+	vars := varsFrame.Vars
 	var entry map[string]any
 	for _, v := range vars {
 		entry = v.(map[string]any)

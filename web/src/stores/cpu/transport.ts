@@ -1,4 +1,4 @@
-import { ref } from 'vue';
+import { ref, onScopeDispose } from 'vue';
 import { formatLog } from '../../i18n/formatLog';
 
 export interface TransportOptions {
@@ -11,6 +11,23 @@ export function useCpuTransport(options: TransportOptions) {
   let ws: WebSocket | null = null;
   const connected = ref(false);
   const hasEverConnected = ref(false);
+
+  onScopeDispose(() => {
+    if (ws) {
+      ws.onclose = null; // Prevent reconnect
+      ws.close();
+      ws = null;
+    }
+    if (retryTimer !== null) {
+      window.clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    if (rafHandle !== null) {
+      cancelAnimationFrame(rafHandle);
+      rafHandle = null;
+    }
+  });
+
   
   const BACKOFF_MS = [1000, 2000, 5000, 10000, 30000];
   const reconnectAttempts = ref(0);
@@ -112,20 +129,34 @@ export function useCpuTransport(options: TransportOptions) {
     });
   }
 
+  // Guards a connect() already in flight. The `ws` checks below only catch a
+  // socket that has reached CONNECTING/OPEN, but `ws` is assigned after two
+  // awaits (bootstrapSession + onBeforeConnect). Two synchronous callers — e.g.
+  // a child view's onMounted firing before its parent shell's — would both pass
+  // the `ws` guard while it is still null and open two sockets, each delivering
+  // every frame into the same store (duplicated events). This flag short-circuits
+  // the second caller before either await runs.
+  let connecting = false;
   async function connect() {
+    if (connecting) return;
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
-    await bootstrapSession();
-    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-      return;
+    connecting = true;
+    try {
+      await bootstrapSession();
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+      if (options.onBeforeConnect) {
+        await options.onBeforeConnect();
+      }
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const url = `${proto}://${location.host}/ws`;
+      ws = new WebSocket(url);
+    } finally {
+      connecting = false;
     }
-    if (options.onBeforeConnect) {
-      await options.onBeforeConnect();
-    }
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${location.host}/ws`;
-    ws = new WebSocket(url);
     ws.onopen = () => {
       connected.value = true;
       hasEverConnected.value = true;

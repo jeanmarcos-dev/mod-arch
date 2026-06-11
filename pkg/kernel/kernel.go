@@ -64,6 +64,11 @@ type Kernel struct {
 	// core; later cores come up idle until the scheduler hands them work.
 	Cores []*Core
 
+	// Clock is the global simulation clock shared by every core. It advances
+	// once per Step and is the sole source of truth for the Tick stamped on
+	// every event, keeping the event log ordered across cores.
+	Clock uint64
+
 	// Mem is the shared physical memory all cores read and write through.
 	Mem *cpu.Memory
 
@@ -297,6 +302,7 @@ func (k *Kernel) Reset() {
 		// Reset on an idle kernel because AllHalted() would stay false.
 		c.CPU.Halted = true
 	}
+	k.Clock = 0
 	k.Processes = make(map[int]*PCB)
 	k.Ready.Reset()
 	k.nextPID = 1
@@ -463,16 +469,20 @@ func (k *Kernel) popNextRunnable() (int, bool) {
 // the simulator extends that invariant to all five phases for visibility.
 func (k *Kernel) Step() ([]cpu.Event, error) {
 	if len(k.PendingKernelWork) > 0 {
-		return k.drainOneKernelWorkPhase(), nil
+		evs := k.drainOneKernelWorkPhase()
+		k.Clock++
+		return evs, nil
 	}
 	out := k.DispatchIdleCores()
 	for _, core := range k.Cores {
 		evs, err := k.stepCore(core)
 		out = append(out, evs...)
 		if err != nil {
+			k.Clock++
 			return out, err
 		}
 	}
+	k.Clock++
 	return out, nil
 }
 
@@ -482,6 +492,9 @@ func (k *Kernel) Step() ([]cpu.Event, error) {
 // idle: it does not tick and emits nothing. It only wakes up once the
 // scheduler assigns it work or routes an interrupt its way.
 func (k *Kernel) stepCore(core *Core) ([]cpu.Event, error) {
+	// Sync the core to the global clock so events emitted inside CPU.Step
+	// carry the global tick instead of a divergent per-core counter.
+	core.CPU.Tick = k.Clock
 	// Gate the idle short-circuit on Halted so the path is only taken when
 	// the swapper is genuinely parked on HLT. After a timer IRQ wakes the
 	// CPU the handler still needs to run (NOP + IRET + JMP + HLT); falling
@@ -499,11 +512,9 @@ func (k *Kernel) stepCore(core *Core) ([]cpu.Event, error) {
 				core.CPU.PendingIRQs = append(core.CPU.PendingIRQs, IRQTimer)
 				core.idleTicksSinceFire = 0
 			} else {
-				tick := core.CPU.Tick
-				core.CPU.Tick++
 				return []cpu.Event{cpu.EventHalt{
 					CoreID: core.ID,
-					Tick:   tick,
+					Tick:   k.Clock,
 					PID:    0,
 				}}, nil
 			}
@@ -538,7 +549,7 @@ func (k *Kernel) stepCore(core *Core) ([]cpu.Event, error) {
 		}
 	}
 	if err != nil {
-		return stampKernelContext(evs, core.ID, core.CPU.Tick), err
+		return stampKernelContext(evs, core.ID, k.Clock), err
 	}
 	for _, e := range evs {
 		irq, ok := e.(cpu.EventIRQFire)
@@ -553,7 +564,7 @@ func (k *Kernel) stepCore(core *Core) ([]cpu.Event, error) {
 		evs = append(evs, handlerEvs...)
 		evs = append(evs, schedEvs...)
 	}
-	return stampKernelContext(evs, core.ID, core.CPU.Tick), nil
+	return stampKernelContext(evs, core.ID, k.Clock), nil
 }
 
 // stampKernelContext fills CoreID/Tick on kernel-emitted events that lack

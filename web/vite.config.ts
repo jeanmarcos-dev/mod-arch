@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 
-const backendHost = (typeof process !== 'undefined' && process.env?.VITE_BACKEND) || 'http://localhost:8080';
+const backendHost = (typeof process !== 'undefined' && process.env?.VITE_BACKEND) || 'http://localhost:9080';
 
 export default defineConfig({
   plugins: [vue()],

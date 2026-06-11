@@ -3,6 +3,36 @@ import { usePreferencesStore } from '../preferences';
 import type { CpuEvent, SessionInfo, Presence, VarMeta, VarSnapshot, LogEntry } from './types';
 import { formatLog } from '../../i18n/formatLog';
 
+// Event tags whose log line is the PRIMARY (atomic) action of a tick. The
+// kernel emits at most one *execution* primary (instruction/irq_fire/halt) per
+// (tick, core); a syscall tick may also carry the sub-event it triggered
+// (fork/thread/mutex/sem), and the event log's headline-priority picks the
+// most meaningful one. Everything else a tick emits is a DETAIL that
+// elaborates the primary: pcb save/restore, core assign/release, reparent,
+// wait, and crucially mode_switch — a privilege flip is always a consequence
+// of a dispatch, an IRQ entry, or an IRET, never an action on its own. Tags
+// that produce no log line (reg_write, mem_*, process_state, console_out,
+// core_idle, pipe_*) never reach pushLog.
+const PRIMARY_LOG_TAGS = new Set<string>([
+  'instruction',
+  'syscall',
+  'sched_decision',
+  'irq_fire',
+  'halt',
+  'page_fault',
+  'wake',
+  'init_reap',
+  'fork',
+  'thread_create',
+  'thread_exit',
+  'mutex_op',
+  'sem_op',
+]);
+
+function roleForTag(tag: string | undefined): LogEntry['role'] {
+  return tag && PRIMARY_LOG_TAGS.has(tag) ? 'primary' : 'detail';
+}
+
 // Using `any` for now to quickly find all missing variables using TS compiler
 export function useCpuReducer(state: any) {
   const {
@@ -68,7 +98,16 @@ export function useCpuReducer(state: any) {
     return () => subscribers.delete(fn);
   }
 
+  // Role/tag of the event currently being applied, derived once and read by
+  // pushLog as the default for every line that event emits. Closure vars keep
+  // the ~30 pushLog call sites untouched; applyEvent runs each event
+  // synchronously, so there is no interleaving to corrupt them.
+  let currentLogRole: LogEntry['role'] = 'detail';
+  let currentLogTag: string | undefined;
+
   function applyEvent(ev: CpuEvent) {
+    currentLogTag = (ev as { type?: string }).type;
+    currentLogRole = roleForTag(currentLogTag);
     // The tutor store listens via a window CustomEvent so cpu.ts does not
     // grow a hard dependency on it. Any payload typed as 'tutor_answer' is
     // forwarded verbatim; the tutor handler decides what to do with it.
@@ -130,7 +169,7 @@ export function useCpuReducer(state: any) {
         if (ev.vars) {
           const next: Record<number, VarSnapshot> = {};
           for (const [pid, snap] of Object.entries(ev.vars)) {
-            next[Number(pid)] = snap;
+            next[Number(pid)] = snap as unknown as VarSnapshot;
           }
           procVars.value = next;
         } else if (ev.vars === null) {
@@ -750,6 +789,8 @@ export function useCpuReducer(state: any) {
     scope?: 'global',
     kind?: 'scheduler',
     glyph?: LogEntry['glyph'],
+    role: LogEntry['role'] = currentLogRole,
+    tag: string | undefined = currentLogTag,
   ) {
     // Derive inKernel from the live per-core mode tracked in cores.value.
     // mode_switch events update that value before subsequent pushLog calls
@@ -761,7 +802,7 @@ export function useCpuReducer(state: any) {
       const c = cores.value.find((x: any) => x.id === coreId);
       if (c) inKernel = c.mode === 0;
     }
-    log.value.push({ ts: Date.now(), text, color, coreId, tick, scope, inKernel, kind, glyph });
+    log.value.push({ ts: Date.now(), text, color, coreId, tick, scope, inKernel, kind, glyph, role, tag });
     if (log.value.length > 500) log.value.splice(0, log.value.length - 500);
     triggerRef(log);
   }

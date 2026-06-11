@@ -781,6 +781,9 @@ const pt = {
       schedulerChipTitle: 'O scheduler atuou neste tick — uma decisão de escalonamento, um wake de processo ou um save/restore de PCB. O scheduler é uma das muitas funções do kernel: K marca "rodou o kernel", S marca "rodou especificamente o scheduler".',
       followTailOn: 'Acompanhamento automático ativo. Clique para parar.',
       followTailOff: 'Acompanhamento automático parado. Clique para retomar.',
+      expandAllOn: 'Detalhe expandido em todos os ticks. Clique para recolher.',
+      expandAllOff: 'Detalhe recolhido. Clique para expandir todos os ticks.',
+      expandRowTitle: 'Mostrar ou ocultar o detalhe deste tick',
     },
     memory: {
       title: 'MEMÓRIA · HEX DUMP',

@@ -112,10 +112,9 @@ func TestDispatchIdleCores_NoopWhenReadyEmpty(t *testing.T) {
 }
 
 // TestDispatchIdleCores_StampsCoreAndTick ensures every kernel event emitted
-// by the dispatcher carries the CoreID of the core receiving the work and a
-// Tick number sourced from that core's CPU. The frontend relies on both
-// fields to place each event in its column / row of the multicore log grid;
-// regressing here would silently misalign the timeline view.
+// by the dispatcher carries the CoreID of the core receiving the work and the
+// global clock as its Tick. The frontend relies on both fields to place each
+// event in its column / row of the multicore log grid.
 func TestDispatchIdleCores_StampsCoreAndTick(t *testing.T) {
 	k := NewMulti(cpu.DefaultMemSize, 2)
 	if _, err := k.AddProcess("p1", []byte{0x90, 0xF4}); err != nil {
@@ -125,43 +124,40 @@ func TestDispatchIdleCores_StampsCoreAndTick(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Drive a couple of ticks so Tick != 0 distinguishes "stamped" from
-	// "zero-value default".
-	k.Cores[0].CPU.Tick = 7
-	k.Cores[1].CPU.Tick = 11
+	// Set the global clock non-zero so "stamped" is distinguishable from the
+	// zero-value default. Every event of this step shares this single tick.
+	k.Clock = 9
 
 	evs := k.DispatchIdleCores()
 	if len(evs) == 0 {
 		t.Fatal("DispatchIdleCores returned no events")
 	}
 
-	// Build the expected (CoreID, Tick) per dispatched PID. P1 went to core 0,
-	// P2 to core 1, in that order.
 	for _, e := range evs {
 		switch v := e.(type) {
 		case cpu.EventSchedDecision:
-			want := struct{ core int; tick uint64 }{}
+			wantCore := -1
 			switch v.ToPID {
 			case 1:
-				want = struct{ core int; tick uint64 }{0, 7}
+				wantCore = 0
 			case 2:
-				want = struct{ core int; tick uint64 }{1, 11}
+				wantCore = 1
 			}
-			if v.CoreID != want.core || v.Tick != want.tick {
+			if v.CoreID != wantCore || v.Tick != k.Clock {
 				t.Errorf("SchedDecision ToPID=%d: CoreID=%d Tick=%d, want CoreID=%d Tick=%d",
-					v.ToPID, v.CoreID, v.Tick, want.core, want.tick)
+					v.ToPID, v.CoreID, v.Tick, wantCore, k.Clock)
 			}
 		case cpu.EventCoreAssign:
-			if v.Tick == 0 {
-				t.Errorf("CoreAssign{CoreID:%d PID:%d}: Tick=0 (not stamped)", v.CoreID, v.PID)
+			if v.Tick != k.Clock {
+				t.Errorf("CoreAssign{CoreID:%d PID:%d}: Tick=%d, want %d", v.CoreID, v.PID, v.Tick, k.Clock)
 			}
 		case cpu.EventPCBRestore:
-			if v.Tick == 0 {
-				t.Errorf("PCBRestore{CoreID:%d PID:%d}: Tick=0 (not stamped)", v.CoreID, v.PID)
+			if v.Tick != k.Clock {
+				t.Errorf("PCBRestore{CoreID:%d PID:%d}: Tick=%d, want %d", v.CoreID, v.PID, v.Tick, k.Clock)
 			}
 		case cpu.EventProcessState:
-			if v.Tick == 0 {
-				t.Errorf("ProcessState{PID:%d State:%s}: Tick=0 (not stamped)", v.PID, v.State)
+			if v.Tick != k.Clock {
+				t.Errorf("ProcessState{PID:%d State:%s}: Tick=%d, want %d", v.PID, v.State, v.Tick, k.Clock)
 			}
 			if v.CoreID == 0 && v.PID == 2 {
 				t.Errorf("ProcessState for PID 2 went to CoreID 0 (expected 1)")

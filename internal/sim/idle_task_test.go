@@ -291,13 +291,13 @@ func TestStepOnce_NoHaltedBroadcastWithIdle(t *testing.T) {
 	for drain := true; drain; {
 		select {
 		case msg := <-client.Send:
-			kind, _ := msg["type"].(string)
-			halted, _ := msg["halted"].(bool)
+			kind, _ := msgAsMap(msg)["type"].(string)
+			halted, _ := msgAsMap(msg)["halted"].(bool)
 			if kind == "state" && halted {
 				t.Error("StepOnce emitted {type:state, halted:true} with idle task enabled; this freezes the UI even though the run loop is alive")
 			}
 			if kind == "tick_events" {
-				if state, ok := msg["state"].(map[string]any); ok {
+				if state, ok := msgAsMap(msg)["state"].(map[string]any); ok {
 					if h, _ := state["halted"].(bool); h {
 						t.Error("StepOnce piggybacked state.halted=true on tick_events with idle task enabled")
 					}
@@ -322,7 +322,7 @@ func TestCoreSnapshot_ExposesRunningIdle(t *testing.T) {
 	core := s.kernel.Cores[0]
 	s.kernel.DispatchIdleCores() // bind PID 0
 
-	got := coreSnapshot(core)
+	got := coreSnapshot(core, s.kernel.Clock)
 	if v, _ := got["running_idle"].(bool); !v {
 		t.Errorf("coreSnapshot.running_idle = %v after binding PID 0, want true", got["running_idle"])
 	}

@@ -789,6 +789,9 @@ const en: MessageSchema = {
       schedulerChipTitle: 'Scheduler acted on this tick — a planning decision, a wake, or a PCB save/restore. The scheduler is one of many kernel functions: K marks "kernel ran", S marks "the scheduler specifically".',
       followTailOn: 'Auto-follow is on. Click to pause.',
       followTailOff: 'Auto-follow is paused. Click to resume.',
+      expandAllOn: 'Details expanded on every tick. Click to collapse.',
+      expandAllOff: 'Details collapsed. Click to expand every tick.',
+      expandRowTitle: 'Show or hide this tick’s detail',
     },
     memory: {
       title: 'MEMORY · HEX DUMP',

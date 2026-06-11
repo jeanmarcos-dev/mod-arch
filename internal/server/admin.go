@@ -272,10 +272,10 @@ func (s *Server) handleAdminMe(w http.ResponseWriter, r *http.Request) {
 	s.ensureCSRFCookie(w, r)
 
 	var (
-		userID      = ""
-		userLabel   = ""
-		role        = ""
-		viaEnv      = false
+		userID    = ""
+		userLabel = ""
+		role      = ""
+		viaEnv    = false
 	)
 	if c, err := r.Cookie(AdminCookie); err == nil {
 		if u, err := s.verifyCookie(c.Value); err == nil {

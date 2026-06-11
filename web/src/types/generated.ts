@@ -84,12 +84,16 @@ export interface SessionInfoEvent {
 
 export interface TickEventsEvent {
   type: 'tick_events';
-  ticks: any[];
+  tick: number;
+  tick_value: number;
+  events: Record<string, any>[];
+  vars?: Record<string, any>;
+  procs?: Record<string, any>[];
+  state?: any;
 }
 
-export interface TickEvent {
-  tick: number;
-  events: any[];
+export interface StateUpdate {
+  halted: boolean;
 }
 
 export interface PresenceEvent {

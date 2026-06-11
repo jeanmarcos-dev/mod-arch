@@ -786,6 +786,9 @@ const es = {
       schedulerChipTitle: 'El scheduler actuó en este tick — una decisión de planificación, un despertar de proceso o un guardado/restauración de PCB. El scheduler es una de muchas funciones del kernel: K marca "corrió el kernel", S marca "corrió específicamente el scheduler".',
       followTailOn: 'Seguimiento automático activo. Haga clic para detenerlo.',
       followTailOff: 'Seguimiento automático detenido. Haga clic para reanudarlo.',
+      expandAllOn: 'Detalle expandido en todos los ticks. Haga clic para colapsar.',
+      expandAllOff: 'Detalle colapsado. Haga clic para expandir todos los ticks.',
+      expandRowTitle: 'Mostrar u ocultar el detalle de este tick',
     },
     memory: {
       title: 'MEMORIA · HEX DUMP',

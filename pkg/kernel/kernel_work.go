@@ -78,7 +78,7 @@ func (k *Kernel) drainOneKernelWorkPhase() []cpu.Event {
 		evs := k.runKernelWorkPhase(ph)
 		if len(evs) > 0 {
 			core := k.Cores[ph.coreID]
-			return stampKernelContext(evs, core.ID, core.CPU.Tick)
+			return stampKernelContext(evs, core.ID, k.Clock)
 		}
 	}
 	return nil

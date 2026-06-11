@@ -338,8 +338,8 @@ func TestMutex_BlockedSinceStampedAndCleared(t *testing.T) {
 	id := k.mutexCreate()
 	_, _, _ = k.mutexLock(k.BootCore(), id)
 
-	// Advance the boot CPU tick so BlockedSince is provably non-zero.
-	k.BootCPU().Tick = 42
+	// Advance the global clock so BlockedSince is provably non-zero.
+	k.Clock = 42
 	k.BootCore().CurrentPID = 2
 
 	_, blocked, _ := k.mutexLock(k.BootCore(), id)

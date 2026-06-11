@@ -114,7 +114,7 @@ func (k *Kernel) bindIdleToCore(core *Core) []cpu.Event {
 	core.CPU.R.DS = cpu.SelKernelData
 	return []cpu.Event{
 		cpu.EventCoreAssign{CoreID: core.ID, PID: 0},
-		cpu.EventCoreIdle{CoreID: core.ID, Tick: core.CPU.Tick},
+		cpu.EventCoreIdle{CoreID: core.ID, Tick: k.Clock},
 	}
 }
 

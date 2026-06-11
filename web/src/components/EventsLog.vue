@@ -3,7 +3,7 @@ import { useCpuStore, type LogEntry } from '../stores/cpu';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller';
-import { ArrowDownToLine, ArrowUpFromLine } from '@lucide/vue';
+import { ArrowDownToLine, ArrowUpFromLine, ChevronRight, ChevronDown, ChevronsDownUp } from '@lucide/vue';
 import LoaderModarch from './brand/LoaderModarch.vue';
 
 const props = defineProps<{ active: boolean }>();
@@ -75,29 +75,117 @@ const visibleCores = computed(() =>
     .sort((a, b) => a - b),
 );
 
+// Headline priority when a single (tick, core) cell carries more than one
+// primary event — the only real case is an `INT 0x80` tick, which emits both
+// the `instruction` (INT) and the `syscall` it triggered. Higher wins. Tags
+// not listed fall back to a low primary weight so any primary still beats a
+// detail. Mirrors the PRIMARY_LOG_TAGS split in the reducer.
+const PRIMARY_PRIORITY: Record<string, number> = {
+  syscall: 100,
+  irq_fire: 90,
+  page_fault: 85,
+  sched_decision: 80,
+  halt: 60,
+  wake: 55,
+  init_reap: 55,
+  fork: 50,
+  thread_create: 50,
+  thread_exit: 50,
+  mutex_op: 50,
+  sem_op: 50,
+  instruction: 40,
+};
+
+interface CellView {
+  // All entries for this (tick, core), kept for the kernel/scheduler cell
+  // tints that read across the whole bucket.
+  entries: LogEntry[];
+  // The single atomic headline shown collapsed.
+  header: LogEntry;
+  // Everything else, revealed when the row is expanded.
+  details: LogEntry[];
+}
+
+// Pick the headline of a cell: the highest-priority 'primary' entry. Falls
+// back to the first entry for the rare details-only cell so the cell never
+// renders empty.
+function splitCell(entries: LogEntry[]): CellView {
+  let headerIdx = 0;
+  let best = -1;
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (e.role !== 'primary') continue;
+    const p = PRIMARY_PRIORITY[e.tag ?? ''] ?? 30;
+    if (p > best) {
+      best = p;
+      headerIdx = i;
+    }
+  }
+  const header = entries[headerIdx];
+  const details = entries.filter((_, i) => i !== headerIdx);
+  return { entries, header, details };
+}
+
+// Per-row expansion. Keyed by the row's stable id (e.g. 't-5') so it survives
+// the count-augmented render key. `expandAll` is the master switch the header
+// toggle flips; individual rows resolve to expanded when either is set.
+const expandedRows = ref(new Set<string>());
+const expandAll = ref(false);
+
+function toggleRow(id: string) {
+  const next = new Set(expandedRows.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  expandedRows.value = next;
+}
+
+function toggleExpandAll() {
+  expandAll.value = !expandAll.value;
+  // Clear per-row overrides so the master switch starts from a clean slate
+  // (otherwise rows toggled while collapsed would stay expanded after a
+  // collapse-all, which reads as the button not working).
+  expandedRows.value = new Set();
+}
+
+// Entries to render for a cell: just the headline when collapsed, headline
+// followed by its details when expanded.
+function cellRows(view: CellView | undefined, expanded: boolean): LogEntry[] {
+  if (!view) return [];
+  return expanded ? [view.header, ...view.details] : [view.header];
+}
+
 interface GridRow {
-  // Key embeds the entry count so that a row growing mid-stream (more events
-  // landing on the same tick) yields a fresh key — DynamicScroller drops the
-  // stale height cache and re-measures from scratch. Stable rows keep their
-  // key across builds and are reused as-is.
+  // Key embeds the entry count and expansion state so that a row growing
+  // mid-stream (more events on the same tick) or being expanded/collapsed
+  // yields a fresh key — DynamicScroller drops the stale height cache and
+  // re-measures. Stable rows keep their key across builds and are reused.
   key: string;
+  // Stable id independent of entry count / expansion, used to track which
+  // rows the user expanded.
+  id: string;
   tick: number | null;
   isGlobal: boolean;
   // Zebra parity is bound to `tick % 2` (not to the row's array index) so
   // shifts on cpu.log and global-row interleaving don't flip every row's
   // background when a new event arrives.
   alt: boolean;
+  // True when at least one cell has detail lines hidden behind the expander.
+  hasDetails: boolean;
+  // Resolved expansion state for this build (expandAll || per-row override).
+  expanded: boolean;
   globalEntry?: LogEntry;
-  cells: Map<number, LogEntry[]>;
+  cells: Map<number, CellView>;
 }
 
 // Group entries into rows. Each tick becomes one row; entries with no tick
 // fall back to a synthetic row that follows their arrival order. Global
-// entries (loaded/reset/ws_*) get their own full-width row.
+// entries (loaded/reset/ws_*) get their own full-width row. Each (tick, core)
+// cell is split into one atomic headline plus collapsible details.
 const gridRows = computed<GridRow[]>(() => {
   if (!props.active) return [];
 
   const rows: GridRow[] = [];
+  const buckets: Map<number, LogEntry[]>[] = [];
   const tickIndex = new Map<number, number>();
   const rowEntries: number[] = [];
   let untickedSeq = 0;
@@ -109,12 +197,16 @@ const gridRows = computed<GridRow[]>(() => {
     if (e.scope === 'global') {
       rows.push({
         key: `g-${untickedSeq++}`,
+        id: '',
         tick: null,
         isGlobal: true,
         alt: false,
+        hasDetails: false,
+        expanded: false,
         globalEntry: e,
         cells: new Map(),
       });
+      buckets.push(new Map());
       rowEntries.push(1);
       continue;
     }
@@ -129,27 +221,38 @@ const gridRows = computed<GridRow[]>(() => {
       const baseKey = tick !== null ? `t-${tick}` : `u-${untickedSeq++}`;
       rows.push({
         key: baseKey,
+        id: baseKey,
         tick,
         isGlobal: false,
         alt: tick !== null ? (tick % 2) === 1 : false,
+        hasDetails: false,
+        expanded: false,
         cells: new Map(),
       });
+      buckets.push(new Map());
       rowEntries.push(0);
       if (tick !== null) tickIndex.set(tick, idx);
     }
-    const row = rows[idx];
+    const bucket = buckets[idx];
     const coreKey = e.coreId ?? -1;
-    const bucket = row.cells.get(coreKey);
-    if (bucket) bucket.push(e);
-    else row.cells.set(coreKey, [e]);
+    const list = bucket.get(coreKey);
+    if (list) list.push(e);
+    else bucket.set(coreKey, [e]);
     rowEntries[idx]++;
   }
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    if (!row.isGlobal) {
-      row.key = `${row.key}-n${rowEntries[i]}`;
+    if (row.isGlobal) continue;
+    let hasDetails = false;
+    for (const [coreKey, entries] of buckets[i]) {
+      const view = splitCell(entries);
+      if (view.details.length > 0) hasDetails = true;
+      row.cells.set(coreKey, view);
     }
+    row.hasDetails = hasDetails;
+    row.expanded = hasDetails && (expandAll.value || expandedRows.value.has(row.id));
+    row.key = `${row.id}-n${rowEntries[i]}${row.expanded ? '-x' : ''}`;
   }
 
   return rows;
@@ -202,7 +305,17 @@ watch(() => props.active, async (active) => {
 <template>
   <div class="panel log" data-pizarra-anchor="events-panel" :style="gridStyle">
     <div v-if="gridRows.length > 0" class="grid__head-row">
-      <div class="grid__head grid__head--tick">{{ t('panels.events.tickColumn') }}</div>
+      <div class="grid__head grid__head--tick">
+        <button
+          type="button"
+          class="grid__expand-all"
+          :class="{ 'grid__expand-all--on': expandAll }"
+          :aria-pressed="expandAll"
+          :title="expandAll ? t('panels.events.expandAllOn') : t('panels.events.expandAllOff')"
+          @click="toggleExpandAll"
+        ><ChevronsDownUp :size="12" :stroke-width="2" /></button>
+        <span>{{ t('panels.events.tickColumn') }}</span>
+      </div>
       <div
         v-for="c in visibleCores"
         :key="`head-${c}`"
@@ -232,25 +345,35 @@ watch(() => props.active, async (active) => {
           >{{ row.globalEntry.text }}</div>
 
           <div v-else class="grid__row">
-            <div class="grid__tick" :class="{ 'grid__cell--alt': row.alt }">{{ row.tick !== null ? row.tick : '·' }}</div>
+            <div class="grid__tick" :class="{ 'grid__cell--alt': row.alt }">
+              <button
+                v-if="row.hasDetails"
+                type="button"
+                class="grid__expander"
+                :aria-expanded="row.expanded"
+                :title="t('panels.events.expandRowTitle')"
+                @click="toggleRow(row.id)"
+              ><ChevronDown v-if="row.expanded" :size="11" :stroke-width="2.25" /><ChevronRight v-else :size="11" :stroke-width="2.25" /></button>
+              <span class="grid__tick-num">{{ row.tick !== null ? row.tick : '·' }}</span>
+            </div>
             <div
               v-for="c in visibleCores"
               :key="`${row.key}-c${c}`"
               class="grid__cell"
               :class="{
                 'grid__cell--alt': row.alt,
-                'grid__cell--kernel': (row.cells.get(c) ?? []).some(e => e.inKernel),
-                'grid__cell--scheduler': (row.cells.get(c) ?? []).some(e => e.kind === 'scheduler'),
+                'grid__cell--kernel': (row.cells.get(c)?.entries ?? []).some(e => e.inKernel),
+                'grid__cell--scheduler': (row.cells.get(c)?.entries ?? []).some(e => e.kind === 'scheduler'),
               }"
               :style="{ borderLeftColor: `var(--core-${c % 4})` }"
             >
               <div
-                v-for="(entry, i) in (row.cells.get(c) ?? [])"
+                v-for="(entry, i) in cellRows(row.cells.get(c), row.expanded)"
                 :key="`${row.key}-c${c}-${i}`"
                 class="grid__entry"
-                :class="{ 'grid__entry--kernel': entry.inKernel }"
+                :class="{ 'grid__entry--kernel': entry.inKernel, 'grid__entry--detail': row.expanded && i > 0 }"
                 :style="{ color: colorOf(entry.color) }"
-              ><span v-if="entry.kind === 'scheduler'" class="grid__sched-chip" :title="t('panels.events.schedulerChipTitle')">S</span><span v-if="entry.inKernel" class="grid__kernel-chip" :title="t('panels.events.kernelChipTitle')">K</span><ArrowDownToLine v-if="entry.glyph === 'pcbSave'" class="grid__glyph" :size="12" :stroke-width="2" aria-hidden="true" /><ArrowUpFromLine v-else-if="entry.glyph === 'pcbRestore'" class="grid__glyph" :size="12" :stroke-width="2" aria-hidden="true" />{{ entry.text }}</div>
+              ><span v-if="entry.kind === 'scheduler'" class="grid__sched-chip" :title="t('panels.events.schedulerChipTitle')">S</span><span v-if="entry.inKernel" class="grid__kernel-chip" :title="t('panels.events.kernelChipTitle')">K</span><ArrowDownToLine v-if="entry.glyph === 'pcbSave'" class="grid__glyph" :size="12" :stroke-width="2" aria-hidden="true" /><ArrowUpFromLine v-else-if="entry.glyph === 'pcbRestore'" class="grid__glyph" :size="12" :stroke-width="2" aria-hidden="true" />{{ entry.text }}<span v-if="!row.expanded && i === 0 && (row.cells.get(c)?.details.length ?? 0) > 0" class="grid__more">+{{ row.cells.get(c)?.details.length }}</span></div>
             </div>
           </div>
         </DynamicScrollerItem>
@@ -316,6 +439,36 @@ watch(() => props.active, async (active) => {
 
 .grid__head--tick {
   color: var(--text-muted, rgba(255, 255, 255, 0.5));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+/* Master expand/collapse toggle, sits in the TICK header cell. */
+.grid__expand-all {
+  min-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.grid__expand-all:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.grid__expand-all--on {
+  color: var(--surface-2, #131a22);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .log__scroller {
@@ -335,11 +488,40 @@ watch(() => props.active, async (active) => {
 
 .grid__tick {
   padding: 1px 4px;
-  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
   color: var(--text-muted, rgba(255, 255, 255, 0.45));
   font-size: 11px;
   border-right: 1px solid var(--border, rgba(255, 181, 71, 0.18));
   white-space: nowrap;
+}
+
+.grid__tick-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Per-row expander chevron. Pushed to the left of the tick number so the
+   numbers stay right-aligned in their column whether or not a row has
+   details. */
+.grid__expander {
+  min-height: 0;
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+.grid__expander:hover {
+  color: var(--accent);
 }
 
 .grid__cell {
@@ -413,6 +595,26 @@ watch(() => props.active, async (active) => {
 .grid__entry {
   padding: 0;
   line-height: 1.4;
+}
+
+/* Detail lines revealed under a headline when the row is expanded. Indented
+   and dimmed so the atomic headline stays the focal point of the cell. */
+.grid__entry--detail {
+  padding-left: 12px;
+  opacity: 0.82;
+  font-size: 0.92em;
+}
+
+/* "+N" badge appended to a collapsed headline to signal hidden detail lines. */
+.grid__more {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--text-muted);
+  font-size: 0.82em;
+  vertical-align: baseline;
 }
 
 /* Leading SVG glyph (pcb_save/restore). Kept inline with the row text and

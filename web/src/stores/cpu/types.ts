@@ -1,17 +1,18 @@
-import type { CpuEventGo } from '../../types/generated';
+import type { CpuEventGo, SnapshotEvent, LoadedEvent, SessionInfoEvent, PresenceEvent, TickEventsEvent } from '../../types/generated';
 
 export type CpuEvent =
   | CpuEventGo
   | { type: 'tick'; value: number }
   | { type: 'state'; halted?: boolean; running?: boolean; paused?: boolean; hz?: number; clockHz?: number; speedMul?: number; tickIntervalMs?: number }
-  | { type: 'snapshot'; regs: Record<string, number>; segments: Record<string, number>; mode: number; halted: boolean; tick: number; timer_quantum?: number; current_pid?: number; ready_queue?: number[]; wait_queue?: WaitInfo[]; procs?: PCBInfo[]; sources?: Record<string, string>; source_maps?: Record<string, SourceLine[]>; vars?: Record<string, VarSnapshot> | null; cores?: CoreInfo[]; num_cores?: number; running?: boolean; paused?: boolean; hz?: number; clockHz?: number; speedMul?: number; tickIntervalMs?: number }
+  | SnapshotEvent
   | { type: 'programs'; list: ProgramInfo[] }
-  | { type: 'loaded'; name: string; pids: number[]; procs: PCBInfo[]; sources: Record<string, string>; source_maps?: Record<string, SourceLine[]>; var_meta?: Record<string, VarMeta> | null }
+  | LoadedEvent
   | { type: 'vars_update'; vars: Record<string, VarSnapshot> | null }
   | { type: 'reset' }
   | { type: 'procs'; procs: PCBInfo[] }
-  | { type: 'session_info'; id: string; mode: string; role: string; label: string; view_token: string; user_id?: string; user_name?: string; user_email?: string; presence?: { section: string; cores: number[]; mode?: string; narrators?: boolean; focus?: Focus } }
-  | { type: 'presence'; section: string; cores: number[]; mode?: string; narrators?: boolean; focus?: Focus; at?: number }
+  | SessionInfoEvent
+  | PresenceEvent
+  | TickEventsEvent
   | { type: 'hand_raise'; label: string; at?: number }
   | { type: 'owner_pointer'; anchor?: string; offset_x?: number; offset_y?: number; route?: string; ts?: number; off?: boolean }
   | { type: 'owner_click'; anchor?: string; offset_x?: number; offset_y?: number; route?: string; ts?: number }
@@ -317,5 +318,17 @@ export interface LogEntry {
   // their `text`, because JetBrains Mono lacks the original ◍/◌ at this
   // size and the system fallback breaks vertical alignment.
   glyph?: 'pcbSave' | 'pcbRestore';
+  // Atomicity role within a tick. Each (tick, core) carries exactly one
+  // 'primary' action (the instruction/syscall/dispatch/irq/… that happened);
+  // every other entry is a 'detail' that elaborates it (pcb save/restore,
+  // core assign/release, reparent, wait). The event log collapses a cell to
+  // its primary line and tucks the details behind an expander. Undefined for
+  // global rows (loaded/reset/ws_*), which never share a cell.
+  role?: 'primary' | 'detail';
+  // Originating event tag (e.g. 'instruction', 'syscall'). The event log uses
+  // it to pick the headline when two primaries land on the same cell — an
+  // `INT 0x80` tick emits both 'instruction' and 'syscall', and the syscall
+  // wins. Undefined for global/transport lines that have no cpu.Event tag.
+  tag?: string;
 }
 

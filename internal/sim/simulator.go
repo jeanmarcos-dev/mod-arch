@@ -14,6 +14,7 @@ import (
 
 	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
 	"github.com/jeanmarcos/modos-cpu/pkg/kernel"
+	"github.com/jeanmarcos/modos-cpu/internal/telemetry"
 )
 
 // Demo is a scenario with one or more processes to load.
@@ -124,14 +125,14 @@ const (
 // transport: it just enqueues messages on Send. Whoever creates the Client
 // (typically the WS handler) is responsible for draining it.
 type Client struct {
-	Send chan map[string]any
+	Send chan any
 	Role ClientRole
 }
 
 // NewClient builds a Client with the standard buffer size and role.
 func NewClient(role ClientRole) *Client {
 	return &Client{
-		Send: make(chan map[string]any, SendBufferSize),
+		Send: make(chan any, SendBufferSize),
 		Role: role,
 	}
 }
@@ -305,7 +306,7 @@ func (s *Simulator) LoadProgram(name string) error {
 	// slot. The first RUN/Step then surfaces the swapper→user proc transition
 	// in the event log instead of hiding it inside a single "loaded" snapshot.
 	bootEvs := s.kernel.BindIdleCores()
-	bootTick := s.kernel.BootCPU().Tick
+	bootTick := s.kernel.Clock
 	snap := s.snapshotLocked()
 	procs := s.processListLocked()
 	s.mu.Unlock()
@@ -335,7 +336,7 @@ func (s *Simulator) StepOnce() error {
 	// against the current Tick value and then increments at the end). Reading
 	// after Step would surface "next tick to execute", which made the header
 	// pill in the UI run one ahead of the last row in the event log.
-	tick := s.kernel.BootCPU().Tick
+	tick := s.kernel.Clock
 	bootEvs := s.kernel.DispatchIdleCores()
 	evs, err := s.kernel.Step()
 	halted := s.kernel.AllHalted()
@@ -398,20 +399,16 @@ func (s *Simulator) broadcastTickFrame(
 		s.events.push(e, tick)
 		wire = append(wire, EventToWire(e))
 	}
-	msg := map[string]any{
-		"type":       "tick_events",
-		"tick":       tick,
-		"tick_value": tick,
-		"events":     wire,
-	}
-	if vars != nil {
-		msg["vars"] = vars
-	}
-	if procs != nil {
-		msg["procs"] = procs
+	msg := TickEventsEvent{
+		Type:      "tick_events",
+		Tick:      tick,
+		TickValue: tick,
+		Events:    wire,
+		Vars:      vars,
+		Procs:     procs,
 	}
 	if haltedNotice {
-		msg["state"] = map[string]any{"halted": true}
+		msg.State = &StateUpdate{Halted: true}
 	}
 	s.Broadcast(msg)
 }
@@ -460,7 +457,7 @@ func (s *Simulator) StartRun(hz int) {
 	// already has work to do and the READY→RUN transitions are observable
 	// in the event log before any instruction executes.
 	bootEvs := s.kernel.DispatchIdleCores()
-	tick := s.kernel.BootCPU().Tick
+	tick := s.kernel.Clock
 	clockHz := s.clockHz
 	speedMul := s.speedMul
 	s.mu.Unlock()
@@ -676,7 +673,7 @@ func (s *Simulator) PushKey(key string) {
 	b := key[0]
 	s.mu.Lock()
 	evs := s.kernel.PushKey(b)
-	tick := s.kernel.BootCPU().Tick
+	tick := s.kernel.Clock
 	running := s.running
 	userPaused := s.userPaused
 	exitDraining := len(s.kernel.PendingKernelWork) > 0
@@ -848,6 +845,9 @@ func (s *Simulator) Reset() {
 
 // Snapshot acquires the mutex and returns the current simulator state.
 func (s *Simulator) Snapshot() map[string]any {
+	start := time.Now()
+	defer telemetry.TrackSnapshotLatency(start)
+	
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.snapshotLocked()
@@ -865,7 +865,7 @@ func (s *Simulator) snapshotLocked() map[string]any {
 	r := c.R
 	cores := make([]map[string]any, 0, s.kernel.NumCores())
 	for _, core := range s.kernel.Cores {
-		cores = append(cores, coreSnapshot(core))
+		cores = append(cores, coreSnapshot(core, s.kernel.Clock))
 	}
 	return map[string]any{
 		"type": "snapshot",
@@ -877,7 +877,7 @@ func (s *Simulator) snapshotLocked() map[string]any {
 		"segments":      map[string]uint16{"CS": r.CS, "DS": r.DS, "SS": r.SS},
 		"mode":          c.Mode,
 		"halted":        c.Halted,
-		"tick":          c.Tick,
+		"tick":          s.kernel.Clock,
 		"timer_quantum": s.kernel.TimerQuantum,
 		"current_pid":   boot.CurrentPID,
 		"ready_queue":   s.kernel.Ready.Snapshot(),
@@ -906,7 +906,7 @@ func tickIntervalMs(hz int, mul float64) int {
 	return ms
 }
 
-func coreSnapshot(core *kernel.Core) map[string]any {
+func coreSnapshot(core *kernel.Core, clock uint64) map[string]any {
 	r := core.CPU.R
 	return map[string]any{
 		"id": core.ID,
@@ -918,7 +918,7 @@ func coreSnapshot(core *kernel.Core) map[string]any {
 		"segments":    map[string]uint16{"CS": r.CS, "DS": r.DS, "SS": r.SS},
 		"mode":        core.CPU.Mode,
 		"halted":      core.CPU.Halted,
-		"tick":        core.CPU.Tick,
+		"tick":        clock,
 		"current_pid": core.CurrentPID,
 		// running_idle disambiguates CurrentPID==0: legacy meaning is
 		// "no proc", but the frontend keys its dedicated HLT-loop badge
@@ -1063,7 +1063,7 @@ func (s *Simulator) RemoveClient(c *Client) {
 // Broadcast sends a message to every connected client. If a client's channel
 // is full the message is dropped, so one slow consumer cannot stall the
 // simulator for the rest.
-func (s *Simulator) Broadcast(msg map[string]any) {
+func (s *Simulator) Broadcast(msg any) {
 	s.clientMu.RLock()
 	defer s.clientMu.RUnlock()
 	for c := range s.clients {
@@ -1077,7 +1077,7 @@ func (s *Simulator) Broadcast(msg map[string]any) {
 // BroadcastTo sends a message only to clients tagged with one of the given
 // roles. Used for presence (viewers) and hand_raise (owner) so each side gets
 // only the events it cares about.
-func (s *Simulator) BroadcastTo(msg map[string]any, roles ...ClientRole) {
+func (s *Simulator) BroadcastTo(msg any, roles ...ClientRole) {
 	if len(roles) == 0 {
 		return
 	}

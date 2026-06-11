@@ -172,7 +172,7 @@ func TestStepCore_IdleTimerFires(t *testing.T) {
 // the idle gate. The very first stepCore decodes the HLT byte (Tick=0); the
 // next call lands in the gate and must stamp EventHalt with Tick=1, matching
 // pre-increment semantics used by EventInstruction.
-func TestStepCore_IdleHaltTickPreIncrement(t *testing.T) {
+func TestStepCore_IdleHaltStampedWithGlobalClock(t *testing.T) {
 	k := NewMulti(cpu.DefaultMemSize, 1)
 	if err := k.SpawnIdle(); err != nil {
 		t.Fatalf("SpawnIdle: %v", err)
@@ -184,6 +184,7 @@ func TestStepCore_IdleHaltTickPreIncrement(t *testing.T) {
 	if _, err := k.stepCore(core); err != nil {
 		t.Fatalf("stepCore #0 (HLT): %v", err)
 	}
+	k.Clock = 5
 	evs, err := k.stepCore(core)
 	if err != nil {
 		t.Fatalf("stepCore #1 (idle gate): %v", err)
@@ -198,8 +199,8 @@ func TestStepCore_IdleHaltTickPreIncrement(t *testing.T) {
 	if halt == nil {
 		t.Fatalf("no EventHalt emitted from the idle gate")
 	}
-	if halt.Tick != 1 {
-		t.Errorf("idle gate EventHalt.Tick = %d, want 1 (pre-increment after the HLT tick)", halt.Tick)
+	if halt.Tick != k.Clock {
+		t.Errorf("idle gate EventHalt.Tick = %d, want %d (global clock)", halt.Tick, k.Clock)
 	}
 }
 

@@ -14,8 +14,8 @@ func drainStateEvents(c *Client, wait time.Duration) []map[string]any {
 	for {
 		select {
 		case msg := <-c.Send:
-			if t, _ := msg["type"].(string); t == "state" {
-				out = append(out, msg)
+			if t, _ := msgAsMap(msg)["type"].(string); t == "state" {
+				out = append(out, msgAsMap(msg))
 			}
 		default:
 			if time.Now().After(deadline) {

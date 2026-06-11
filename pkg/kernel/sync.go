@@ -110,7 +110,7 @@ func (k *Kernel) handleSync(core *Core) []cpu.Event {
 	}
 
 	core.CPU.R.EAX = result
-	return stampKernelContext(out, core.ID, core.CPU.Tick)
+	return stampKernelContext(out, core.ID, k.Clock)
 }
 
 // mutexCreate allocates a fresh mutex and returns its ID (1-indexed).
@@ -299,7 +299,7 @@ func (k *Kernel) blockOnSync(core *Core, reason string) []cpu.Event {
 	}
 	pcb.State = StateBlocked
 	pcb.BlockedOn = reason
-	pcb.BlockedSince = core.CPU.Tick
+	pcb.BlockedSince = k.Clock
 	pcb.Core = -1
 
 	out := []cpu.Event{
@@ -318,16 +318,16 @@ func (k *Kernel) blockOnSync(core *Core, reason string) []cpu.Event {
 			cpu.EventCoreRelease{CoreID: core.ID, PID: curPID, Reason: reason},
 		)
 		out = append(out, k.switchTo(core, nextPID)...)
-		return stampKernelContext(out, core.ID, core.CPU.Tick)
+		return stampKernelContext(out, core.ID, k.Clock)
 	}
 
 	core.CPU.Halted = true
 	core.CurrentPID = 0
 	out = append(out,
 		cpu.EventCoreRelease{CoreID: core.ID, PID: curPID, Reason: reason},
-		cpu.EventHalt{CoreID: core.ID, Tick: core.CPU.Tick, PID: curPID},
+		cpu.EventHalt{CoreID: core.ID, Tick: k.Clock, PID: curPID},
 	)
-	return stampKernelContext(out, core.ID, core.CPU.Tick)
+	return stampKernelContext(out, core.ID, k.Clock)
 }
 
 // evictFromAllQueues removes pid from every place where it might still be
@@ -397,7 +397,7 @@ func (k *Kernel) wakeWaiter(caller *Core, pid int, reason string) []cpu.Event {
 			cpu.EventCoreAssign{CoreID: idle.ID, PID: pid},
 			cpu.EventProcessState{PID: pid, State: string(StateRun)},
 		)
-		return stampKernelContext(out, caller.ID, caller.CPU.Tick)
+		return stampKernelContext(out, caller.ID, k.Clock)
 	}
 	k.Ready.Push(pid)
 	out = append(out, cpu.EventSchedDecision{
@@ -406,5 +406,5 @@ func (k *Kernel) wakeWaiter(caller *Core, pid int, reason string) []cpu.Event {
 		Reason:     "wake",
 		ReadyQueue: k.Ready.Snapshot(),
 	})
-	return stampKernelContext(out, caller.ID, caller.CPU.Tick)
+	return stampKernelContext(out, caller.ID, k.Clock)
 }

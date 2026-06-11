@@ -21,7 +21,9 @@ import (
 )
 
 // citationTokenRe matches every label format declared in prompts.go:
-//   [Glosario: id]   [Demo: id]   [ISA: id]   [Docs: id]   [Silberschatz p. N]
+//
+//	[Glosario: id]   [Demo: id]   [ISA: id]   [Docs: id]   [Silberschatz p. N]
+//
 // The leading \s* eats spaces and newlines that precede the token so trailing
 // citation blocks collapse cleanly when stripped from the answer.
 var citationTokenRe = regexp.MustCompile(`\s*\[(?:Glosario|Demo|ISA|Docs|Silberschatz)[^\]]*\]`)
@@ -526,8 +528,8 @@ func (s *Service) callLLM(ctx context.Context, streamer llm.Streamer, canStream 
 			eta := s.bucket.NextAvailableIn()
 			if progress != nil {
 				progress("queued", map[string]any{
-					"wait_seconds":   int(eta.Round(time.Second).Seconds()),
-					"queue_depth":    s.bucket.QueueDepth(),
+					"wait_seconds": int(eta.Round(time.Second).Seconds()),
+					"queue_depth":  s.bucket.QueueDepth(),
 				})
 			}
 			if err := s.bucket.Acquire(ctx); err != nil {
@@ -883,5 +885,3 @@ func utf8RuneCount(s string) int {
 	}
 	return n
 }
-
-

@@ -68,7 +68,7 @@ func (k *Kernel) blockCurrent(core *Core, reason string) []cpu.Event {
 	}
 	pcb.State = StateBlocked
 	pcb.BlockedOn = reason
-	pcb.BlockedSince = core.CPU.Tick
+	pcb.BlockedSince = k.Clock
 	pcb.Core = -1
 
 	out := []cpu.Event{
@@ -87,7 +87,7 @@ func (k *Kernel) blockCurrent(core *Core, reason string) []cpu.Event {
 			cpu.EventCoreRelease{CoreID: core.ID, PID: curPID, Reason: reason},
 		)
 		out = append(out, k.switchTo(core, nextPID)...)
-		return stampKernelContext(out, core.ID, core.CPU.Tick)
+		return stampKernelContext(out, core.ID, k.Clock)
 	}
 
 	// No other READY processes: halt this core with IF=1, waiting for an IRQ.
@@ -98,7 +98,7 @@ func (k *Kernel) blockCurrent(core *Core, reason string) []cpu.Event {
 		cpu.EventCoreRelease{CoreID: core.ID, PID: curPID, Reason: reason},
 		cpu.EventHalt{CoreID: core.ID, PID: curPID},
 	)
-	return stampKernelContext(out, core.ID, core.CPU.Tick)
+	return stampKernelContext(out, core.ID, k.Clock)
 }
 
 // handleKeyboard runs after a core dispatched IRQ 0x21. If there are BLOCKED
@@ -164,7 +164,7 @@ func (k *Kernel) handleKeyboard(core *Core) []cpu.Event {
 	}
 
 	out = append(out, k.kbdSnapshot())
-	return stampKernelContext(out, core.ID, core.CPU.Tick)
+	return stampKernelContext(out, core.ID, k.Clock)
 }
 
 // sysRead implements read(fd, buf, count). Only fd=0 (stdin) is supported.

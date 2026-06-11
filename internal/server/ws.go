@@ -28,7 +28,9 @@ import (
 // box; production deployments behind a real domain must set ALLOWED_ORIGINS.
 var defaultAllowedOrigins = []string{
 	"localhost:5173",
-	"localhost:8080",
+	"localhost:5174",
+	"localhost:5175",
+	"localhost:9080",
 }
 
 // allowedWSOrigins parses ALLOWED_ORIGINS (comma-separated) and falls back to
@@ -128,9 +130,9 @@ type Command struct {
 	// the UI can pair the answer with the pending input. TutorMode is
 	// "direct" (default) or "socratic" — the orchestrator swaps the system
 	// prompt to a question-driven variant in socratic mode.
-	Question  string             `json:"question,omitempty"`
-	RequestID string             `json:"request_id,omitempty"`
-	TutorMode string             `json:"tutor_mode,omitempty"`
+	Question  string              `json:"question,omitempty"`
+	RequestID string              `json:"request_id,omitempty"`
+	TutorMode string              `json:"tutor_mode,omitempty"`
 	History   []tutor.HistoryTurn `json:"history,omitempty"`
 }
 
@@ -144,6 +146,10 @@ type Command struct {
 // server from malformed, missing, or maliciously sized inputs.
 func (c *Command) Validate() error {
 	switch c.Cmd {
+	case "run":
+		if c.Speed < 0 || c.Speed > 100 {
+			return fmt.Errorf("speed must be between 0 and 100")
+		}
 	case "load":
 		if len(c.Program) == 0 || len(c.Program) > 200 {
 			return fmt.Errorf("invalid program name length")
@@ -198,11 +204,30 @@ func (c *Command) Validate() error {
 			return fmt.Errorf("invalid tutor mode")
 		}
 	case "presence":
+		if c.Section == "" {
+			return fmt.Errorf("section cannot be empty")
+		}
 		if len(c.Section) > 50 || len(c.Mode) > 50 {
 			return fmt.Errorf("presence strings too long")
 		}
 		if len(c.VisibleCore) > 32 {
 			return fmt.Errorf("too many visible cores")
+		}
+		for _, core := range c.VisibleCore {
+			if core < 0 || core > 1024 {
+				return fmt.Errorf("invalid core id: %d", core)
+			}
+		}
+		if c.Focus != nil {
+			if c.Focus.MiddleTab != nil && len(*c.Focus.MiddleTab) > 50 {
+				return fmt.Errorf("middle tab identifier too long")
+			}
+			if c.Focus.SimBarMode != nil {
+				mode := *c.Focus.SimBarMode
+				if mode != "docked" && mode != "floating" {
+					return fmt.Errorf("invalid sim bar mode: %s", mode)
+				}
+			}
 		}
 	}
 	return nil
@@ -406,12 +431,12 @@ var viewerSafeCommands = map[string]bool{
 // host's broadcast. The whiteboard cursor (pointer / pointer_off) is also
 // owner-only — viewers receive but never emit.
 var ownerOnlyCommands = map[string]bool{
-	"presence":            true,
-	"pointer":             true,
-	"pointer_off":         true,
-	"click":               true,
-	"glossary_hover":      true,
-	"glossary_hover_off":  true,
+	"presence":           true,
+	"pointer":            true,
+	"pointer_off":        true,
+	"click":              true,
+	"glossary_hover":     true,
+	"glossary_hover_off": true,
 }
 
 // dispatch routes a Command to the session's Simulator. When role is Viewer,

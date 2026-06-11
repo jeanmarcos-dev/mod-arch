@@ -68,7 +68,7 @@ func runAdminHash(args []string) {
 
 func runServer(args []string) {
 	fs := flag.NewFlagSet("modos-cpu", flag.ExitOnError)
-	addr := fs.String("addr", ":8080", "dirección donde escuchar")
+	addr := fs.String("addr", ":9080", "dirección donde escuchar")
 	_ = fs.Parse(args)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))

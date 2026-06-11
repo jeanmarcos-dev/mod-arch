@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jeanmarcos/modos-cpu/internal/server"
+	"github.com/jeanmarcos/modos-cpu/internal/sim"
 	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
 )
 
@@ -29,11 +30,27 @@ func main() {
 	sb.WriteString("}\n\n")
 
 	// 3. Generate FocusInput
-	sb.WriteString(generateInterface(reflect.TypeOf(server.FocusInput{}), "FocusInput"))
+	sb.WriteString(generateInterface(reflect.TypeOf(server.FocusInput{}), "FocusInput", ""))
+	sb.WriteString("\n")
+
+	// Extra structs
+	sb.WriteString(generateInterface(reflect.TypeOf(sim.SnapshotEvent{}), "SnapshotEvent", "snapshot"))
+	sb.WriteString("\n")
+	sb.WriteString(generateInterface(reflect.TypeOf(sim.CoreSnapshot{}), "CoreSnapshot", ""))
+	sb.WriteString("\n")
+	sb.WriteString(generateInterface(reflect.TypeOf(sim.LoadedEvent{}), "LoadedEvent", "loaded"))
+	sb.WriteString("\n")
+	sb.WriteString(generateInterface(reflect.TypeOf(server.SessionInfoEvent{}), "SessionInfoEvent", "session_info"))
+	sb.WriteString("\n")
+	sb.WriteString(generateInterface(reflect.TypeOf(sim.TickEventsEvent{}), "TickEventsEvent", "tick_events"))
+	sb.WriteString("\n")
+	sb.WriteString(generateInterface(reflect.TypeOf(sim.StateUpdate{}), "StateUpdate", ""))
+	sb.WriteString("\n")
+	sb.WriteString(generateInterface(reflect.TypeOf(server.PresenceEvent{}), "PresenceEvent", "presence"))
 	sb.WriteString("\n")
 
 	// 4. Generate Command
-	sb.WriteString(generateInterface(reflect.TypeOf(server.Command{}), "Command"))
+	sb.WriteString(generateInterface(reflect.TypeOf(server.Command{}), "Command", ""))
 	sb.WriteString("\n")
 
 	// 5. Generate Go Events
@@ -144,7 +161,7 @@ func typeToTS(t reflect.Type) string {
 	}
 }
 
-func generateInterface(t reflect.Type, name string) string {
+func generateInterface(t reflect.Type, name string, typeTag string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("export interface %s {\n", name))
 	for i := 0; i < t.NumField(); i++ {
@@ -168,6 +185,9 @@ func generateInterface(t reflect.Type, name string) string {
 		opt := ""
 		if isOptional {
 			opt = "?"
+		}
+		if jsonName == "type" && typeTag != "" {
+			tsType = fmt.Sprintf("'%s'", typeTag)
 		}
 		sb.WriteString(fmt.Sprintf("  %s%s: %s;\n", jsonName, opt, tsType))
 	}
@@ -200,6 +220,9 @@ func generateEventInterface(t reflect.Type, name string, tag string) string {
 		opt := ""
 		if isOptional {
 			opt = "?"
+		}
+		if jsonName == "type" && tag != "" {
+			tsType = fmt.Sprintf("'%s'", tag)
 		}
 		sb.WriteString(fmt.Sprintf("  %s%s: %s;\n", jsonName, opt, tsType))
 	}

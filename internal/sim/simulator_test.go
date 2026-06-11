@@ -145,7 +145,7 @@ func TestStepOnce_BroadcastsProcsOnFork(t *testing.T) {
 	// gains an extra stage.
 	const maxSteps = 64
 	sawProcs := false
-	var procsMsg map[string]any
+	var procsMsg TickEventsEvent
 	for i := 0; i < maxSteps && !sawProcs; i++ {
 		if err := s.StepOnce(); err != nil {
 			t.Fatalf("StepOnce #%d: %v", i, err)
@@ -153,9 +153,9 @@ func TestStepOnce_BroadcastsProcsOnFork(t *testing.T) {
 		for {
 			select {
 			case msg := <-client.Send:
-				if msg["type"] == "tick_events" && msg["procs"] != nil {
+				if ev, ok := msg.(TickEventsEvent); ok && len(ev.Procs) > 0 {
 					sawProcs = true
-					procsMsg = msg
+					procsMsg = ev
 				}
 			default:
 				goto drained
@@ -167,7 +167,8 @@ func TestStepOnce_BroadcastsProcsOnFork(t *testing.T) {
 	if !sawProcs {
 		t.Fatalf("no tick_events frame with procs piggyback observed after %d steps", maxSteps)
 	}
-	procs, ok := procsMsg["procs"].([]map[string]any)
+	procs := procsMsg.Procs
+	ok := true
 	if !ok {
 		t.Fatalf("procs piggyback missing procs slice: %#v", procsMsg)
 	}

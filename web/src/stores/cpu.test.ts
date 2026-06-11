@@ -233,3 +233,45 @@ describe('cpu store — halt event formatting', () => {
     expect(cpu.halted).toBe(true);
   });
 });
+
+describe('cpu store — event atomicity roles', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('tags the dispatch sequence as one primary headline plus details', () => {
+    const cpu = useCpuStore();
+    cpu.__applyEvent({
+      type: 'loaded',
+      name: 'demo',
+      pids: [5],
+      procs: [{ pid: 5, name: 'demo', state: 'READY', parent_pid: 1, regs: {} }],
+      sources: {},
+    } as any);
+    const before = cpu.log.length;
+    // A dispatch tick: sched_decision is the atomic action; pcb_restore and
+    // core_assign elaborate it.
+    cpu.__applyEvent({ type: 'sched_decision', core_id: 0, tick: 0, from_pid: 0, to_pid: 5, reason: 'dispatch', ready_queue: [] } as any);
+    cpu.__applyEvent({ type: 'pcb_restore', core_id: 0, tick: 0, pid: 5, regs: { EIP: 0x200000 } } as any);
+    cpu.__applyEvent({ type: 'core_assign', core_id: 0, tick: 0, pid: 5 } as any);
+
+    const added = cpu.log.slice(before);
+    const byTag = (tag: string) => added.find(e => e.tag === tag);
+    expect(byTag('sched_decision')?.role).toBe('primary');
+    expect(byTag('pcb_restore')?.role).toBe('detail');
+    expect(byTag('core_assign')?.role).toBe('detail');
+    // Exactly one primary lands on this (tick, core).
+    const primaries = added.filter(e => e.coreId === 0 && e.tick === 0 && e.role === 'primary');
+    expect(primaries).toHaveLength(1);
+  });
+
+  it('marks a plain instruction as primary and does not duplicate it', () => {
+    const cpu = useCpuStore();
+    const before = cpu.log.length;
+    cpu.__applyEvent({ type: 'instruction', core_id: 1, tick: 3, eip: 0x200005, mnemonic: 'MOV EBX, 0x20', bytes: [0, 0, 0, 0, 0] } as any);
+    const added = cpu.log.slice(before).filter(e => e.tick === 3 && e.coreId === 1);
+    expect(added).toHaveLength(1);
+    expect(added[0].role).toBe('primary');
+    expect(added[0].tag).toBe('instruction');
+  });
+});
