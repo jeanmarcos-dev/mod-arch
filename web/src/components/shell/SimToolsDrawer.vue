@@ -39,6 +39,12 @@ function onToggleIdleTask() {
   if (next && !prefs.showInitTouched) prefs.setShowInit(true, /*fromCoupling*/ true);
 }
 
+function toggleAutoPause() {
+  const next = !prefs.autoPauseOnIdle;
+  prefs.setAutoPauseOnIdle(next);
+  settings.cpu.setAutoPauseOnIdle(next);
+}
+
 function onEsc(e: KeyboardEvent) {
   if (e.key === 'Escape' && bar.toolsDrawerOpen) bar.closeTools();
 }
@@ -170,6 +176,20 @@ watch(() => bar.toolsDrawerOpen, (open) => {
               <span>{{ settings.cpu.idleTaskEnabled ? t('simbar.settings.idleTaskOn') : t('simbar.settings.idleTaskOff') }}</span>
             </button>
             <span class="tools-dock__field-help">{{ t('simbar.settings.idleTaskHint') }}</span>
+          </div>
+          <div class="tools-dock__field">
+            <span class="tools-dock__field-label">{{ t('simbar.settings.autoPause') }}</span>
+            <button
+              type="button"
+              :class="['tools-dock__btn', { 'tools-dock__btn--on': prefs.autoPauseOnIdle }]"
+              :aria-pressed="prefs.autoPauseOnIdle"
+              :disabled="settings.viewer.value"
+              :title="prefs.autoPauseOnIdle ? t('simbar.settings.autoPauseTooltipOn') : t('simbar.settings.autoPauseTooltipOff')"
+              @click="toggleAutoPause"
+            >
+              <span>{{ prefs.autoPauseOnIdle ? t('simbar.settings.autoPauseOn') : t('simbar.settings.autoPauseOff') }}</span>
+            </button>
+            <span class="tools-dock__field-help">{{ t('simbar.settings.autoPauseHint') }}</span>
           </div>
         </section>
 

@@ -92,6 +92,10 @@ type Command struct {
 	// IdleTask field leaves the kernel state untouched.
 	IdleTask *bool `json:"idle_task,omitempty"`
 
+	// AutoPauseIdle toggles parking the run loop once no user work remains.
+	// Pointer for the same omitted-vs-false reason as IdleTask.
+	AutoPauseIdle *bool `json:"auto_pause_idle,omitempty"`
+
 	// Owner-broadcasted presence payload: the section the host is currently
 	// presenting, the visible cores filter, the presentation mode preset and
 	// the narrators toggle. Viewers with autofollow on mirror these to keep
@@ -513,6 +517,12 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 		if err := sess.Sim.SetIdleTaskEnabled(*cmd.IdleTask); err != nil {
 			c.Send <- map[string]any{"type": "error", "message": err.Error()}
 		}
+	case "set_auto_pause_idle":
+		if cmd.AutoPauseIdle == nil {
+			c.Send <- map[string]any{"type": "error", "message": "set_auto_pause_idle requires an auto_pause_idle boolean"}
+			return
+		}
+		sess.Sim.SetAutoPauseOnIdle(*cmd.AutoPauseIdle)
 	case "set_alias":
 		alias, err := cleanLabel(cmd.Alias)
 		if err != nil {

@@ -275,3 +275,43 @@ describe('cpu store — event atomicity roles', () => {
     expect(added[0].tag).toBe('instruction');
   });
 });
+
+describe('cpu store — run epoch separates demos', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  const loaded = (name: string) => ({
+    type: 'loaded',
+    name,
+    pids: [4],
+    procs: [{ pid: 4, name, state: 'READY', parent_pid: 1, regs: {} }],
+    sources: {},
+  });
+  const instr = () => ({
+    type: 'instruction', core_id: 0, tick: 0, eip: 0x200000, mnemonic: 'NOP', bytes: [0x90],
+  });
+
+  it('clears the log on load by default', () => {
+    const cpu = useCpuStore();
+    cpu.__applyEvent(loaded('A') as any);
+    cpu.__applyEvent(instr() as any);
+    expect(cpu.log.length).toBeGreaterThan(1);
+    cpu.__applyEvent(loaded('B') as any);
+    expect(cpu.log).toHaveLength(1);
+    expect(cpu.log[0].text).toContain('B');
+  });
+
+  it('stamps a fresh epoch per demo so tick 0 never merges (keep mode)', async () => {
+    const { usePreferencesStore } = await import('./preferences');
+    usePreferencesStore().setClearLogOnLoad(false);
+    const cpu = useCpuStore();
+    cpu.__applyEvent(loaded('A') as any);
+    cpu.__applyEvent(instr() as any);
+    cpu.__applyEvent(loaded('B') as any);
+    cpu.__applyEvent(instr() as any);
+    const instrs = cpu.log.filter(e => e.tag === 'instruction');
+    expect(instrs).toHaveLength(2);
+    expect(instrs[0].epoch).not.toBe(instrs[1].epoch);
+  });
+});

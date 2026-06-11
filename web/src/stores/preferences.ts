@@ -114,6 +114,13 @@ interface PrefsState {
   // than the eye can resolve. Configurable so the teacher can widen or
   // narrow the readable band.
   narratorMinTickMs: number;
+  // clearLogOnLoad wipes the event log + console on load so each demo starts
+  // clean. Off keeps history (the run-epoch stops ticks merging). Reset always
+  // clears.
+  clearLogOnLoad: boolean;
+  // autoPauseOnIdle stops the run loop once no user process remains. Off keeps
+  // the realistic "the CPU never stops" behavior.
+  autoPauseOnIdle: boolean;
   theme: Theme;
   locale: Locale;
   panelsCollapsed: PanelsCollapsed;
@@ -152,6 +159,8 @@ const DEFAULTS: PrefsState = {
   narratorsEnabled: true,
   schedulerAnimationEnabled: true,
   narratorMinTickMs: 200,
+  clearLogOnLoad: true,
+  autoPauseOnIdle: true,
   theme: 'amber',
   locale: DEFAULT_LOCALE,
   panelsCollapsed: {
@@ -338,6 +347,8 @@ export const usePreferencesStore = defineStore('preferences', () => {
   // a strict `?? DEFAULTS` keeps the new flag on for returning users.
   const schedulerAnimationEnabled = ref(initial.schedulerAnimationEnabled ?? DEFAULTS.schedulerAnimationEnabled);
   const narratorMinTickMs = ref(initial.narratorMinTickMs);
+  const clearLogOnLoad = ref(initial.clearLogOnLoad ?? DEFAULTS.clearLogOnLoad);
+  const autoPauseOnIdle = ref(initial.autoPauseOnIdle ?? DEFAULTS.autoPauseOnIdle);
   const theme = ref<Theme>(initial.theme);
   const locale = ref<Locale>(isLocale(initial.locale) ? initial.locale : DEFAULT_LOCALE);
   const panelsCollapsed = ref<PanelsCollapsed>({ ...initial.panelsCollapsed });
@@ -368,6 +379,8 @@ export const usePreferencesStore = defineStore('preferences', () => {
       narratorsEnabled: narratorsEnabled.value,
       schedulerAnimationEnabled: schedulerAnimationEnabled.value,
       narratorMinTickMs: narratorMinTickMs.value,
+      clearLogOnLoad: clearLogOnLoad.value,
+      autoPauseOnIdle: autoPauseOnIdle.value,
       theme: theme.value,
       locale: locale.value,
       panelsCollapsed: panelsCollapsed.value,
@@ -379,7 +392,7 @@ export const usePreferencesStore = defineStore('preferences', () => {
   }
 
   watch(
-    [sidebarCollapsed, showInit, showInitTouched, mode, density, narratorsEnabled, schedulerAnimationEnabled, narratorMinTickMs, theme, locale, panelsCollapsed, asidesCollapsed, columnWidths, panelHeights, consoleDrawer],
+    [sidebarCollapsed, showInit, showInitTouched, mode, density, narratorsEnabled, schedulerAnimationEnabled, narratorMinTickMs, clearLogOnLoad, autoPauseOnIdle, theme, locale, panelsCollapsed, asidesCollapsed, columnWidths, panelHeights, consoleDrawer],
     () => {
       try {
         window.localStorage.setItem(STORAGE_KEY, serialize());
@@ -421,6 +434,14 @@ export const usePreferencesStore = defineStore('preferences', () => {
   function applyShowInitDefault(_nonInitProcCount: number) {
     if (showInitTouched.value) return;
     showInit.value = true;
+  }
+
+  function setClearLogOnLoad(v: boolean) {
+    clearLogOnLoad.value = v;
+  }
+
+  function setAutoPauseOnIdle(v: boolean) {
+    autoPauseOnIdle.value = v;
   }
 
   function togglePanel(name: PanelName, value?: boolean) {
@@ -568,6 +589,10 @@ export const usePreferencesStore = defineStore('preferences', () => {
     narratorsEnabled,
     schedulerAnimationEnabled,
     narratorMinTickMs,
+    clearLogOnLoad,
+    autoPauseOnIdle,
+    setClearLogOnLoad,
+    setAutoPauseOnIdle,
     theme,
     locale,
     panelsCollapsed,

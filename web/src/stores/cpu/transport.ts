@@ -129,13 +129,9 @@ export function useCpuTransport(options: TransportOptions) {
     });
   }
 
-  // Guards a connect() already in flight. The `ws` checks below only catch a
-  // socket that has reached CONNECTING/OPEN, but `ws` is assigned after two
-  // awaits (bootstrapSession + onBeforeConnect). Two synchronous callers — e.g.
-  // a child view's onMounted firing before its parent shell's — would both pass
-  // the `ws` guard while it is still null and open two sockets, each delivering
-  // every frame into the same store (duplicated events). This flag short-circuits
-  // the second caller before either await runs.
+  // `ws` is assigned only after two awaits, so two synchronous callers would
+  // both clear the `ws` guard and open duplicate sockets feeding the same
+  // store. This flag blocks the second caller before either await runs.
   let connecting = false;
   async function connect() {
     if (connecting) return;

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
-import { computed, reactive, ref, shallowRef } from 'vue';
+import { computed, reactive, ref, shallowRef, watch } from 'vue';
+import { usePreferencesStore } from './preferences';
 
 // Tipos de eventos que llegan por WS (espejo de internal/cpu/events.go).
 // Todos los eventos generados por la CPU llevan core_id: con multicore el
@@ -548,6 +549,26 @@ export const useCpuStore = defineStore('cpu', () => {
     setVisibleCores(Array.from({ length: Math.max(1, n) }, (_, i) => i));
   }
   function setIdleTaskEnabled(enabled: boolean) { send({ cmd: 'set_idle_task', idle_task: enabled }); }
+  function setAutoPauseOnIdle(enabled: boolean) { send({ cmd: 'set_auto_pause_idle', auto_pause_idle: enabled }); }
+
+  // Push the persisted preference on every (re)connect so a saved choice
+  // survives reloads (the backend defaults it to true).
+  watch(connected, (isConnected) => {
+    if (isConnected) setAutoPauseOnIdle(usePreferencesStore().autoPauseOnIdle);
+  });
+
+  // True once the loop is stopped and only system tasks remain. Disables RUN
+  // so a finished demo doesn't re-arm a loop that would immediately re-park.
+  const demoFinished = computed(() =>
+    !running.value &&
+    procs.value.length > 0 &&
+    !procs.value.some(p =>
+      p.is_idle !== true &&
+      p.is_kthread !== true &&
+      p.name !== 'init' &&
+      p.state !== 'ZOMBIE',
+    ),
+  );
 
   // idleTaskEnabled is derived from the process table: PID 0 only appears
   // when the kernel toggle is on (LoadProgram / SetIdleTaskEnabled spawn
@@ -671,7 +692,7 @@ export const useCpuStore = defineStore('cpu', () => {
     lastPresence, handRaiseSignal, lastHandRaiseLabel, ownerGlossaryHover,
     connect, load, step, run, pause, reset, clearLog, setQuantum,
     setSpeed, setClockHz, setSpeedMul, pushKey, openGlossary,
-    share, unshare, setAlias, setNumCores, setIdleTaskEnabled, idleTaskEnabled, sendPresence, sendFocus, raiseHand, sendPointer, sendPointerOff, sendClick, sendGlossaryHover, sendGlossaryHoverOff,
+    share, unshare, setAlias, setNumCores, setIdleTaskEnabled, idleTaskEnabled, setAutoPauseOnIdle, demoFinished, sendPresence, sendFocus, raiseHand, sendPointer, sendPointerOff, sendClick, sendGlossaryHover, sendGlossaryHoverOff,
     // Tutor: keep the wire shape private to this store so consumers do not
     // have to know the WS command name.
     sendTutorAsk: (

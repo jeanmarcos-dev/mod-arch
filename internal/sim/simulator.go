@@ -164,6 +164,9 @@ type Simulator struct {
 	// "frozen on purpose" from "system idle waiting for IRQ" and only freeze
 	// visual narrators in the former case.
 	userPaused      bool
+	// autoPauseOnIdle parks the run loop once no user work remains, so a
+	// finished demo settles instead of streaming idle ticks. Default on.
+	autoPauseOnIdle bool
 	runStop         chan struct{}
 	clockHz         int
 	speedMul        float64
@@ -204,13 +207,14 @@ func New(cfg Config) *Simulator {
 	// can flip it off to compare against the legacy auto-stop model.
 	k.IdleTaskEnabled = true
 	return &Simulator{
-		kernel:   k,
-		programs: progs,
-		clients:  make(map[*Client]struct{}),
-		events:   NewEventRing(DefaultEventRingCapacity),
-		logger:   cfg.Logger,
-		clockHz:  2,
-		speedMul: 1.0,
+		kernel:          k,
+		programs:        progs,
+		clients:         make(map[*Client]struct{}),
+		events:          NewEventRing(DefaultEventRingCapacity),
+		logger:          cfg.Logger,
+		clockHz:         2,
+		speedMul:        1.0,
+		autoPauseOnIdle: true,
 	}
 }
 
@@ -243,6 +247,8 @@ func (s *Simulator) LoadProgram(name string) error {
 	}
 	s.mu.Lock()
 	s.kernel.Reset()
+	// New demo restarts the clock at 0; drop stale-tick history from the ring.
+	s.events.Clear()
 	// Init (PID 1) is spawned for every demo so the process tree always has
 	// a root and orphan zombies have somewhere to land. Demos that only care
 	// about a single process keep working: the UI hides PID 1 by default
@@ -479,11 +485,13 @@ func (s *Simulator) StartRun(hz int) {
 			case <-ticker.C:
 				s.mu.Lock()
 				hasWork := s.kernel.HasWork()
+				// HasWork is always true with the swapper on, so a finished
+				// demo would stream idle ticks forever; autoPauseOnIdle parks
+				// the loop once no user work remains. A future PushKey rearms
+				// us via StepOnce.
+				idleDone := s.autoPauseOnIdle && !s.kernel.HasUserWork()
 				s.mu.Unlock()
-				if !hasWork {
-					// Park the loop only when nothing can advance: every
-					// core halted AND no pending IRQ on the way in. A
-					// future PushKey will rearm us via StepOnce.
+				if !hasWork || idleDone {
 					s.StopRun()
 					return
 				}
@@ -767,6 +775,14 @@ func (s *Simulator) SetNumCores(n int) error {
 	return nil
 }
 
+// SetAutoPauseOnIdle toggles parking the run loop once no user work remains.
+// Takes effect on the next ticker iteration; no restart needed.
+func (s *Simulator) SetAutoPauseOnIdle(enabled bool) {
+	s.mu.Lock()
+	s.autoPauseOnIdle = enabled
+	s.mu.Unlock()
+}
+
 // SetIdleTaskEnabled toggles the kernel's swapper (PID 0). When enabling on
 // a loaded demo the PCB is spawned immediately so the next dispatch can bind
 // it. When disabling, the PCB stays in the table but every core bound to it
@@ -834,6 +850,7 @@ func (s *Simulator) Reset() {
 	}
 	s.mu.Lock()
 	s.kernel.Reset()
+	s.events.Clear()
 	snap := s.snapshotLocked()
 	procs := s.processListLocked()
 	s.mu.Unlock()

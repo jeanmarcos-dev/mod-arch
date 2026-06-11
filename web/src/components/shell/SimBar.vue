@@ -132,7 +132,10 @@ const showPause = computed(() => cpu.running || (idleWait.value && !cpu.paused))
 const stepDisabled = computed<boolean>(
   () => viewer.value || cpu.running || haltedDead.value,
 );
-const runDisabled = computed<boolean>(() => viewer.value || haltedDead.value);
+// demoFinished implies the loop already auto-paused with no user work left, so
+// RUN would just re-arm a loop that re-parks on the next tick. Disable it (STEP
+// stays enabled so the idle loop is still observable by hand).
+const runDisabled = computed<boolean>(() => viewer.value || haltedDead.value || cpu.demoFinished);
 
 const stepTooltip = computed(() => {
   if (viewer.value) return t('simbar.tooltips.viewerLocked');
@@ -144,6 +147,7 @@ const stepTooltip = computed(() => {
 const runTooltip = computed(() => {
   if (viewer.value) return t('simbar.tooltips.viewerLocked');
   if (haltedDead.value) return t('simbar.tooltips.runDisabledDead');
+  if (cpu.demoFinished) return t('simbar.tooltips.runDisabledFinished');
   if (cpu.paused) return t('simbar.tooltips.runResumeFromPause');
   return t('simbar.tooltips.run');
 });

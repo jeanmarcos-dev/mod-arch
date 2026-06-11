@@ -286,6 +286,32 @@ func (k *Kernel) HasWork() bool {
 	return len(k.PendingKernelWork) > 0
 }
 
+// HasUserWork reports whether any USER process can still progress: a do_exit
+// cascade is mid-flight, the ready queue is non-empty, or a live (non-zombie)
+// user process exists. System tasks (swapper, init, kthreads) are excluded, so
+// once they are all that remains the demo has finished. The simulator's
+// auto-pause-on-idle polls this; manual Step ignores it.
+func (k *Kernel) HasUserWork() bool {
+	if len(k.PendingKernelWork) > 0 {
+		return true
+	}
+	if k.Ready.Len() > 0 {
+		return true
+	}
+	for _, pcb := range k.Processes {
+		if pcb == nil || pcb.IsIdle() || pcb.IsKThread {
+			continue
+		}
+		if k.InitPID != 0 && pcb.PID == k.InitPID {
+			continue
+		}
+		if pcb.State != StateZombie {
+			return true
+		}
+	}
+	return false
+}
+
 // Reset clears the process table and reinstalls the IDT. Useful for loading a
 // fresh scenario from scratch. All cores go back to their initial state.
 func (k *Kernel) Reset() {
@@ -469,9 +495,24 @@ func (k *Kernel) popNextRunnable() (int, bool) {
 // the simulator extends that invariant to all five phases for visibility.
 func (k *Kernel) Step() ([]cpu.Event, error) {
 	if len(k.PendingKernelWork) > 0 {
-		evs := k.drainOneKernelWorkPhase()
+		// One do_exit phase advances on the dying core; the other cores keep
+		// ticking (SMP — only the core running do_exit stalls). The draining
+		// core is skipped because it is busy with the phase.
+		draining := k.PendingKernelWork[0].coreID
+		out := k.drainOneKernelWorkPhase()
+		for _, core := range k.Cores {
+			if core.ID == draining {
+				continue
+			}
+			evs, err := k.stepCore(core)
+			out = append(out, evs...)
+			if err != nil {
+				k.Clock++
+				return out, err
+			}
+		}
 		k.Clock++
-		return evs, nil
+		return out, nil
 	}
 	out := k.DispatchIdleCores()
 	for _, core := range k.Cores {

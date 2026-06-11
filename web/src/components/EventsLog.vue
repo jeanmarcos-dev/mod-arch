@@ -75,11 +75,9 @@ const visibleCores = computed(() =>
     .sort((a, b) => a - b),
 );
 
-// Headline priority when a single (tick, core) cell carries more than one
-// primary event — the only real case is an `INT 0x80` tick, which emits both
-// the `instruction` (INT) and the `syscall` it triggered. Higher wins. Tags
-// not listed fall back to a low primary weight so any primary still beats a
-// detail. Mirrors the PRIMARY_LOG_TAGS split in the reducer.
+// Headline priority when a cell carries more than one primary (e.g. an
+// `INT 0x80` tick emits both `instruction` and `syscall`). Higher wins;
+// unlisted primaries get a low weight that still beats any detail.
 const PRIMARY_PRIORITY: Record<string, number> = {
   syscall: 100,
   irq_fire: 90,
@@ -97,18 +95,13 @@ const PRIMARY_PRIORITY: Record<string, number> = {
 };
 
 interface CellView {
-  // All entries for this (tick, core), kept for the kernel/scheduler cell
-  // tints that read across the whole bucket.
-  entries: LogEntry[];
-  // The single atomic headline shown collapsed.
-  header: LogEntry;
-  // Everything else, revealed when the row is expanded.
-  details: LogEntry[];
+  entries: LogEntry[]; // full bucket, for the kernel/scheduler cell tints
+  header: LogEntry;    // atomic headline shown collapsed
+  details: LogEntry[]; // revealed on expand
 }
 
-// Pick the headline of a cell: the highest-priority 'primary' entry. Falls
-// back to the first entry for the rare details-only cell so the cell never
-// renders empty.
+// Headline = highest-priority primary entry; falls back to the first entry for
+// a details-only cell so it never renders empty.
 function splitCell(entries: LogEntry[]): CellView {
   let headerIdx = 0;
   let best = -1;
@@ -126,9 +119,8 @@ function splitCell(entries: LogEntry[]): CellView {
   return { entries, header, details };
 }
 
-// Per-row expansion. Keyed by the row's stable id (e.g. 't-5') so it survives
-// the count-augmented render key. `expandAll` is the master switch the header
-// toggle flips; individual rows resolve to expanded when either is set.
+// Per-row expansion, keyed by the row's stable id. `expandAll` is the master
+// switch; a row is expanded when either is set.
 const expandedRows = ref(new Set<string>());
 const expandAll = ref(false);
 
@@ -141,38 +133,27 @@ function toggleRow(id: string) {
 
 function toggleExpandAll() {
   expandAll.value = !expandAll.value;
-  // Clear per-row overrides so the master switch starts from a clean slate
-  // (otherwise rows toggled while collapsed would stay expanded after a
-  // collapse-all, which reads as the button not working).
-  expandedRows.value = new Set();
+  expandedRows.value = new Set(); // drop per-row overrides so the switch wins
 }
 
-// Entries to render for a cell: just the headline when collapsed, headline
-// followed by its details when expanded.
 function cellRows(view: CellView | undefined, expanded: boolean): LogEntry[] {
   if (!view) return [];
   return expanded ? [view.header, ...view.details] : [view.header];
 }
 
 interface GridRow {
-  // Key embeds the entry count and expansion state so that a row growing
-  // mid-stream (more events on the same tick) or being expanded/collapsed
-  // yields a fresh key — DynamicScroller drops the stale height cache and
-  // re-measures. Stable rows keep their key across builds and are reused.
+  // Embeds entry count + expansion so a growing or toggled row gets a fresh
+  // key and DynamicScroller re-measures instead of using a stale height.
   key: string;
-  // Stable id independent of entry count / expansion, used to track which
-  // rows the user expanded.
-  id: string;
+  id: string; // stable across count/expansion, tracks which rows are expanded
   tick: number | null;
   isGlobal: boolean;
   // Zebra parity is bound to `tick % 2` (not to the row's array index) so
   // shifts on cpu.log and global-row interleaving don't flip every row's
   // background when a new event arrives.
   alt: boolean;
-  // True when at least one cell has detail lines hidden behind the expander.
-  hasDetails: boolean;
-  // Resolved expansion state for this build (expandAll || per-row override).
-  expanded: boolean;
+  hasDetails: boolean; // any cell has detail lines behind the expander
+  expanded: boolean;   // resolved: expandAll || per-row override
   globalEntry?: LogEntry;
   cells: Map<number, CellView>;
 }
@@ -186,7 +167,9 @@ const gridRows = computed<GridRow[]>(() => {
 
   const rows: GridRow[] = [];
   const buckets: Map<number, LogEntry[]>[] = [];
-  const tickIndex = new Map<number, number>();
+  // Keyed by `${epoch}:${tick}` so a new demo's tick 0 (a fresh epoch) never
+  // merges into the previous demo's tick 0 row after the clock resets.
+  const tickIndex = new Map<string, number>();
   const rowEntries: number[] = [];
   let untickedSeq = 0;
 
@@ -212,13 +195,15 @@ const gridRows = computed<GridRow[]>(() => {
     }
 
     const tick = typeof e.tick === 'number' ? e.tick : null;
+    const epoch = e.epoch ?? 0;
+    const tickKey = tick !== null ? `${epoch}:${tick}` : null;
     let idx: number | undefined;
-    if (tick !== null) {
-      idx = tickIndex.get(tick);
+    if (tickKey !== null) {
+      idx = tickIndex.get(tickKey);
     }
     if (idx === undefined) {
       idx = rows.length;
-      const baseKey = tick !== null ? `t-${tick}` : `u-${untickedSeq++}`;
+      const baseKey = tick !== null ? `e${epoch}-t${tick}` : `u-${untickedSeq++}`;
       rows.push({
         key: baseKey,
         id: baseKey,
@@ -231,7 +216,7 @@ const gridRows = computed<GridRow[]>(() => {
       });
       buckets.push(new Map());
       rowEntries.push(0);
-      if (tick !== null) tickIndex.set(tick, idx);
+      if (tickKey !== null) tickIndex.set(tickKey, idx);
     }
     const bucket = buckets[idx];
     const coreKey = e.coreId ?? -1;
@@ -374,6 +359,7 @@ watch(() => props.active, async (active) => {
                 :class="{ 'grid__entry--kernel': entry.inKernel, 'grid__entry--detail': row.expanded && i > 0 }"
                 :style="{ color: colorOf(entry.color) }"
               ><span v-if="entry.kind === 'scheduler'" class="grid__sched-chip" :title="t('panels.events.schedulerChipTitle')">S</span><span v-if="entry.inKernel" class="grid__kernel-chip" :title="t('panels.events.kernelChipTitle')">K</span><ArrowDownToLine v-if="entry.glyph === 'pcbSave'" class="grid__glyph" :size="12" :stroke-width="2" aria-hidden="true" /><ArrowUpFromLine v-else-if="entry.glyph === 'pcbRestore'" class="grid__glyph" :size="12" :stroke-width="2" aria-hidden="true" />{{ entry.text }}<span v-if="!row.expanded && i === 0 && (row.cells.get(c)?.details.length ?? 0) > 0" class="grid__more">+{{ row.cells.get(c)?.details.length }}</span></div>
+              <span v-if="!row.cells.get(c)" class="grid__cell-empty" aria-hidden="true">·</span>
             </div>
           </div>
         </DynamicScrollerItem>
@@ -595,6 +581,11 @@ watch(() => props.active, async (active) => {
 .grid__entry {
   padding: 0;
   line-height: 1.4;
+}
+
+.grid__cell-empty {
+  color: var(--text-muted, rgba(255, 255, 255, 0.25));
+  opacity: 0.4;
 }
 
 /* Detail lines revealed under a headline when the row is expanded. Indented

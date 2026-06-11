@@ -3,16 +3,11 @@ import { usePreferencesStore } from '../preferences';
 import type { CpuEvent, SessionInfo, Presence, VarMeta, VarSnapshot, LogEntry } from './types';
 import { formatLog } from '../../i18n/formatLog';
 
-// Event tags whose log line is the PRIMARY (atomic) action of a tick. The
-// kernel emits at most one *execution* primary (instruction/irq_fire/halt) per
-// (tick, core); a syscall tick may also carry the sub-event it triggered
-// (fork/thread/mutex/sem), and the event log's headline-priority picks the
-// most meaningful one. Everything else a tick emits is a DETAIL that
-// elaborates the primary: pcb save/restore, core assign/release, reparent,
-// wait, and crucially mode_switch — a privilege flip is always a consequence
-// of a dispatch, an IRQ entry, or an IRET, never an action on its own. Tags
-// that produce no log line (reg_write, mem_*, process_state, console_out,
-// core_idle, pipe_*) never reach pushLog.
+// Event tags whose log line is a PRIMARY (atomic) action of a tick. Everything
+// else that reaches pushLog is a DETAIL elaborating the primary (pcb
+// save/restore, core assign/release, reparent, wait, and mode_switch — a
+// privilege flip is always a consequence of a dispatch/IRQ/IRET). The event
+// log shows one headline per cell and collapses the rest.
 const PRIMARY_LOG_TAGS = new Set<string>([
   'instruction',
   'syscall',
@@ -98,12 +93,12 @@ export function useCpuReducer(state: any) {
     return () => subscribers.delete(fn);
   }
 
-  // Role/tag of the event currently being applied, derived once and read by
-  // pushLog as the default for every line that event emits. Closure vars keep
-  // the ~30 pushLog call sites untouched; applyEvent runs each event
-  // synchronously, so there is no interleaving to corrupt them.
+  // Role/tag/epoch of the event being applied, read by pushLog as defaults so
+  // the ~30 call sites stay untouched. applyEvent runs synchronously, so these
+  // never interleave. Epoch bumps on each load/reset to keep demos' ticks apart.
   let currentLogRole: LogEntry['role'] = 'detail';
   let currentLogTag: string | undefined;
+  let currentEpoch = 0;
 
   function applyEvent(ev: CpuEvent) {
     currentLogTag = (ev as { type?: string }).type;
@@ -306,6 +301,7 @@ export function useCpuReducer(state: any) {
         if (ev.speedMul !== undefined) speedMul.value = ev.speedMul;
         break;
       case 'loaded': {
+        beginNewEpoch();
         pushLog(formatLog.loaded(ev.name, ev.pids.length, ev.pids), 'green', undefined, undefined, 'global');
         procs.value = ev.procs;
         // Pick a sensible default for the "Mostrar init" toggle based on how
@@ -352,6 +348,10 @@ export function useCpuReducer(state: any) {
         applyVarsPayload(ev.vars);
         break;
       case 'reset':
+        // A hard reset wipes the machine to a blank slate, so the event log
+        // always clears (unlike load, which honors the keep-history pref).
+        currentEpoch++;
+        log.value = [];
         changedRegs.clear();
         for (const k of Object.keys(changedRegsByCore)) delete changedRegsByCore[Number(k)];
         procs.value = [];
@@ -781,6 +781,17 @@ export function useCpuReducer(state: any) {
     }
   }
 
+  // Starts a fresh run timeline: always bumps the epoch (so ticks never merge
+  // across demos) and clears the log + console when the user preference asks.
+  function beginNewEpoch() {
+    currentEpoch++;
+    const prefs = usePreferencesStore();
+    if (prefs.clearLogOnLoad) {
+      log.value = [];
+      consoleChunks.value = [];
+    }
+  }
+
   function pushLog(
     text: string,
     color: string,
@@ -791,6 +802,7 @@ export function useCpuReducer(state: any) {
     glyph?: LogEntry['glyph'],
     role: LogEntry['role'] = currentLogRole,
     tag: string | undefined = currentLogTag,
+    epoch: number = currentEpoch,
   ) {
     // Derive inKernel from the live per-core mode tracked in cores.value.
     // mode_switch events update that value before subsequent pushLog calls
@@ -802,7 +814,7 @@ export function useCpuReducer(state: any) {
       const c = cores.value.find((x: any) => x.id === coreId);
       if (c) inKernel = c.mode === 0;
     }
-    log.value.push({ ts: Date.now(), text, color, coreId, tick, scope, inKernel, kind, glyph, role, tag });
+    log.value.push({ ts: Date.now(), text, color, coreId, tick, scope, inKernel, kind, glyph, role, tag, epoch });
     if (log.value.length > 500) log.value.splice(0, log.value.length - 500);
     triggerRef(log);
   }

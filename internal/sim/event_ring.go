@@ -55,6 +55,21 @@ func (r *EventRing) push(ev cpu.Event, tick uint64) {
 	r.mu.Unlock()
 }
 
+// Clear drops all retained history. Called on load/reset so tutor tools never
+// surface a previous demo's events under the restarted clock.
+func (r *EventRing) Clear() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.head = 0
+	r.filled = false
+	for i := range r.buf {
+		r.buf[i] = ringEntry{}
+	}
+	r.mu.Unlock()
+}
+
 // Recent returns up to n entries whose Type matches one of `types` (or every
 // entry if `types` is empty). Newest-first ordering.
 func (r *EventRing) Recent(types []string, n int) []map[string]any {

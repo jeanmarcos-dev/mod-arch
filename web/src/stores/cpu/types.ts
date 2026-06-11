@@ -318,17 +318,14 @@ export interface LogEntry {
   // their `text`, because JetBrains Mono lacks the original ◍/◌ at this
   // size and the system fallback breaks vertical alignment.
   glyph?: 'pcbSave' | 'pcbRestore';
-  // Atomicity role within a tick. Each (tick, core) carries exactly one
-  // 'primary' action (the instruction/syscall/dispatch/irq/… that happened);
-  // every other entry is a 'detail' that elaborates it (pcb save/restore,
-  // core assign/release, reparent, wait). The event log collapses a cell to
-  // its primary line and tucks the details behind an expander. Undefined for
-  // global rows (loaded/reset/ws_*), which never share a cell.
+  // Atomicity role: the event log shows one 'primary' headline per cell and
+  // tucks 'detail' lines behind an expander. Undefined for global rows.
   role?: 'primary' | 'detail';
-  // Originating event tag (e.g. 'instruction', 'syscall'). The event log uses
-  // it to pick the headline when two primaries land on the same cell — an
-  // `INT 0x80` tick emits both 'instruction' and 'syscall', and the syscall
-  // wins. Undefined for global/transport lines that have no cpu.Event tag.
+  // Originating event tag, used to pick the headline when two primaries share
+  // a cell (an `INT 0x80` tick emits both 'instruction' and 'syscall').
   tag?: string;
+  // Run epoch, bumped on every load/reset; the log groups by (epoch, tick) so
+  // a new demo's tick 0 never merges into the previous one.
+  epoch?: number;
 }
 
