@@ -379,4 +379,21 @@ describe('cpu store — sync objects from snapshot', () => {
     expect(cpu.mutexes).toEqual([]);
     expect(cpu.semaphores).toEqual([]);
   });
+
+  it('clears lock state from the previous demo on loaded', () => {
+    const cpu = useCpuStore();
+    cpu.__applyEvent({
+      type: 'mutex_op', core_id: 0, tick: 0, pid: 3, mutex_id: 1, op: 'create',
+    } as any);
+    cpu.__applyEvent({
+      type: 'sem_op', core_id: 0, tick: 0, pid: 3, sem_id: 1, op: 'create', count: 1,
+    } as any);
+    expect(cpu.mutexes).toHaveLength(1);
+    expect(cpu.semaphores).toHaveLength(1);
+
+    cpu.__applyEvent({ type: 'loaded', name: 'demo', pids: [2], procs: [] } as any);
+
+    expect(cpu.mutexes).toEqual([]);
+    expect(cpu.semaphores).toEqual([]);
+  });
 });

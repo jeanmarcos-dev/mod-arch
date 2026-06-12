@@ -318,6 +318,10 @@ export function useCpuReducer(state: any) {
         // A new demo starts with no open IPC channels — the kernel
         // resets its Pipes registry alongside its process table.
         pipes.value = [];
+        // Drop the previous demo's lock state so the wait graph and deadlock
+        // latch never render against stale holders before the first snapshot.
+        mutexes.value = [];
+        semaphores.value = [];
         if (ev.sources) {
           procSources.value = {};
           for (const [pid, src] of Object.entries(ev.sources)) {
