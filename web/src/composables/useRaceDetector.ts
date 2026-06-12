@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, reactive, type ComputedRef } from 'vue';
+import { computed, onScopeDispose, reactive, type ComputedRef } from 'vue';
 import { useCpuStore, type CpuEvent, type VarMeta } from '../stores/cpu';
 
 // Ring cap. Small on purpose: the lens only narrates the recent past.
@@ -240,7 +240,10 @@ export function useRaceDetector(): UseRaceDetectorReturn {
     }
   });
 
-  onBeforeUnmount(() => unsub());
+  // onScopeDispose (not onBeforeUnmount) fires on component unmount AND when a
+  // detached effectScope is stopped, so this composable can back an app-level
+  // singleton; it also stays silent when used outside a component.
+  onScopeDispose(() => unsub());
 
   const expectedFinal = computed(() =>
     state.cellValue === null ? null : state.cellValue + state.lostTotal,

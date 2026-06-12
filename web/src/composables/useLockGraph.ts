@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, ref, type ComputedRef } from 'vue';
+import { computed, onScopeDispose, ref, type ComputedRef } from 'vue';
 import { useCpuStore, type CpuEvent } from '../stores/cpu';
 
 export interface GraphNode {
@@ -105,7 +105,10 @@ export function useLockGraph(): UseLockGraphReturn {
       assignSlots();
     }
   });
-  onBeforeUnmount(() => unsub());
+  // onScopeDispose (not onBeforeUnmount) fires on component unmount AND when a
+  // detached effectScope is stopped, so this composable can back an app-level
+  // singleton; it also stays silent when used outside a component.
+  onScopeDispose(() => unsub());
 
   // Cover locks that already existed before this consumer mounted.
   assignSlots();

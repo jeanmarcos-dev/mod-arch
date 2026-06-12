@@ -2,8 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useCpuStore, type CpuEvent } from '../../stores/cpu';
-import { useLockGraph } from '../../composables/useLockGraph';
-import { useRaceDetector } from '../../composables/useRaceDetector';
+import { useConcurrencyState } from '../../composables/useConcurrencyState';
 import { useSchedulerMetrics } from '../../composables/useSchedulerMetrics';
 import { pidColor } from '../../lib/pidColors';
 import WaitGraph from '../../components/concurrency/WaitGraph.vue';
@@ -17,10 +16,10 @@ const cpu = useCpuStore();
 
 onMounted(() => { cpu.connect(); });
 
-// Single shared instances: every panel below consumes these, so the view
-// holds exactly one subscription per composable.
-const lockGraph = useLockGraph();
-const detector = useRaceDetector();
+// App-level shared instances: detection state outlives this view so other
+// sections can read it. The scheduler metrics stay per-view.
+const { lockGraph, raceDetector } = useConcurrencyState();
+const detector = raceDetector;
 const sched = useSchedulerMetrics();
 
 // Latch the deadlock instant in the shared metrics' relative tick space so
