@@ -308,11 +308,12 @@ func (s *Simulator) LoadProgram(name string) error {
 	s.procGlobals = globalsByPID
 	s.procLocals = localsByPID
 	s.procFuncs = funcsByPID
-	// Boot bind: park every core on its swapper before any user proc takes a
-	// slot. The first RUN/Step then surfaces the swapper→user proc transition
-	// in the event log instead of hiding it inside a single "loaded" snapshot.
-	bootEvs := s.kernel.BindIdleCores()
-	bootTick := s.kernel.Clock
+	// Boot bind: park every core on its swapper so the snapshot reflects the
+	// idle state. These events are NOT broadcast as a tick-0 frame: load does
+	// not step the CPU, so tick 0 belongs to the first STEP/RUN. Emitting them
+	// here would later merge with that step's dispatch and make the tick-0 row
+	// mutate. The first DispatchIdleCores re-surfaces the swapper→user transition.
+	s.kernel.BindIdleCores()
 	snap := s.snapshotLocked()
 	procs := s.processListLocked()
 	s.mu.Unlock()
@@ -326,7 +327,6 @@ func (s *Simulator) LoadProgram(name string) error {
 		"source_maps": sourceMaps,
 		"var_meta":    varMetaPayload(globalsByPID, localsByPID, funcsByPID),
 	})
-	s.broadcastTickEvents(bootTick, bootEvs)
 	s.Broadcast(snap)
 	return nil
 }
@@ -459,45 +459,49 @@ func (s *Simulator) StartRun(hz int) {
 	stop := s.runStop
 	intCh := s.intervalChange
 	interval := tickInterval(s.clockHz, s.speedMul)
-	// Boot dispatch: assign ready procs to idle cores so the first tick
-	// already has work to do and the READY→RUN transitions are observable
-	// in the event log before any instruction executes.
-	bootEvs := s.kernel.DispatchIdleCores()
-	tick := s.kernel.Clock
 	clockHz := s.clockHz
 	speedMul := s.speedMul
 	s.mu.Unlock()
 
-	s.broadcastTickEvents(tick, bootEvs)
 	s.broadcastSpeedState(true, false, clockHz, speedMul, interval)
 
+	// Step-then-wait: the first StepOnce runs immediately so RUN feels
+	// responsive, and crucially it is the sole owner of tick 0. A separate
+	// boot-dispatch broadcast here would land a second frame on the same tick
+	// and make the event log's tick-0 row mutate; StepOnce already does its own
+	// DispatchIdleCores + Step, so tick 0 matches what STEP produces.
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
-			select {
-			case <-stop:
+			s.mu.Lock()
+			hasWork := s.kernel.HasWork()
+			// HasWork is always true with the swapper on, so a finished demo
+			// would stream idle ticks forever; autoPauseOnIdle parks the loop
+			// once no user work remains. A future PushKey rearms us via StepOnce.
+			idleDone := s.autoPauseOnIdle && !s.kernel.HasUserWork()
+			s.mu.Unlock()
+			if !hasWork || idleDone {
+				s.StopRun()
 				return
-			case newInterval := <-intCh:
-				if newInterval > 0 {
-					ticker.Reset(newInterval)
-				}
-			case <-ticker.C:
-				s.mu.Lock()
-				hasWork := s.kernel.HasWork()
-				// HasWork is always true with the swapper on, so a finished
-				// demo would stream idle ticks forever; autoPauseOnIdle parks
-				// the loop once no user work remains. A future PushKey rearms
-				// us via StepOnce.
-				idleDone := s.autoPauseOnIdle && !s.kernel.HasUserWork()
-				s.mu.Unlock()
-				if !hasWork || idleDone {
-					s.StopRun()
+			}
+			if err := s.StepOnce(); err != nil {
+				s.StopRun()
+				return
+			}
+			// Wait for the next tick, honoring stop and live retunes without
+			// stepping again.
+			waiting := true
+			for waiting {
+				select {
+				case <-stop:
 					return
-				}
-				if err := s.StepOnce(); err != nil {
-					s.StopRun()
-					return
+				case newInterval := <-intCh:
+					if newInterval > 0 {
+						ticker.Reset(newInterval)
+					}
+				case <-ticker.C:
+					waiting = false
 				}
 			}
 		}
