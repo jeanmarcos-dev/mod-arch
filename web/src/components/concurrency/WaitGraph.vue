@@ -211,8 +211,14 @@ const cycleText = computed(() => {
 }
 
 .wg__svg {
-  width: 100%;
   display: block;
+  width: 100%;
+  /* Cap by the viewBox aspect so the SVG never balloons to the column width
+     and pushes lower nodes onto the panels below; center it in the column. */
+  max-width: 460px;
+  margin-inline: auto;
+  aspect-ratio: 4 / 3;
+  height: auto;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
