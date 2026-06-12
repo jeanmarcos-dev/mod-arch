@@ -251,6 +251,7 @@ const en: MessageSchema = {
         ownerThreadStack: 'P{pid} {name} · stack (thread of P{leader})',
         sharedWith: 'shared with {tids}',
         sharedHint: 'This code is part of a thread group; each PID listed runs the same segment.',
+        disputed: 'Shared address — {lost} increments lost to a race condition',
       },
     },
     memoryActivityFeed: {

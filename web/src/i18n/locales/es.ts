@@ -248,6 +248,7 @@ const es = {
         ownerThreadStack: 'P{pid} {name} · pila (hilo de P{leader})',
         sharedWith: 'compartido con {tids}',
         sharedHint: 'Este código forma parte de un grupo de hilos; cada PID listado ejecuta el mismo segmento.',
+        disputed: 'Dirección compartida — {lost} incrementos perdidos en condición de carrera',
       },
     },
     memoryActivityFeed: {

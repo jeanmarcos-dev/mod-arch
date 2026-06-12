@@ -243,6 +243,7 @@ const pt = {
         ownerThreadStack: 'P{pid} {name} · pilha (thread de P{leader})',
         sharedWith: 'compartilhado com {tids}',
         sharedHint: 'Este código faz parte de um grupo de threads; cada PID listado executa o mesmo segmento.',
+        disputed: 'Endereço compartilhado — {lost} incrementos perdidos em condição de corrida',
       },
     },
     memoryActivityFeed: {

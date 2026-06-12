@@ -42,6 +42,12 @@ const props = defineProps<{
    *  byte" (kernel, PID N · code/stack, thread stack). Optional: when
    *  omitted, the popover skips the ownership row. */
   owners?: MemoryOwner[];
+  /** Address of the contended shared counter flagged by the race detector.
+   *  Its cell gets a continuous red pulse so the contended byte stands out
+   *  even for students who never opened /concurrencia. */
+  disputedAddr?: number | null;
+  /** Total increments lost to the race so far, surfaced in the cell popover. */
+  disputedLost?: number;
 }>();
 
 const emit = defineEmits<{
@@ -196,6 +202,10 @@ function isRowHighlighted(rowAddr: number): boolean {
   return props.highlightedAddr >= rowAddr && props.highlightedAddr < rowAddr + 16;
 }
 
+function isDisputed(addr: number): boolean {
+  return props.disputedAddr !== null && props.disputedAddr !== undefined && addr === props.disputedAddr;
+}
+
 function ageLabel(t0: number | undefined): string {
   if (t0 === undefined) return '—';
   const ms = performance.now() - t0;
@@ -227,6 +237,7 @@ const popoverInfo = computed(() => {
     lastW,
     lastR,
     owner,
+    disputed: isDisputed(addr),
   };
 });
 
@@ -271,7 +282,7 @@ function ensureTicker() {
         <span
           v-for="(byte, idx) in row.cells"
           :key="idx"
-          class="hexgrid__cell"
+          :class="['hexgrid__cell', { 'hexgrid__cell--disputed': isDisputed(row.addr + idx) }]"
           :style="cellHeatStyle(row.addr + idx)"
           :data-mem-addr="`0x${(row.addr + idx).toString(16).toLowerCase()}`"
           @mousedown="onCellMouseDown(row.addr + idx, $event)"
@@ -320,6 +331,9 @@ function ensureTicker() {
           <span v-if="popoverInfo.value !== undefined" class="hexgrid__popover-dec">
             ({{ popoverInfo.valueDec }}<template v-if="popoverInfo.printable"> · {{ popoverInfo.printable }}</template>)
           </span>
+        </div>
+        <div v-if="popoverInfo.disputed" class="hexgrid__popover-disputed">
+          {{ t('shell.memoryHexGrid.popover.disputed', { lost: disputedLost ?? 0 }) }}
         </div>
         <dl class="hexgrid__popover-stats">
           <div v-if="popoverInfo.owner">
@@ -512,6 +526,37 @@ function ensureTicker() {
   100% { background-color: transparent; box-shadow: none; }
 }
 
+/* Disputed cell: the shared counter address flagged by the race detector.
+   A continuous red pulse — distinct from the one-shot amber jump highlight —
+   marks it as the contended byte. The ring lives on the cell while a soft
+   background pulse rides a ::before layer behind the heat overlay and digit
+   (z-index 0), so heat animations and the digit stay readable on top. */
+.hexgrid__cell--disputed {
+  z-index: 4;
+  animation: disputed-ring 1.4s ease-in-out infinite;
+  border-radius: 2px;
+}
+
+.hexgrid__cell--disputed::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: 2px;
+  pointer-events: none;
+  animation: disputed-glow 1.4s ease-in-out infinite;
+}
+
+@keyframes disputed-ring {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 58, 58, 0.55); }
+  50%      { box-shadow: inset 0 0 0 1.5px var(--red), 0 0 8px rgba(255, 58, 58, 0.6); }
+}
+
+@keyframes disputed-glow {
+  0%, 100% { background-color: rgba(255, 58, 58, 0.10); }
+  50%      { background-color: rgba(255, 58, 58, 0.28); }
+}
+
 .digit-fade-enter-active,
 .digit-fade-leave-active {
   position: absolute;
@@ -594,6 +639,17 @@ function ensureTicker() {
 .hexgrid__popover-dec {
   color: var(--text-muted);
   font-size: 10px;
+}
+
+.hexgrid__popover-disputed {
+  color: var(--red-soft);
+  font-size: 10px;
+  line-height: 1.35;
+  margin-bottom: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--red);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 58, 58, 0.08);
 }
 
 .hexgrid__popover-stats {
@@ -684,6 +740,9 @@ function ensureTicker() {
   .hexgrid__heat--read { animation: none; opacity: 0; }
   .digit-fade-enter-active,
   .digit-fade-leave-active { transition: none; }
+  /* Keep the disputed cell legible as a static red ring, no pulsing. */
+  .hexgrid__cell--disputed { animation: none; box-shadow: inset 0 0 0 1.5px var(--red); }
+  .hexgrid__cell--disputed::before { animation: none; background-color: rgba(255, 58, 58, 0.16); }
 }
 
 /* Mobile sub-grid that lets the 16-column layout scroll horizontally while

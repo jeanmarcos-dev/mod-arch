@@ -16,6 +16,7 @@ import MemoryHexGrid, { type HeatEntry } from '../../components/memory/MemoryHex
 import MemoryActivityFeed, { type FeedEntry } from '../../components/memory/MemoryActivityFeed.vue';
 import { fmtAddr, regionFor, MEM_TOTAL } from '../../lib/memoryLayout';
 import { buildOwners, buildCoreMarkers } from '../../lib/memoryOwners';
+import { useConcurrencyState } from '../../composables/useConcurrencyState';
 
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
@@ -300,6 +301,13 @@ const owners = computed(() => buildOwners(cpu.procs, cpu.cores));
 
 const coreMarkers = computed(() => buildCoreMarkers(cpu.cores, new Set(cpu.selectedCoreIds)));
 
+// The race detector runs app-wide, so the contended shared-counter address is
+// known here even if the student never opened /concurrencia. Surface it as a
+// continuous red pulse on its byte in the hex grid.
+const { raceDetector } = useConcurrencyState();
+const disputedAddr = computed(() => raceDetector.state.trackedAddr);
+const disputedLost = computed(() => raceDetector.state.lostTotal);
+
 const selectedOwnerId = ref<string | null>(null);
 
 function onOwnerSelect(id: string) {
@@ -422,6 +430,8 @@ function onOwnerJumpStack(addr: number) {
         :highlight-seq="highlightSeq"
         :core-markers="coreMarkers"
         :owners="owners"
+        :disputed-addr="disputedAddr"
+        :disputed-lost="disputedLost"
         @scroll-by="scrollBy"
       />
 
