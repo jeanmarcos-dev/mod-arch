@@ -138,6 +138,10 @@ type Command struct {
 	RequestID string              `json:"request_id,omitempty"`
 	TutorMode string              `json:"tutor_mode,omitempty"`
 	History   []tutor.HistoryTurn `json:"history,omitempty"`
+	// DetectionContext is a pre-rendered Spanish summary of the live
+	// concurrency detectors (lost updates, deadlock cycle) the client computes
+	// so the tutor can explain this run instead of generic theory.
+	DetectionContext string `json:"detection_context,omitempty"`
 }
 
 // FocusInput mirrors the wire shape the owner sends inside a presence

@@ -131,11 +131,16 @@ Solo [Glosario: <término exacto>] o [Silberschatz p. <N>]. Nunca formatos inter
 // "¿y por qué?" without needing the student to repeat themselves. The eager
 // slice carries pre-executed tool outputs so the LLM has the common answers
 // without having to invoke tools — see Service.runEagerTools.
-func BuildMessages(question string, simSnapshot string, eager []EagerResult, retrieved []rag.ScoredChunk, history []HistoryTurn) []promptMessage {
+func BuildMessages(question string, simSnapshot string, eager []EagerResult, retrieved []rag.ScoredChunk, history []HistoryTurn, detectionContext string) []promptMessage {
 	var ctxBlock strings.Builder
 	if strings.TrimSpace(simSnapshot) != "" {
 		ctxBlock.WriteString("ESTADO ACTUAL DEL SIMULADOR\n")
 		ctxBlock.WriteString(simSnapshot)
+		ctxBlock.WriteString("\n\n")
+	}
+	if strings.TrimSpace(detectionContext) != "" {
+		ctxBlock.WriteString("DETECTORES DE CONCURRENCIA (estado en vivo):\n")
+		ctxBlock.WriteString(strings.TrimSpace(detectionContext))
 		ctxBlock.WriteString("\n\n")
 	}
 	for _, r := range eager {

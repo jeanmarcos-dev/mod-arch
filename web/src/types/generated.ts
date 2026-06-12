@@ -146,6 +146,7 @@ export interface Command {
   request_id?: string;
   tutor_mode?: string;
   history?: HistoryTurn[];
+  detection_context?: string;
 }
 
 export interface EventInstruction {

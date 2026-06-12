@@ -62,7 +62,7 @@ func (s *Server) handleTutorAsk(cmd Command, sess *sessions.Session, c *sim.Clie
 		if len(hist) > historyHardCap {
 			hist = hist[len(hist)-historyHardCap:]
 		}
-		ans, err := svc.AskWithOptions(ctx, sess, cmd.Question, tutor.AskOptions{Mode: cmd.TutorMode, History: hist}, progress)
+		ans, err := svc.AskWithOptions(ctx, sess, cmd.Question, tutor.AskOptions{Mode: cmd.TutorMode, History: hist, DetectionContext: cmd.DetectionContext}, progress)
 		if err != nil {
 			var rl *tutor.RateLimitError
 			if errors.As(err, &rl) {

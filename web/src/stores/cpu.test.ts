@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { useCpuStore } from './cpu';
 
@@ -395,5 +395,79 @@ describe('cpu store — sync objects from snapshot', () => {
 
     expect(cpu.mutexes).toEqual([]);
     expect(cpu.semaphores).toEqual([]);
+  });
+});
+
+describe('cpu store — sendTutorAsk payload', () => {
+  // Fake socket that captures the JSON frames the store sends so we can assert
+  // the wire shape of the "ask" command.
+  class FakeWebSocket {
+    static instances: FakeWebSocket[] = [];
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    readyState = FakeWebSocket.OPEN;
+    onopen: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    sent: string[] = [];
+    constructor(public url: string) {
+      FakeWebSocket.instances.push(this);
+    }
+    send(data: string) {
+      this.sent.push(data);
+    }
+    close() {}
+  }
+
+  function flush() {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    FakeWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', FakeWebSocket as unknown as typeof WebSocket);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function connectStore() {
+    const cpu = useCpuStore();
+    await cpu.connect();
+    const sock = FakeWebSocket.instances[0];
+    sock.onopen?.();
+    return { cpu, sock };
+  }
+
+  it('omits detection_context when no 4th arg is passed', async () => {
+    const { cpu, sock } = await connectStore();
+    cpu.sendTutorAsk('¿qué es PL3?', 'req-1');
+    await flush();
+    const frame = JSON.parse(sock.sent.at(-1)!);
+    expect(frame.cmd).toBe('ask');
+    expect(frame.question).toBe('¿qué es PL3?');
+    expect(frame.request_id).toBe('req-1');
+    expect('detection_context' in frame).toBe(false);
+  });
+
+  it('omits detection_context when the 4th arg is empty', async () => {
+    const { cpu, sock } = await connectStore();
+    cpu.sendTutorAsk('¿qué es PL3?', 'req-2', [], '');
+    await flush();
+    const frame = JSON.parse(sock.sent.at(-1)!);
+    expect('detection_context' in frame).toBe(false);
+  });
+
+  it('carries detection_context when a non-empty summary is provided', async () => {
+    const { cpu, sock } = await connectStore();
+    const summary = 'Interbloqueo activo desde el tick 42: ciclo de espera P1 → P2 → P1.';
+    cpu.sendTutorAsk('¿por qué se cuelga?', 'req-3', [], summary);
+    await flush();
+    const frame = JSON.parse(sock.sent.at(-1)!);
+    expect(frame.detection_context).toBe(summary);
   });
 });

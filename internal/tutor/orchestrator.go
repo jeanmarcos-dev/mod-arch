@@ -229,6 +229,11 @@ type HistoryTurn struct {
 type AskOptions struct {
 	Mode    string
 	History []HistoryTurn
+	// DetectionContext is a pre-rendered Spanish summary of the live
+	// concurrency detectors (lost updates, deadlock cycle) the client computes.
+	// When non-empty it is appended to the user message so the tutor explains
+	// the current run; empty adds nothing.
+	DetectionContext string
 }
 
 // Ask runs the full pipeline for a single question from a session. progress
@@ -358,7 +363,7 @@ func (s *Service) askInternal(ctx context.Context, sess *sessions.Session, quest
 		}
 	}
 
-	initial := BuildMessages(question, snapText, eager, retrieved, history)
+	initial := BuildMessages(question, snapText, eager, retrieved, history, opts.DetectionContext)
 	messages := toLLMMessages(initial)
 	// Socratic mode replaces the first system message with the alternate
 	// prompt. Tools and snapshot context stay untouched so the model can

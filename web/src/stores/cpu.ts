@@ -695,7 +695,15 @@ export const useCpuStore = defineStore('cpu', () => {
       question: string,
       requestId: string,
       history?: { role: 'user' | 'assistant'; text: string }[],
-    ) => send({ cmd: 'ask', question, request_id: requestId, history }),
+      detectionContext?: string,
+    ) =>
+      send({
+        cmd: 'ask',
+        question,
+        request_id: requestId,
+        history,
+        ...(detectionContext ? { detection_context: detectionContext } : {}),
+      }),
     // Test seam: vitest fakes the WebSocket by dispatching events directly
     // through this entry point. Production code uses the real ws.onmessage.
     __applyEvent: applyEvent,

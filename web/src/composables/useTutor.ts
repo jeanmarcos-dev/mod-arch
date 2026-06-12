@@ -1,5 +1,6 @@
 import { onBeforeUnmount, onMounted } from 'vue';
 
+import { useConcurrencyState } from './useConcurrencyState';
 import { useCpuStore } from '../stores/cpu';
 import { useTutorStore, type IncomingAnswer, type IncomingProgress } from '../stores/tutor';
 
@@ -14,6 +15,7 @@ import { useTutorStore, type IncomingAnswer, type IncomingProgress } from '../st
 export function useTutor() {
   const cpu = useCpuStore();
   const tutor = useTutorStore();
+  const concurrency = useConcurrencyState();
 
   function onAnswer(e: Event) {
     const ce = e as CustomEvent<unknown>;
@@ -69,9 +71,13 @@ export function useTutor() {
       });
     // Mode is controlled by the admin globally; the client just sends the
     // question and lets the server pick the system prompt.
+    // A short Spanish summary of the live concurrency detectors (lost updates,
+    // active deadlock cycle). Empty when nothing notable is happening; the
+    // server only appends a context section when it is non-empty.
+    const detectionContext = concurrency.tutorSummary();
     tutor.startAsk(trimmed, requestId);
     try {
-      cpu.sendTutorAsk(trimmed, requestId, history);
+      cpu.sendTutorAsk(trimmed, requestId, history, detectionContext);
     } catch (err) {
       tutor.failPending(requestId, String(err));
     }

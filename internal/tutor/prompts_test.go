@@ -1,9 +1,44 @@
 package tutor
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestBuildMessagesDetectionContext(t *testing.T) {
+	const summary = "Interbloqueo activo desde el tick 42: ciclo de espera P1 → P2 → P1."
+	cases := []struct {
+		name             string
+		detectionContext string
+		wantSection      bool
+	}{
+		{name: "non-empty appends section", detectionContext: summary, wantSection: true},
+		{name: "empty appends nothing", detectionContext: "", wantSection: false},
+		{name: "whitespace appends nothing", detectionContext: "   \n  ", wantSection: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msgs := BuildMessages("¿por qué se cuelga?", "", nil, nil, nil, tc.detectionContext)
+			user := msgs[len(msgs)-1]
+			if user.Role != "user" {
+				t.Fatalf("last message role = %q, want user", user.Role)
+			}
+			hasHeader := strings.Contains(user.Content, "DETECTORES DE CONCURRENCIA (estado en vivo):")
+			if hasHeader != tc.wantSection {
+				t.Errorf("section present = %v, want %v; content:\n%s", hasHeader, tc.wantSection, user.Content)
+			}
+			if tc.wantSection && !strings.Contains(user.Content, summary) {
+				t.Errorf("detection context text missing from user message:\n%s", user.Content)
+			}
+			if !tc.wantSection && strings.Contains(user.Content, "DETECTORES") {
+				t.Errorf("unexpected detector text leaked when context empty:\n%s", user.Content)
+			}
+		})
+	}
+}
 
 func TestBuildMessagesNoHistory(t *testing.T) {
-	msgs := BuildMessages("¿qué es PL3?", "", nil, nil, nil)
+	msgs := BuildMessages("¿qué es PL3?", "", nil, nil, nil, "")
 	if len(msgs) != 2 {
 		t.Fatalf("expected 2 messages (system+user), got %d", len(msgs))
 	}
@@ -17,7 +52,7 @@ func TestBuildMessagesWithHistoryOrdering(t *testing.T) {
 		{Role: "user", Text: "¿qué pasó en el último context switch?"},
 		{Role: "assistant", Text: "El kernel decidió correr P2."},
 	}
-	msgs := BuildMessages("¿y por qué?", "", nil, nil, history)
+	msgs := BuildMessages("¿y por qué?", "", nil, nil, history, "")
 	if len(msgs) != 4 {
 		t.Fatalf("expected 4 messages (system+history+user), got %d", len(msgs))
 	}
