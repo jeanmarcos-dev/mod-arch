@@ -1377,6 +1377,7 @@ const pt = {
       title: 'Memória',
       windowLabel: 'Janela',
       globalHint: 'Memória única do sistema — o kernel e os processos são os donos; os núcleos apenas executam e leem.',
+      gotoDisputed: 'Ir para o endereço em disputa',
       ownersTitle: 'Donos',
       ownersHint: 'Kernel e processos vivos. Cada chip exibe os intervalos que possui e, se aplicável, em qual núcleo está em execução agora.',
       autofocusLabel: 'Autofoco',

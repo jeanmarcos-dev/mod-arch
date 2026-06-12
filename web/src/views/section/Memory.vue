@@ -307,6 +307,11 @@ const coreMarkers = computed(() => buildCoreMarkers(cpu.cores, new Set(cpu.selec
 const { raceDetector } = useConcurrencyState();
 const disputedAddr = computed(() => raceDetector.state.trackedAddr);
 const disputedLost = computed(() => raceDetector.state.lostTotal);
+// The contended address usually sits outside the default code-region window,
+// so offer a jump to it when it is tracked but off-screen.
+const disputedInView = computed(() =>
+  disputedAddr.value !== null && disputedAddr.value >= baseAddr.value && disputedAddr.value < wndEnd.value,
+);
 
 const selectedOwnerId = ref<string | null>(null);
 
@@ -368,6 +373,12 @@ function onOwnerJumpStack(addr: number) {
           />
         </label>
         <div class="memory-page__presets">
+          <button
+            v-if="disputedAddr !== null && !disputedInView"
+            type="button"
+            class="memory-page__disputed-jump"
+            @click="jumpToAndHighlight(disputedAddr)"
+          >⚠ {{ t('sections.memory.gotoDisputed') }}</button>
           <button
             v-for="p in presets"
             :key="p.label"
@@ -581,6 +592,8 @@ function onOwnerJumpStack(addr: number) {
 
 .memory-page__presets button:last-child { border-right: none; }
 .memory-page__presets button:hover { background: rgba(var(--accent-rgb), 0.10); color: var(--amber); }
+.memory-page__disputed-jump { color: var(--red-soft); }
+.memory-page__disputed-jump:hover { background: rgba(255, 58, 58, 0.12); color: var(--red); }
 
 .memory-page__follow {
   display: inline-flex !important;

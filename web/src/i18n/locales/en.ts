@@ -1385,6 +1385,7 @@ const en: MessageSchema = {
       title: 'Memory',
       windowLabel: 'Window',
       globalHint: 'A single system-wide memory — the kernel and the processes own it; cores only execute and read.',
+      gotoDisputed: 'Go to the contended address',
       ownersTitle: 'Owners',
       ownersHint: 'Kernel and live processes. Each chip shows the ranges it owns and, when applicable, the core executing it right now.',
       autofocusLabel: 'Autofocus',

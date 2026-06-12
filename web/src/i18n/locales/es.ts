@@ -1382,6 +1382,7 @@ const es = {
       title: 'Memoria',
       windowLabel: 'Ventana',
       globalHint: 'Memoria única del sistema — el kernel y los procesos son los dueños; los núcleos solo ejecutan y leen.',
+      gotoDisputed: 'Ir a la dirección en disputa',
       ownersTitle: 'Dueños',
       ownersHint: 'Kernel y procesos vivos. Cada chip muestra los rangos que posee y, si aplica, en qué núcleo se está ejecutando ahora.',
       autofocusLabel: 'Autofoco',
