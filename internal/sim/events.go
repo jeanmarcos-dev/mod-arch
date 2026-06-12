@@ -20,6 +20,8 @@ type SnapshotEvent struct {
 	Sources        map[int]string                           `json:"sources"`
 	SourceMaps     map[int]map[string][]programs.SourceLine `json:"source_maps,omitempty"`
 	Vars           map[int]map[string]any                   `json:"vars,omitempty"`
+	Mutexes        []MutexSnapshot                          `json:"mutexes"`
+	Semaphores     []SemaphoreSnapshot                      `json:"semaphores"`
 	Cores          []CoreSnapshot                           `json:"cores"`
 	NumCores       int                                      `json:"num_cores"`
 	Running        bool                                     `json:"running"`
@@ -41,6 +43,22 @@ type CoreSnapshot struct {
 	CurrentPID  int               `json:"current_pid"`
 	RunningIdle bool              `json:"running_idle,omitempty"`
 	IdleTicks   uint64            `json:"idle_ticks,omitempty"`
+}
+
+// MutexSnapshot is the wire format for one kernel mutex. The field names
+// mirror the mutex_op event so the frontend builds the same MutexState from
+// either source.
+type MutexSnapshot struct {
+	ID      int   `json:"id"`
+	Holder  int   `json:"holder"`
+	Waiters []int `json:"waiters"`
+}
+
+// SemaphoreSnapshot is the wire format for one kernel semaphore.
+type SemaphoreSnapshot struct {
+	ID      int   `json:"id"`
+	Count   int   `json:"count"`
+	Waiters []int `json:"waiters"`
 }
 
 // LoadedEvent is the wire format broadcast when a program is loaded.

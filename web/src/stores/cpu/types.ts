@@ -1,4 +1,4 @@
-import type { CpuEventGo, SnapshotEvent, LoadedEvent, SessionInfoEvent, PresenceEvent, TickEventsEvent } from '../../types/generated';
+import type { CpuEventGo, SnapshotEvent, LoadedEvent, SessionInfoEvent, PresenceEvent, TickEventsEvent, MutexSnapshot, SemaphoreSnapshot } from '../../types/generated';
 
 export type CpuEvent =
   | CpuEventGo
@@ -36,17 +36,11 @@ export interface CoreInfo {
   idle_ticks?: number;
 }
 
-export interface MutexState {
-  id: number;
-  holder: number;
-  waiters: number[];
-}
+// Lock state is built from mutex_op/sem_op events and resynced from
+// snapshots; both sources share the generated wire shape.
+export type MutexState = MutexSnapshot;
 
-export interface SemaphoreState {
-  id: number;
-  count: number;
-  waiters: number[];
-}
+export type SemaphoreState = SemaphoreSnapshot;
 
 export interface SessionInfo {
   id: string;

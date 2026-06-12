@@ -37,6 +37,8 @@ export interface SnapshotEvent {
   sources: Record<number, string>;
   source_maps?: Record<number, Record<string, any[]>>;
   vars?: Record<number, Record<string, any>>;
+  mutexes: MutexSnapshot[];
+  semaphores: SemaphoreSnapshot[];
   cores: any[];
   num_cores: number;
   running: boolean;
@@ -57,6 +59,18 @@ export interface CoreSnapshot {
   current_pid: number;
   running_idle?: boolean;
   idle_ticks?: number;
+}
+
+export interface MutexSnapshot {
+  id: number;
+  holder: number;
+  waiters: number[];
+}
+
+export interface SemaphoreSnapshot {
+  id: number;
+  count: number;
+  waiters: number[];
 }
 
 export interface LoadedEvent {
@@ -117,6 +131,7 @@ export interface Command {
   alias?: string;
   cores?: number;
   idle_task?: boolean;
+  auto_pause_idle?: boolean;
   section?: string;
   visible_cores?: number[];
   mode?: string;

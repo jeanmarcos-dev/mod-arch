@@ -903,6 +903,8 @@ func (s *Simulator) snapshotLocked() map[string]any {
 		"sources":       s.procSources,
 		"source_maps":   s.procSourceMaps,
 		"vars":          s.varsLocked(),
+		"mutexes":       s.mutexesLocked(),
+		"semaphores":    s.semaphoresLocked(),
 		"cores":            cores,
 		"num_cores":        s.kernel.NumCores(),
 		"running":          s.running,
@@ -911,6 +913,35 @@ func (s *Simulator) snapshotLocked() map[string]any {
 		"speedMul":         s.speedMul,
 		"tickIntervalMs":   tickIntervalMs(s.clockHz, s.speedMul),
 	}
+}
+
+// mutexesLocked serializes the kernel's mutex registry for the snapshot so a
+// client connecting mid-demo sees the same state it would have built from the
+// mutex_op event stream. Waiters are copied: the snapshot may be encoded
+// after s.mu is released, while the kernel keeps mutating the live slices.
+func (s *Simulator) mutexesLocked() []MutexSnapshot {
+	list := make([]MutexSnapshot, 0, len(s.kernel.Mutexes))
+	for _, m := range s.kernel.Mutexes {
+		list = append(list, MutexSnapshot{
+			ID:      m.ID,
+			Holder:  m.Holder,
+			Waiters: append([]int{}, m.Waiters...),
+		})
+	}
+	return list
+}
+
+// semaphoresLocked is the semaphore counterpart of mutexesLocked.
+func (s *Simulator) semaphoresLocked() []SemaphoreSnapshot {
+	list := make([]SemaphoreSnapshot, 0, len(s.kernel.Semaphores))
+	for _, sem := range s.kernel.Semaphores {
+		list = append(list, SemaphoreSnapshot{
+			ID:      sem.ID,
+			Count:   sem.Count,
+			Waiters: append([]int{}, sem.Waiters...),
+		})
+	}
+	return list
 }
 
 // tickIntervalMs returns the snapshot-friendly rounded millisecond value

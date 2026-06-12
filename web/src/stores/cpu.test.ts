@@ -315,3 +315,68 @@ describe('cpu store — run epoch separates demos', () => {
     expect(instrs[0].epoch).not.toBe(instrs[1].epoch);
   });
 });
+
+describe('cpu store — sync objects from snapshot', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  const baseSnapshot = {
+    type: 'snapshot',
+    regs: {}, segments: {}, mode: 0, halted: false, tick: 0,
+    procs: [],
+    cores: [
+      { id: 0, regs: {}, segments: {}, mode: 0, halted: false, tick: 0, current_pid: 0 },
+    ],
+  };
+
+  it('applies mutexes and semaphores carried by the snapshot', () => {
+    const cpu = useCpuStore();
+    cpu.__applyEvent({
+      ...baseSnapshot,
+      mutexes: [{ id: 1, holder: 3, waiters: [4, 5] }],
+      semaphores: [{ id: 1, count: 2, waiters: [6] }],
+    } as any);
+
+    expect(cpu.mutexes).toEqual([{ id: 1, holder: 3, waiters: [4, 5] }]);
+    expect(cpu.semaphores).toEqual([{ id: 1, count: 2, waiters: [6] }]);
+  });
+
+  it('replaces event-built state with the snapshot payload after a resync', () => {
+    const cpu = useCpuStore();
+    cpu.__applyEvent({
+      type: 'mutex_op', core_id: 0, tick: 0, pid: 3, mutex_id: 1, op: 'create',
+    } as any);
+    cpu.__applyEvent({
+      type: 'mutex_op', core_id: 0, tick: 1, pid: 3, mutex_id: 1, op: 'acquired', waiters: [4, 5],
+    } as any);
+    expect(cpu.mutexes).toEqual([{ id: 1, holder: 3, waiters: [4, 5] }]);
+
+    // Reconnect scenario: the client missed a handoff while offline, so the
+    // snapshot is the only source of truth for the new holder/waiters.
+    cpu.__applyEvent({
+      ...baseSnapshot,
+      mutexes: [{ id: 1, holder: 4, waiters: [5] }],
+      semaphores: [],
+    } as any);
+
+    expect(cpu.mutexes).toEqual([{ id: 1, holder: 4, waiters: [5] }]);
+  });
+
+  it('resets to empty when the snapshot omits them', () => {
+    const cpu = useCpuStore();
+    cpu.__applyEvent({
+      type: 'mutex_op', core_id: 0, tick: 0, pid: 3, mutex_id: 1, op: 'create',
+    } as any);
+    cpu.__applyEvent({
+      type: 'sem_op', core_id: 0, tick: 0, pid: 3, sem_id: 1, op: 'create', count: 1,
+    } as any);
+    expect(cpu.mutexes).toHaveLength(1);
+    expect(cpu.semaphores).toHaveLength(1);
+
+    cpu.__applyEvent({ ...baseSnapshot } as any);
+
+    expect(cpu.mutexes).toEqual([]);
+    expect(cpu.semaphores).toEqual([]);
+  });
+});

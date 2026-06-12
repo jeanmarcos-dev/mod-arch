@@ -149,6 +149,11 @@ export function useCpuReducer(state: any) {
         if (ev.ready_queue) readyQueue.value = ev.ready_queue;
         if (ev.wait_queue) waitQueue.value = ev.wait_queue;
         if (ev.procs) procs.value = ev.procs;
+        // Sync objects always come authoritative in a snapshot: a missing key
+        // (older backend) means there are none, so stale event-built state
+        // must not survive the resync.
+        mutexes.value = ev.mutexes ?? [];
+        semaphores.value = ev.semaphores ?? [];
         if (ev.sources) {
           procSources.value = {};
           for (const [pid, src] of Object.entries(ev.sources)) {

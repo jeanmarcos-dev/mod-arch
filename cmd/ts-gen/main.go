@@ -38,6 +38,10 @@ func main() {
 	sb.WriteString("\n")
 	sb.WriteString(generateInterface(reflect.TypeOf(sim.CoreSnapshot{}), "CoreSnapshot", ""))
 	sb.WriteString("\n")
+	sb.WriteString(generateInterface(reflect.TypeOf(sim.MutexSnapshot{}), "MutexSnapshot", ""))
+	sb.WriteString("\n")
+	sb.WriteString(generateInterface(reflect.TypeOf(sim.SemaphoreSnapshot{}), "SemaphoreSnapshot", ""))
+	sb.WriteString("\n")
 	sb.WriteString(generateInterface(reflect.TypeOf(sim.LoadedEvent{}), "LoadedEvent", "loaded"))
 	sb.WriteString("\n")
 	sb.WriteString(generateInterface(reflect.TypeOf(server.SessionInfoEvent{}), "SessionInfoEvent", "session_info"))
@@ -138,6 +142,12 @@ func typeToTS(t reflect.Type) string {
 		}
 		if elem.Name() == "HistoryTurn" {
 			return "HistoryTurn[]"
+		}
+		if elem.Name() == "MutexSnapshot" {
+			return "MutexSnapshot[]"
+		}
+		if elem.Name() == "SemaphoreSnapshot" {
+			return "SemaphoreSnapshot[]"
 		}
 		return typeToTS(elem) + "[]"
 	case reflect.Map:
