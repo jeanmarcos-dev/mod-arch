@@ -118,7 +118,9 @@ function waitersText(waiters: number[]): string {
 
 .lb__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  /* min(100%, 190px) lets a card shrink to the column width in narrow side
+     panels instead of forcing a fixed 190px track that overflows the panel. */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
   gap: var(--space-2);
 }
 

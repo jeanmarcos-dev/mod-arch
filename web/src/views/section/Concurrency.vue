@@ -268,6 +268,9 @@ function coreStatus(c: { halted: boolean; mode: number; current_pid: number }): 
   box-shadow: var(--shadow-glow-amber);
 }
 
+/* min-width: 0 on both grid columns so neither track can be forced wider than
+   its fr share by its content, which would push the other column off-screen. */
+.conc__scenario { min-width: 0; }
 .conc__locks { min-width: 0; }
 
 .conc__cores {
