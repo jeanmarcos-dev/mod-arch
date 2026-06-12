@@ -35,13 +35,22 @@ import {
 import ProgramPicker from '../ProgramPicker.vue';
 import SimStatusRow from './SimStatusRow.vue';
 import SimToolsDrawer from './SimToolsDrawer.vue';
+import DeadlockChip from './DeadlockChip.vue';
 import Term from '../glossary/Term.vue';
+import { useConcurrencyState } from '../../composables/useConcurrencyState';
 
 const cpu = useCpuStore();
 const bar = useSimBarStore();
 const settings = useSimSettings();
 const { isMobile } = useBreakpoint();
 const { t } = useI18n();
+
+// App-level concurrency detector: drives the deadlock chip from every section
+// since the bar is shared. hasDeadlock is store-derived, deadlockTick latches
+// the absolute tick of the first deadlock.
+const concurrency = useConcurrencyState();
+const hasDeadlock = concurrency.lockGraph.hasDeadlock;
+const deadlockTick = concurrency.deadlockTick;
 
 const panelRef = ref<HTMLElement | null>(null);
 
@@ -180,6 +189,8 @@ const pauseTooltip = computed(() => {
 
         <SimStatusRow inline class="sim-bar__status-inline" />
 
+        <DeadlockChip :has-deadlock="hasDeadlock" :tick="deadlockTick" class="sim-bar__deadlock" />
+
         <button
           type="button"
           :class="['icon-btn', 'sim-bar__cores-btn', { 'sim-bar__cores-btn--on': bar.coresExpanded }]"
@@ -285,6 +296,13 @@ const pauseTooltip = computed(() => {
         </div>
 
         <SimStatusRow v-if="bar.mode === 'docked'" inline class="sim-bar__status-inline" />
+
+        <DeadlockChip
+          v-if="bar.mode === 'docked'"
+          :has-deadlock="hasDeadlock"
+          :tick="deadlockTick"
+          class="sim-bar__deadlock"
+        />
 
         <div v-if="bar.mode === 'docked'" class="sim-bar__right">
           <button
@@ -514,6 +532,14 @@ const pauseTooltip = computed(() => {
      the rest. */
 }
 
+/* The deadlock chip is an optional flex item: present only during a
+   deadlock, it shrinks before overflowing and never forces a layout shift on
+   the read-only status cluster (the bar already flex-wraps). */
+.sim-bar__deadlock {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
 .sim-bar__right {
   position: absolute;
   right: var(--space-3);
@@ -551,9 +577,10 @@ const pauseTooltip = computed(() => {
     display: grid;
     grid-template-columns: 28px 1fr auto;
     grid-template-areas:
-      ".      status cluster"
-      "picker picker picker"
-      "btns   btns   btns";
+      ".        status cluster"
+      "deadlock deadlock deadlock"
+      "picker   picker  picker"
+      "btns     btns    btns";
     align-items: center;
     padding: var(--space-2);
     row-gap: var(--space-2);
@@ -566,6 +593,12 @@ const pauseTooltip = computed(() => {
   .sim-bar__status-inline {
     grid-area: status;
     min-width: 0;
+    justify-self: center;
+    max-width: 100%;
+  }
+
+  .sim-bar__deadlock {
+    grid-area: deadlock;
     justify-self: center;
     max-width: 100%;
   }

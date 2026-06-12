@@ -30,6 +30,11 @@ const pt = {
     coresToggleExpand: 'Exibir detalhe por núcleo',
     coresToggleCollapse: 'Ocultar detalhe por núcleo',
     coresToggleLabel: 'Cores',
+    deadlock: {
+      warn: 'Possível impasse (tick {tick})',
+      warnNoTick: 'Possível impasse',
+      hint: 'Foi detectado um ciclo de espera entre processos. Abrir a vista de concorrência.',
+    },
     buttons: {
       load: 'CARREGAR',
       step: 'PASSO',

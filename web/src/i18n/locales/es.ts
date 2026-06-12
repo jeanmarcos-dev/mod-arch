@@ -35,6 +35,11 @@ const es = {
     coresToggleExpand: 'Mostrar detalle por núcleo',
     coresToggleCollapse: 'Ocultar detalle por núcleo',
     coresToggleLabel: 'Cores',
+    deadlock: {
+      warn: 'Posible interbloqueo (tick {tick})',
+      warnNoTick: 'Posible interbloqueo',
+      hint: 'Se detectó un ciclo de espera entre procesos. Abrir la vista de concurrencia.',
+    },
     buttons: {
       load: 'CARGAR',
       step: 'PASO',

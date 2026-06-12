@@ -38,6 +38,11 @@ const en: MessageSchema = {
     coresToggleExpand: 'Show per-core detail',
     coresToggleCollapse: 'Hide per-core detail',
     coresToggleLabel: 'Cores',
+    deadlock: {
+      warn: 'Possible deadlock (tick {tick})',
+      warnNoTick: 'Possible deadlock',
+      hint: 'A wait cycle between processes was detected. Open the concurrency view.',
+    },
     buttons: {
       load: 'LOAD',
       step: 'STEP',
