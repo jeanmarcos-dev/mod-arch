@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { computed, reactive, ref, shallowRef, watch } from 'vue';
 import { usePreferencesStore } from './preferences';
+import { isUserProc } from '../lib/userProcs';
 
 // Tipos de eventos que llegan por WS (espejo de internal/cpu/events.go).
 // Todos los eventos generados por la CPU llevan core_id: con multicore el
@@ -562,12 +563,7 @@ export const useCpuStore = defineStore('cpu', () => {
   const demoFinished = computed(() =>
     !running.value &&
     procs.value.length > 0 &&
-    !procs.value.some(p =>
-      p.is_idle !== true &&
-      p.is_kthread !== true &&
-      p.name !== 'init' &&
-      p.state !== 'ZOMBIE',
-    ),
+    !procs.value.some(p => isUserProc(p) && p.state !== 'ZOMBIE'),
   );
 
   // idleTaskEnabled is derived from the process table: PID 0 only appears
