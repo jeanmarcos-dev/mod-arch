@@ -1436,6 +1436,23 @@ const pt = {
       colBlockedOn: 'Bloqueado em',
       holderFree: 'livre',
       blockedForFmt: '~{n} ticks',
+      waitGraph: {
+        legendHolds: 'recurso atribuído a',
+        legendWaits: 'processo solicita',
+        deadlockTitle: '⚠ DEADLOCK DETECTADO',
+        deadlockBody: 'Ciclo {cycle}. Cada processo possui um recurso e espera o do seguinte: nenhum deles consegue avançar jamais.',
+        noWaiters: 'Nenhum processo espera por um recurso.',
+        noLocksHint: 'A demo carregada não cria mutexes nem semáforos. Se vários processos tocam memória compartilhada sem proteção, essa ausência é justamente a lição: observe a condição de corrida.',
+      },
+      lock: {
+        free: 'LIVRE',
+        heldBy: 'EM PODER DE P{pid}',
+        heldByNamed: 'EM PODER DE P{pid} ({name})',
+        semAvailable: '{count} permissões disponíveis',
+      },
+      lockBay: {
+        viewAsTable: 'ver como tabela',
+      },
     },
     x86: {
       title: 'x86 real',

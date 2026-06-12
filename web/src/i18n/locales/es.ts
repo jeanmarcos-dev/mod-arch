@@ -1441,6 +1441,23 @@ const es = {
       colBlockedOn: 'Bloqueado en',
       holderFree: 'libre',
       blockedForFmt: '~{n} ticks',
+      waitGraph: {
+        legendHolds: 'recurso asignado a',
+        legendWaits: 'proceso solicita',
+        deadlockTitle: '⚠ INTERBLOQUEO DETECTADO',
+        deadlockBody: 'Ciclo {cycle}. Cada proceso posee un recurso y espera el del siguiente: ninguno puede avanzar jamás.',
+        noWaiters: 'Ningún proceso espera por un recurso.',
+        noLocksHint: 'La demo cargada no crea mutexes ni semáforos. Si varios procesos tocan memoria compartida sin protección, esa ausencia es precisamente la lección: observe la condición de carrera.',
+      },
+      lock: {
+        free: 'LIBRE',
+        heldBy: 'EN PODER DE P{pid}',
+        heldByNamed: 'EN PODER DE P{pid} ({name})',
+        semAvailable: '{count} permisos disponibles',
+      },
+      lockBay: {
+        viewAsTable: 'ver como tabla',
+      },
     },
     x86: {
       title: 'x86 real',

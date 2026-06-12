@@ -1444,6 +1444,23 @@ const en: MessageSchema = {
       colBlockedOn: 'Blocked on',
       holderFree: 'free',
       blockedForFmt: '~{n} ticks',
+      waitGraph: {
+        legendHolds: 'resource assigned to',
+        legendWaits: 'process requests',
+        deadlockTitle: '⚠ DEADLOCK DETECTED',
+        deadlockBody: 'Cycle {cycle}. Each process holds one resource and waits for the next one: none of them can ever make progress.',
+        noWaiters: 'No process is waiting for a resource.',
+        noLocksHint: 'The loaded demo creates no mutexes or semaphores. If several processes touch shared memory without protection, that absence is precisely the lesson: watch the race condition.',
+      },
+      lock: {
+        free: 'FREE',
+        heldBy: 'HELD BY P{pid}',
+        heldByNamed: 'HELD BY P{pid} ({name})',
+        semAvailable: '{count} permits available',
+      },
+      lockBay: {
+        viewAsTable: 'view as table',
+      },
     },
     x86: {
       title: 'real x86',
