@@ -74,6 +74,24 @@ export interface PcbRestore {
   seq: number;
 }
 
+// Op vocabularies as the kernel emits them (pkg/cpu/events.go). The wire
+// type is a bare string, so the fire sites narrow it with a cast; the union
+// keeps subscriber comparisons typo-proof.
+export type MutexOpKind = 'create' | 'acquired' | 'waiting' | 'released' | 'handoff' | 'rejected';
+export type SemOpKind = 'create' | 'wait_immediate' | 'wait_blocked' | 'signal' | 'handoff';
+
+// Normalized mutex_op/sem_op. On handoff, `pid` is the giver and `nextPid`
+// the receiver; `waiters` is the queue after the op.
+export interface LockOp {
+  op: MutexOpKind | SemOpKind;
+  lockId: number;
+  pid: number;
+  nextPid?: number;
+  waiters: number[];
+  coreId: number;
+  seq: number;
+}
+
 type AnyHandler = (...args: unknown[]) => void;
 
 export interface NarratorOptions {
@@ -101,6 +119,8 @@ export function useNarrators(opts: NarratorOptions = {}) {
     irqFire: new Set(),
     pcbSave: new Set(),
     pcbRestore: new Set(),
+    mutexOp: new Set(),
+    semOp: new Set(),
   };
 
   let seq = 0;
@@ -192,6 +212,30 @@ export function useNarrators(opts: NarratorOptions = {}) {
           seq,
         } satisfies PcbRestore);
         break;
+      case 'mutex_op':
+        seq++;
+        fire('mutexOp', {
+          op: ev.op as MutexOpKind,
+          lockId: ev.mutex_id,
+          pid: ev.pid,
+          nextPid: ev.next_pid,
+          waiters: ev.waiters ?? [],
+          coreId: ev.core_id,
+          seq,
+        } satisfies LockOp);
+        break;
+      case 'sem_op':
+        seq++;
+        fire('semOp', {
+          op: ev.op as SemOpKind,
+          lockId: ev.sem_id,
+          pid: ev.pid,
+          nextPid: ev.next_pid,
+          waiters: ev.waiters ?? [],
+          coreId: ev.core_id,
+          seq,
+        } satisfies LockOp);
+        break;
     }
   });
 
@@ -205,5 +249,7 @@ export function useNarrators(opts: NarratorOptions = {}) {
     onIrqFire(fn: (m: IrqFire) => void) { handlers.irqFire.add(fn as AnyHandler); },
     onPcbSave(fn: (m: PcbSave) => void) { handlers.pcbSave.add(fn as AnyHandler); },
     onPcbRestore(fn: (m: PcbRestore) => void) { handlers.pcbRestore.add(fn as AnyHandler); },
+    onMutexOp(fn: (m: LockOp) => void) { handlers.mutexOp.add(fn as AnyHandler); },
+    onSemOp(fn: (m: LockOp) => void) { handlers.semOp.add(fn as AnyHandler); },
   };
 }

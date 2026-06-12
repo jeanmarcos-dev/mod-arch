@@ -1444,6 +1444,14 @@ const en: MessageSchema = {
       colBlockedOn: 'Blocked on',
       holderFree: 'free',
       blockedForFmt: '~{n} ticks',
+      view: {
+        scenarioTitle: 'Scenario',
+        tabRace: 'Critical section',
+        tabGraph: 'Wait graph',
+        locksBoardTitle: 'Lock board',
+        timelineTitle: 'Synchronization timeline',
+        coresAria: 'Core status',
+      },
       waitGraph: {
         legendHolds: 'resource assigned to',
         legendWaits: 'process requests',

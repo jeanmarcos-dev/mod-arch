@@ -3,6 +3,8 @@ import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useCpuStore, type MutexState, type SemaphoreState } from '../../stores/cpu';
 import { pidColor } from '../../lib/pidColors';
+import { useNarrators, type LockOp } from '../../lib/narratorBus';
+import { useNarratorAnimation } from '../narrators/useNarratorAnimation';
 
 const props = defineProps<{
   kind: 'mutex' | 'sem';
@@ -56,10 +58,74 @@ function blockedTicks(pid: number): string {
   if (typeof bs !== 'number' || bs <= 0) return '';
   return t('sections.concurrency.blockedForFmt', { n: Math.max(0, cpu.tick - bs) });
 }
+
+// Handoff/rejection narration. Bus handlers run before Vue flushes the DOM
+// patch, so measuring at event time usually sees the giver's side and the
+// receiver still at the head of the waiter list. Batch-edge approximation:
+// two ops on the same lock in one flush make the second measurement see the
+// pre-batch DOM — acceptable for a 300ms ghost.
+const rootEl = ref<HTMLElement | null>(null);
+const flyKeyEl = ref<SVGSVGElement | null>(null);
+const flyTokenEl = ref<HTMLElement | null>(null);
+const narrators = useNarrators();
+const animator = useNarratorAnimation();
+
+// Flies the ghost between the centers of two elements, in root coordinates.
+function flyGhost(ghost: HTMLElement, fromEl: Element, toEl: Element) {
+  const root = rootEl.value;
+  if (!root) return;
+  const rr = root.getBoundingClientRect();
+  const gr = ghost.getBoundingClientRect();
+  const a = fromEl.getBoundingClientRect();
+  const b = toEl.getBoundingClientRect();
+  const dx = gr.width / 2 + rr.left;
+  const dy = gr.height / 2 + rr.top;
+  animator.play(ghost, [
+    { transform: `translate(${a.left + a.width / 2 - dx}px, ${a.top + a.height / 2 - dy}px)`, opacity: 1 },
+    { transform: `translate(${b.left + b.width / 2 - dx}px, ${b.top + b.height / 2 - dy}px)`, opacity: 0 },
+  ], { durationMs: 300, fill: 'none' });
+}
+
+function flyHandoff() {
+  const root = rootEl.value;
+  if (!root) return;
+  const waiter = root.querySelector('.lw__waiter');
+  if (!waiter) return;
+  // Mutex: the key leaves the holder capsule. Semaphore: a token (●) leaves
+  // the token row — a semaphore has no key to hand over.
+  const ghost = props.kind === 'mutex'
+    ? (flyKeyEl.value as unknown as HTMLElement | null)
+    : flyTokenEl.value;
+  const from = root.querySelector(props.kind === 'mutex' ? '[data-lock-key]' : '[data-sem-token]');
+  if (!ghost || !from) return;
+  flyGhost(ghost, from, waiter);
+}
+
+function shake() {
+  if (!rootEl.value) return;
+  animator.play(rootEl.value, [
+    { transform: 'translateX(0)' },
+    { transform: 'translateX(-3px)' },
+    { transform: 'translateX(3px)' },
+    { transform: 'translateX(0)' },
+  ], { durationMs: 250, fill: 'none' });
+}
+
+function onLockOp(e: LockOp) {
+  if (e.lockId !== props.lock.id) return;
+  if (e.op === 'handoff') flyHandoff();
+  // 'rejected' belongs to the mutex vocabulary only (unlock by a non-holder);
+  // the sem channel never carries it, so the shake is mutex-gated.
+  else if (e.op === 'rejected' && props.kind === 'mutex') shake();
+}
+
+if (props.kind === 'mutex') narrators.onMutexOp(onLockOp);
+else narrators.onSemOp(onLockOp);
 </script>
 
 <template>
   <article
+    ref="rootEl"
     class="lw"
     :class="[`lw--${status}`, { 'lw--cycle': inCycle }]"
     :data-narrator-anchor="anchor"
@@ -68,7 +134,7 @@ function blockedTicks(pid: number): string {
       <code class="lw__id">{{ idLabel }}</code>
       <span v-if="mutex" class="lw__state">{{ mutex.holder < 0 ? t('sections.concurrency.lock.free') : heldLabel }}</span>
       <span v-else class="lw__state lw__state--sem" :title="t('sections.concurrency.lock.semAvailable', { count: sem!.count })">
-        <span class="lw__tokens" aria-hidden="true">
+        <span class="lw__tokens" data-sem-token aria-hidden="true">
           <span
             v-for="i in tokenCap"
             :key="i"
@@ -103,6 +169,12 @@ function blockedTicks(pid: number): string {
       </span>
     </div>
 
+    <svg v-if="kind === 'mutex'" ref="flyKeyEl" class="lw__fly lw__fly--key" viewBox="0 0 26 12" aria-hidden="true">
+      <circle cx="5.5" cy="6" r="3.6" fill="none" stroke="currentColor" stroke-width="1.6" />
+      <path d="M9 6 H23 M19 6 v3.4 M22.5 6 v3.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+    </svg>
+    <span v-else ref="flyTokenEl" class="lw__fly lw__fly--token" aria-hidden="true">●</span>
+
     <ol v-if="lock.waiters.length > 0" class="lw__waiters">
       <li
         v-for="(pid, idx) in lock.waiters"
@@ -120,6 +192,7 @@ function blockedTicks(pid: number): string {
 
 <style scoped>
 .lw {
+  position: relative;
   min-height: 90px;
   background: var(--surface-1);
   border: 1px solid var(--border);
@@ -208,6 +281,28 @@ function blockedTicks(pid: number): string {
 .lw__capsule-pid { font-size: 11px; }
 
 .lw__key { width: 24px; height: 11px; display: block; }
+
+/* Handoff flight ghost: parked invisible at the widget origin, moved with
+   WAAPI from the giver's side to the head waiter on each handoff. */
+.lw__fly {
+  position: absolute;
+  left: 0;
+  top: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.lw__fly--key {
+  width: 24px;
+  height: 11px;
+  color: var(--amber);
+  filter: drop-shadow(0 0 4px color-mix(in oklab, var(--amber) 55%, transparent));
+}
+.lw__fly--token {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--green);
+  text-shadow: 0 0 5px color-mix(in oklab, var(--green) 40%, transparent);
+}
 
 .lw__waiters {
   list-style: none;

@@ -1436,6 +1436,14 @@ const pt = {
       colBlockedOn: 'Bloqueado em',
       holderFree: 'livre',
       blockedForFmt: '~{n} ticks',
+      view: {
+        scenarioTitle: 'Cenário',
+        tabRace: 'Seção crítica',
+        tabGraph: 'Grafo de espera',
+        locksBoardTitle: 'Painel de locks',
+        timelineTitle: 'Linha do tempo de sincronização',
+        coresAria: 'Estado dos cores',
+      },
       waitGraph: {
         legendHolds: 'recurso atribuído a',
         legendWaits: 'processo solicita',

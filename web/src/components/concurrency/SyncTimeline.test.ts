@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { defineComponent, h } from 'vue';
 import { mount } from '@vue/test-utils';
 import SyncTimeline from './SyncTimeline.vue';
+import { useSchedulerMetrics, type UseSchedulerMetricsReturn } from '../../composables/useSchedulerMetrics';
 import { i18n } from '../../i18n';
 import { useCpuStore, type CpuEvent, type PCBInfo } from '../../stores/cpu';
 
@@ -106,6 +108,25 @@ describe('SyncTimeline', () => {
     await w.vm.$nextTick();
     expect(w.find('.st__deadlock-line').exists()).toBe(true);
     expect(w.find('.st__deadlock-label').text()).toContain('interbloqueo');
+  });
+
+  it('consumes a shared metrics instance passed via the metrics prop', async () => {
+    let shared!: UseSchedulerMetricsReturn;
+    const Host = defineComponent({
+      setup() {
+        shared = useSchedulerMetrics();
+        return () => h(SyncTimeline, { metrics: shared });
+      },
+    });
+    const w = mount(Host);
+    loadDemo();
+    dispatch({ type: 'tick', value: 10 });
+    dispatch({ type: 'process_state', core_id: 0, tick: 0, pid: 1, state: 'BLOCKED', reason: 'mutex:1' });
+    await w.vm.$nextTick();
+    // The lanes must come from the shared accumulator, not a private one.
+    expect(Object.keys(shared.metrics.liveSegmentByPid).length).toBeGreaterThan(0);
+    expect(w.findAll('.st__lane-label').length).toBe(2);
+    expect(w.findAll('.st__seg--blocked').length).toBe(1);
   });
 
   it('omits the deadlock line when the prop is null', async () => {

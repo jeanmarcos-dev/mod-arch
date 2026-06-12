@@ -2,25 +2,32 @@
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useCpuStore } from '../../stores/cpu';
-import { useLockGraph, GRAPH_W, GRAPH_H, type GraphEdge, type GraphNode } from '../../composables/useLockGraph';
+import { GRAPH_W, GRAPH_H, type GraphEdge, type GraphNode } from '../../composables/useLockGraph';
 import { pidColor } from '../../lib/pidColors';
 import Term from '../glossary/Term.vue';
 
+// The parent view owns the single useLockGraph instance and feeds the graph
+// down, so several panels can share one subscription and one deadlock state.
+const props = defineProps<{
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  cycle?: string[] | null;
+}>();
+
 const { t } = useI18n();
 const cpu = useCpuStore();
-const { nodes, edges, deadlockCycle } = useLockGraph();
 
 const PROC_W = 66;
 const PROC_H = 26;
 const LOCK_R = 11;
 
-const byId = computed(() => new Map(nodes.value.map(n => [n.id, n])));
+const byId = computed(() => new Map(props.nodes.map(n => [n.id, n])));
 const blockedPids = computed(
   () => new Set(cpu.procs.filter(p => p.state === 'BLOCKED').map(p => p.pid)),
 );
 
-const hasLocks = computed(() => nodes.value.some(n => n.kind !== 'proc'));
-const hasWaits = computed(() => edges.value.some(e => e.kind === 'waits'));
+const hasLocks = computed(() => props.nodes.some(n => n.kind !== 'proc'));
+const hasWaits = computed(() => props.edges.some(e => e.kind === 'waits'));
 
 // Distance from a node's center to its boundary along a unit direction, so
 // arrowheads land just outside the shape instead of underneath it.
@@ -44,7 +51,7 @@ interface RenderedEdge extends GraphEdge {
 
 const renderedEdges = computed<RenderedEdge[]>(() => {
   const out: RenderedEdge[] = [];
-  for (const e of edges.value) {
+  for (const e of props.edges) {
     const a = byId.value.get(e.from);
     const b = byId.value.get(e.to);
     if (!a || !b) continue;
@@ -71,8 +78,8 @@ function markerFor(e: GraphEdge): string {
   return e.kind === 'holds' ? 'url(#wg-arrow-holds)' : 'url(#wg-arrow-waits)';
 }
 
-const procNodes = computed(() => nodes.value.filter(n => n.kind === 'proc'));
-const lockNodes = computed(() => nodes.value.filter(n => n.kind !== 'proc'));
+const procNodes = computed(() => props.nodes.filter(n => n.kind === 'proc'));
+const lockNodes = computed(() => props.nodes.filter(n => n.kind !== 'proc'));
 
 // At 8px mono the proc rect fits ~12 characters; longer names would spill
 // over the edges. The full label stays available via the <title> tooltip.
@@ -83,7 +90,7 @@ function shortLabel(n: GraphNode): string {
 }
 
 const cycleText = computed(() => {
-  const c = deadlockCycle.value;
+  const c = props.cycle;
   if (!c) return '';
   const procs = c.filter(id => id.startsWith('p')).map(id => `P${id.slice(1)}`);
   return [...procs, procs[0]].join(' → ');

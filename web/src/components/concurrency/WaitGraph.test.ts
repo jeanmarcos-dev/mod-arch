@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { defineComponent, h } from 'vue';
 import { mount } from '@vue/test-utils';
 import WaitGraph from './WaitGraph.vue';
+import { useLockGraph } from '../../composables/useLockGraph';
 import { i18n } from '../../i18n';
 import { useCpuStore, type CpuEvent } from '../../stores/cpu';
 
@@ -16,16 +18,25 @@ function mutexOp(op: string, mutexId: number, pid: number, waiters: number[] = [
   dispatch({ type: 'mutex_op', core_id: 0, tick: 0, pid, mutex_id: mutexId, op, waiters } as CpuEvent);
 }
 
+// WaitGraph takes the graph via props; mirror the view by owning a single
+// useLockGraph instance in a host component.
+const Host = defineComponent({
+  setup() {
+    const { nodes, edges, deadlockCycle } = useLockGraph();
+    return () => h(WaitGraph, { nodes: nodes.value, edges: edges.value, cycle: deadlockCycle.value });
+  },
+});
+
 describe('WaitGraph', () => {
   it('shows the didactic empty state when the demo has no locks', () => {
-    const w = mount(WaitGraph);
+    const w = mount(Host);
     expect(w.find('svg').exists()).toBe(false);
     expect(w.text()).toContain('Ningún proceso espera por un recurso.');
     expect(w.find('.wg__empty-hint').exists()).toBe(true);
   });
 
   it('renders nodes, edges and the legend once locks exist', async () => {
-    const w = mount(WaitGraph);
+    const w = mount(Host);
     mutexOp('acquired', 1, 1);
     mutexOp('waiting', 1, 2, [2]);
     await w.vm.$nextTick();
@@ -39,7 +50,7 @@ describe('WaitGraph', () => {
   });
 
   it('truncates long proc names and keeps the full label as tooltip', async () => {
-    const w = mount(WaitGraph);
+    const w = mount(Host);
     dispatch({
       type: 'procs',
       procs: [{
@@ -60,7 +71,7 @@ describe('WaitGraph', () => {
   });
 
   it('shows the deadlock banner with the interpolated cycle', async () => {
-    const w = mount(WaitGraph);
+    const w = mount(Host);
     mutexOp('acquired', 1, 1);
     mutexOp('acquired', 2, 2);
     mutexOp('waiting', 2, 1, [1]);

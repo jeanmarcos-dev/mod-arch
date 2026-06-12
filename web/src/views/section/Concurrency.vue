@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useCpuStore } from '../../stores/cpu';
+import { useCpuStore, type CpuEvent } from '../../stores/cpu';
+import { useLockGraph } from '../../composables/useLockGraph';
+import { useRaceDetector } from '../../composables/useRaceDetector';
+import { useSchedulerMetrics } from '../../composables/useSchedulerMetrics';
+import { pidColor } from '../../lib/pidColors';
+import WaitGraph from '../../components/concurrency/WaitGraph.vue';
+import LockBay from '../../components/concurrency/LockBay.vue';
+import SyncTimeline from '../../components/concurrency/SyncTimeline.vue';
+import RaceLens from '../../components/concurrency/RaceLens.vue';
 import Term from '../../components/glossary/Term.vue';
 
 const { t } = useI18n();
@@ -9,54 +17,54 @@ const cpu = useCpuStore();
 
 onMounted(() => { cpu.connect(); });
 
-function hex(n: number, w = 8) {
-  return '0x' + (n >>> 0).toString(16).padStart(w, '0').toUpperCase();
-}
-function modeName(m: number) { return m === 0 ? 'KERNEL' : 'USER'; }
+// Single shared instances: every panel below consumes these, so the view
+// holds exactly one subscription per composable.
+const lockGraph = useLockGraph();
+const detector = useRaceDetector();
+const sched = useSchedulerMetrics();
 
-// When only one core is provisioned the demos that need real parallelism
-// won't shine — we still let the student load them (the kernel handles
-// single-core gracefully via the timer scheduler) but surface a hint.
+// Latch the deadlock instant in the shared metrics' relative tick space so
+// the timeline annotation lands on the same x axis its segments use. The
+// latch pins the FIRST deadlock until loaded/reset (intentional: a deadlock
+// never resolves on its own). Immediate covers a deadlock that already
+// existed when the section mounted — the store persists across navigation.
+const deadlockAtTick = ref<number | null>(null);
+watch(lockGraph.hasDeadlock, (now, prev) => {
+  if (now && !prev && deadlockAtTick.value === null) {
+    deadlockAtTick.value = sched.currentTickRel.value;
+  }
+}, { immediate: true });
+
+type Tab = 'race' | 'graph';
+const manualTab = ref<Tab | null>(null);
+const hasLocks = computed(() => cpu.mutexes.length > 0 || cpu.semaphores.length > 0);
+// Demo-agnostic default: locks on stage mean the wait graph is the story;
+// otherwise the race lens is (it covers both the tracked and the empty case).
+const activeTab = computed<Tab>(() => manualTab.value ?? (hasLocks.value ? 'graph' : 'race'));
+function selectTab(tab: Tab) { manualTab.value = tab; }
+
+const unsubscribe = cpu.subscribe((ev: CpuEvent) => {
+  if (ev.type === 'loaded' || ev.type === 'reset') {
+    deadlockAtTick.value = null;
+    manualTab.value = null;
+  }
+});
+onBeforeUnmount(unsubscribe);
+
 const singleCoreHint = computed(() => cpu.numCores < 2);
 
 const cores = computed(() => {
-  // Fall back to a synthetic core[0] view when the snapshot has not yet
-  // populated cpu.cores (first connection). When the SimBar filter hides a
-  // core, drop it from the grid so the layout reflects the same set as the
-  // rest of the app.
   if (cpu.cores.length > 0) return cpu.cores.filter(c => cpu.isCoreVisible(c.id));
-  return [{
-    id: 0,
-    regs: { ...cpu.regs },
-    segments: { ...cpu.segments },
-    mode: cpu.mode,
-    halted: cpu.halted,
-    tick: cpu.tick,
-    current_pid: cpu.currentPID,
-  }];
+  return [{ id: 0, mode: cpu.mode, halted: cpu.halted, current_pid: cpu.currentPID }];
 });
 
-function pidName(pid: number) {
-  const p = cpu.procs.find(x => x.pid === pid);
-  return p ? `P${pid} ${p.name}` : `P${pid}`;
-}
-function pidShort(pid: number) {
-  if (pid === 0) return '—';
-  return `P${pid}`;
-}
-function procName(pid: number): string {
-  return cpu.procs.find(p => p.pid === pid)?.name ?? '';
-}
-// Format the tick delta as "~N ticks" while the proc is still blocked.
-// We prefer waitQueue.blocked_since (kept in sync via process_state) and
-// fall back to procs[].blocked_since from the last snapshot. Returns an
-// empty string when neither source is available — the cell renders a dash.
-function blockedFor(pid: number): string {
-  const w = cpu.waitQueue.find(x => x.pid === pid);
-  const bs = w?.blocked_since ?? cpu.procs.find(p => p.pid === pid)?.blocked_since;
-  if (typeof bs !== 'number' || bs <= 0) return '';
-  const dt = Math.max(0, cpu.tick - bs);
-  return t('sections.concurrency.blockedForFmt', { n: dt });
+// Chip status: visible label + the glossary term backing it.
+function coreStatus(c: { halted: boolean; mode: number; current_pid: number }): { label: string; term: string } {
+  if (c.halted) return { label: 'HALT', term: 'HLT' };
+  if (c.current_pid === 0) return { label: 'IDLE', term: 'Ready queue' };
+  return c.mode === 0
+    ? { label: 'KERNEL', term: 'KERNEL MODE (PL0)' }
+    : { label: 'USER', term: 'USER MODE (PL3)' };
 }
 </script>
 
@@ -72,152 +80,103 @@ function blockedFor(pid: number): string {
       </div>
     </header>
 
-    <div class="conc__body">
-      <div class="conc__cores">
-        <article
-          v-for="c in cores"
-          :key="c.id"
-          class="core-card"
-          :class="{ halted: c.halted, kernel: c.mode === 0 }"
-          :data-narrator-anchor="`cpu-${c.id}`"
+    <div class="conc__main">
+      <section class="conc__panel conc__scenario">
+        <div class="conc__tabs" role="tablist" :aria-label="t('sections.concurrency.view.scenarioTitle')">
+          <button
+            id="conc-tab-race"
+            type="button"
+            role="tab"
+            class="conc__tab"
+            :class="{ 'conc__tab--active': activeTab === 'race' }"
+            :aria-selected="activeTab === 'race'"
+            aria-controls="conc-stage"
+            @click="selectTab('race')"
+          >{{ t('sections.concurrency.view.tabRace') }}</button>
+          <button
+            id="conc-tab-graph"
+            type="button"
+            role="tab"
+            class="conc__tab"
+            :class="{ 'conc__tab--active': activeTab === 'graph' }"
+            :aria-selected="activeTab === 'graph'"
+            aria-controls="conc-stage"
+            @click="selectTab('graph')"
+          >{{ t('sections.concurrency.view.tabGraph') }}</button>
+        </div>
+        <div
+          id="conc-stage"
+          class="conc__stage"
+          role="tabpanel"
+          :aria-labelledby="activeTab === 'race' ? 'conc-tab-race' : 'conc-tab-graph'"
         >
-          <header>
-            <span class="core-id">CORE {{ c.id }}</span>
-            <Term
-              :term="c.halted ? 'HLT' : (c.current_pid === 0 ? 'Ready queue' : 'RUN')"
-              mode="label"
-              class="core-state"
-            >{{ c.halted ? 'HALT' : (c.current_pid === 0 ? 'IDLE' : 'RUN') }}</Term>
-            <Term
-              :term="c.mode === 0 ? 'KERNEL MODE (PL0)' : 'USER MODE (PL3)'"
-              mode="label"
-              class="core-mode"
-              :class="`mode-${c.mode}`"
-            >{{ modeName(c.mode) }}</Term>
-            <span class="core-pid">{{ pidShort(c.current_pid) }}</span>
-          </header>
-          <div class="core-regs">
-            <div class="reg-row"><Term term="EAX" mode="label">EAX</Term><code>{{ hex(c.regs.EAX ?? 0) }}</code></div>
-            <div class="reg-row"><Term term="EBX" mode="label">EBX</Term><code>{{ hex(c.regs.EBX ?? 0) }}</code></div>
-            <div class="reg-row"><Term term="ECX" mode="label">ECX</Term><code>{{ hex(c.regs.ECX ?? 0) }}</code></div>
-            <div class="reg-row"><Term term="EDX" mode="label">EDX</Term><code>{{ hex(c.regs.EDX ?? 0) }}</code></div>
-            <div class="reg-row separator"><Term term="EIP" mode="label">EIP</Term><code>{{ hex(c.regs.EIP ?? 0) }}</code></div>
-            <div class="reg-row"><Term term="ESP" mode="label">ESP</Term><code>{{ hex(c.regs.ESP ?? 0) }}</code></div>
-          </div>
-        </article>
-      </div>
+          <RaceLens v-if="activeTab === 'race'" :detector="detector" />
+          <WaitGraph
+            v-else
+            :nodes="lockGraph.nodes.value"
+            :edges="lockGraph.edges.value"
+            :cycle="lockGraph.deadlockCycle.value"
+          />
+        </div>
+      </section>
 
-      <aside class="conc__locks">
-        <section class="lock-block">
-          <h2><Term term="Mutex" mode="title">{{ t('sections.concurrency.mutexesTitle') }}</Term></h2>
-          <p v-if="cpu.mutexes.length === 0" class="empty">
-            {{ t('sections.concurrency.mutexEmpty') }}
-          </p>
-          <table v-else>
-            <thead>
-              <tr>
-                <th>{{ t('sections.concurrency.colId') }}</th>
-                <th><Term term="Mutex" mode="label">{{ t('sections.concurrency.colHolder') }}</Term></th>
-                <th><Term term="Waiting queue" mode="label">{{ t('sections.concurrency.colQueue') }}</Term></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="m in cpu.mutexes"
-                :key="m.id"
-                :data-narrator-anchor="`mutex-${m.id}`"
-                :class="{ free: m.holder < 0 }"
-              >
-                <td>#{{ m.id }}</td>
-                <td><code v-if="m.holder >= 0" :title="pidName(m.holder)">P{{ m.holder }}</code><span v-else class="muted">{{ t('sections.concurrency.holderFree') }}</span></td>
-                <td>
-                  <span v-if="m.waiters.length === 0" class="muted">—</span>
-                  <ol v-else class="waiters-list">
-                    <li
-                      v-for="(pid, idx) in m.waiters"
-                      :key="pid"
-                      class="waiter"
-                      :class="{ 'waiter--head': idx === 0 }"
-                    >
-                      <span class="waiter__pos">{{ idx + 1 }}°</span>
-                      <code class="waiter__pid">P{{ pid }}</code>
-                      <span class="waiter__name">{{ procName(pid) }}</span>
-                      <span class="waiter__time">{{ blockedFor(pid) }}</span>
-                    </li>
-                  </ol>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
-
-        <section class="lock-block">
-          <h2><Term term="Semaphore" mode="title">{{ t('sections.concurrency.semsTitle') }}</Term></h2>
-          <p v-if="cpu.semaphores.length === 0" class="empty">
-            {{ t('sections.concurrency.semsEmpty') }}
-          </p>
-          <table v-else>
-            <thead>
-              <tr>
-                <th>{{ t('sections.concurrency.colId') }}</th>
-                <th><Term term="Semaphore" mode="label">{{ t('sections.concurrency.colCount') }}</Term></th>
-                <th><Term term="Waiting queue" mode="label">{{ t('sections.concurrency.colQueue') }}</Term></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="s in cpu.semaphores" :key="s.id" :data-narrator-anchor="`sem-${s.id}`">
-                <td>#{{ s.id }}</td>
-                <td><code>{{ s.count }}</code></td>
-                <td>
-                  <span v-if="s.waiters.length === 0" class="muted">—</span>
-                  <ol v-else class="waiters-list">
-                    <li
-                      v-for="(pid, idx) in s.waiters"
-                      :key="pid"
-                      class="waiter"
-                      :class="{ 'waiter--head': idx === 0 }"
-                    >
-                      <span class="waiter__pos">{{ idx + 1 }}°</span>
-                      <code class="waiter__pid">P{{ pid }}</code>
-                      <span class="waiter__name">{{ procName(pid) }}</span>
-                      <span class="waiter__time">{{ blockedFor(pid) }}</span>
-                    </li>
-                  </ol>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
-
-        <section class="lock-block">
-          <h2><Term term="PCB" mode="title">{{ t('sections.concurrency.procStateTitle') }}</Term></h2>
-          <table>
-            <thead>
-              <tr>
-                <th><Term term="PID" mode="label">PID</Term></th>
-                <th>{{ t('sections.concurrency.colName') }}</th>
-                <th>{{ t('sections.concurrency.colState') }}</th>
-                <th><Term term="BLOCKED" mode="label">{{ t('sections.concurrency.colBlockedOn') }}</Term></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="p in cpu.procs" :key="p.pid">
-                <td>P{{ p.pid }}</td>
-                <td>{{ p.name }}</td>
-                <td>
-                  <Term
-                    :term="p.state"
-                    mode="label"
-                    :class="['state-tag', `state-${p.state.toLowerCase()}`]"
-                  >{{ p.state }}</Term>
-                </td>
-                <td><code v-if="p.blocked_on">{{ p.blocked_on }}</code><span v-else class="muted">—</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
+      <aside class="conc__panel conc__locks">
+        <h2 class="conc__panel-title"><Term term="Mutex" mode="title">{{ t('sections.concurrency.view.locksBoardTitle') }}</Term></h2>
+        <LockBay :cycle-ids="lockGraph.deadlockCycle.value ?? undefined" />
       </aside>
     </div>
+
+    <section class="conc__panel conc__timeline">
+      <h2 class="conc__panel-title"><Term term="BLOCKED" mode="title">{{ t('sections.concurrency.view.timelineTitle') }}</Term></h2>
+      <SyncTimeline :metrics="sched" :deadlock-at-tick="deadlockAtTick" />
+    </section>
+
+    <div class="conc__cores" role="group" :aria-label="t('sections.concurrency.view.coresAria')">
+      <span
+        v-for="c in cores"
+        :key="c.id"
+        class="core-chip"
+        :class="{ 'core-chip--halted': c.halted, 'core-chip--kernel': !c.halted && c.current_pid !== 0 && c.mode === 0 }"
+        :data-narrator-anchor="`cpu-${c.id}`"
+      >
+        <span class="core-chip__id">CORE {{ c.id }}</span>
+        <span class="core-chip__sep" aria-hidden="true">·</span>
+        <code
+          class="core-chip__pid"
+          :style="c.current_pid !== 0 ? { color: pidColor(c.current_pid) } : undefined"
+        >{{ c.current_pid !== 0 ? `P${c.current_pid}` : '—' }}</code>
+        <span class="core-chip__sep" aria-hidden="true">·</span>
+        <Term :term="coreStatus(c).term" mode="label" class="core-chip__status">{{ coreStatus(c).label }}</Term>
+      </span>
+    </div>
+
+    <details class="conc__procs">
+      <summary><Term term="PCB" mode="label">{{ t('sections.concurrency.procStateTitle') }}</Term></summary>
+      <table>
+        <thead>
+          <tr>
+            <th><Term term="PID" mode="label">PID</Term></th>
+            <th>{{ t('sections.concurrency.colName') }}</th>
+            <th>{{ t('sections.concurrency.colState') }}</th>
+            <th><Term term="BLOCKED" mode="label">{{ t('sections.concurrency.colBlockedOn') }}</Term></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="p in cpu.procs" :key="p.pid">
+            <td>P{{ p.pid }}</td>
+            <td>{{ p.name }}</td>
+            <td>
+              <Term
+                :term="p.state"
+                mode="label"
+                :class="['state-tag', `state-${p.state.toLowerCase()}`]"
+              >{{ p.state }}</Term>
+            </td>
+            <td><code v-if="p.blocked_on">{{ p.blocked_on }}</code><span v-else class="muted">—</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </details>
   </section>
 </template>
 
@@ -257,64 +216,22 @@ function blockedFor(pid: number): string {
   color: var(--amber);
 }
 
-.conc__body {
+.conc__main {
   display: grid;
   grid-template-columns: 3fr 2fr;
   gap: var(--space-4);
+  align-items: start;
   min-height: 0;
 }
 
-.conc__cores {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--space-3);
-  align-content: start;
-}
-
-.core-card {
-  background: var(--surface-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: var(--space-3);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  transition: border-color var(--transition-base), box-shadow var(--transition-base);
-}
-.core-card.halted { opacity: 0.55; }
-.core-card.kernel { border-color: var(--amber); box-shadow: var(--shadow-glow-amber); }
-
-.core-card header {
-  display: grid;
-  grid-template-columns: auto 1fr auto auto;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: 11px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-}
-.core-id { color: var(--amber); font-weight: bold; }
-.core-state { color: var(--text-dim); font-size: 9px; }
-.core-mode { font-size: 9px; padding: 2px 6px; border-radius: var(--radius-sm); border: 1px solid var(--border); }
-.core-mode.mode-0 { color: var(--amber); border-color: var(--amber); }
-.core-mode.mode-3 { color: var(--text-dim); }
-.core-pid { font-family: 'JetBrains Mono', monospace; color: var(--cyan, #80d6ff); }
-
-.core-regs { display: flex; flex-direction: column; gap: 2px; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
-.reg-row { display: flex; justify-content: space-between; padding: 2px 0; }
-.reg-row span { color: var(--text-muted); letter-spacing: 1px; }
-.reg-row code { color: var(--text); }
-.reg-row.separator { border-top: 1px dashed var(--border); padding-top: 6px; margin-top: 4px; }
-
-.conc__locks { display: flex; flex-direction: column; gap: var(--space-3); }
-
-.lock-block {
+.conc__panel {
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: var(--space-3);
 }
-.lock-block h2 {
+
+.conc__panel-title {
   font-size: 11px;
   letter-spacing: 2px;
   text-transform: uppercase;
@@ -322,16 +239,88 @@ function blockedFor(pid: number): string {
   margin: 0 0 var(--space-2);
   font-family: var(--font-display);
 }
-.lock-block p.empty { font-size: 11px; color: var(--text-muted); margin: 0; }
-.lock-block code { background: rgba(var(--accent-rgb), 0.1); padding: 0 4px; border-radius: var(--radius-sm); }
 
-.lock-block table {
+.conc__tabs {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: var(--space-2);
+}
+
+.conc__tab {
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: color var(--transition-base), border-color var(--transition-base), box-shadow var(--transition-base);
+}
+.conc__tab:hover { color: var(--text); }
+.conc__tab--active {
+  color: var(--amber);
+  border-color: var(--amber);
+  box-shadow: var(--shadow-glow-amber);
+}
+
+.conc__locks { min-width: 0; }
+
+.conc__cores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.core-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-1);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  transition: border-color var(--transition-base), opacity var(--transition-base);
+}
+.core-chip--halted { opacity: 0.55; }
+.core-chip--kernel { border-color: var(--amber); box-shadow: var(--shadow-glow-amber); }
+.core-chip__id { color: var(--amber); font-weight: bold; }
+.core-chip__sep { color: var(--text-muted); }
+.core-chip__pid { color: var(--text-muted); }
+.core-chip__status { color: var(--text-dim); font-size: 9px; }
+.core-chip--kernel .core-chip__status { color: var(--amber); }
+
+.conc__procs {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+}
+.conc__procs summary {
+  cursor: pointer;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.conc__procs summary:hover { color: var(--cyan); }
+
+.conc__procs table {
   width: 100%;
   border-collapse: collapse;
   font-size: 11px;
   font-family: 'JetBrains Mono', monospace;
+  margin-top: var(--space-2);
 }
-.lock-block th {
+.conc__procs th {
   text-align: left;
   font-weight: normal;
   color: var(--text-muted);
@@ -341,64 +330,9 @@ function blockedFor(pid: number): string {
   padding: 4px 6px;
   border-bottom: 1px dashed var(--border);
 }
-.lock-block td { padding: 4px 6px; border-bottom: 1px dashed rgba(255, 255, 255, 0.04); }
-.lock-block tr.free td:nth-child(2) { color: var(--text-muted); }
-.lock-block .muted { color: var(--text-muted); }
-.lock-block .waiters { color: var(--yellow, #ffd54f); }
-
-.waiters-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.waiter {
-  display: grid;
-  grid-template-columns: 22px auto 1fr auto;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 4px;
-  border-radius: var(--radius-sm);
-  border: 1px solid transparent;
-}
-.waiter__pos {
-  color: var(--text-muted);
-  font-size: 10px;
-  text-align: right;
-}
-.waiter__pid {
-  color: var(--yellow, #ffd54f);
-  background: rgba(255, 213, 79, 0.08);
-  padding: 0 4px;
-  border-radius: var(--radius-sm);
-}
-.waiter__name {
-  color: var(--text-dim);
-  font-size: 10px;
-  text-transform: lowercase;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.waiter__time {
-  color: var(--text-muted);
-  font-size: 10px;
-  font-style: italic;
-}
-/* The head of each waiter list is the next process the kernel will hand
-   the resource to once the holder releases it — pulsing it on a yellow
-   halo telegraphs that hierarchy without resorting to a separate label. */
-.waiter--head {
-  border-color: color-mix(in oklab, var(--yellow, #ffd54f) 60%, transparent);
-  background: rgba(255, 213, 79, 0.05);
-  animation: waiter-head-pulse 1.8s ease-in-out infinite;
-}
-@keyframes waiter-head-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 transparent; }
-  50%      { box-shadow: 0 0 10px 0 color-mix(in oklab, var(--yellow, #ffd54f) 35%, transparent); }
-}
+.conc__procs td { padding: 4px 6px; border-bottom: 1px dashed rgba(255, 255, 255, 0.04); }
+.conc__procs code { background: rgba(var(--accent-rgb), 0.1); padding: 0 4px; border-radius: var(--radius-sm); }
+.conc__procs .muted { color: var(--text-muted); }
 
 .state-tag {
   display: inline-block;
@@ -414,6 +348,6 @@ function blockedFor(pid: number): string {
 .state-zombie { color: var(--text-muted); }
 
 @media (max-width: 768px) {
-  .conc__body { grid-template-columns: 1fr; }
+  .conc__main { grid-template-columns: 1fr; }
 }
 </style>

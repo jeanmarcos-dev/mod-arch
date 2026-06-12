@@ -2,17 +2,28 @@
 import { computed, useId } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useCpuStore } from '../../stores/cpu';
-import { useSchedulerMetrics, type StateSegment, type LockMark } from '../../composables/useSchedulerMetrics';
+import {
+  useSchedulerMetrics,
+  type UseSchedulerMetricsReturn,
+  type StateSegment,
+  type LockMark,
+} from '../../composables/useSchedulerMetrics';
 import { pidColor } from '../../lib/pidColors';
 import { isUserProc } from '../../lib/userProcs';
 
+// An external metrics instance lets the parent view share one accumulator
+// across panels (and guarantees deadlockAtTick lives in the same relative
+// tick space). Standalone usage falls back to a private one. Read once at
+// setup: swapping the prop later is not supported.
 const props = defineProps<{
   deadlockAtTick?: number | null;
+  metrics?: UseSchedulerMetricsReturn;
 }>();
 
 const { t } = useI18n();
 const cpu = useCpuStore();
-const { metrics, currentTickRel } = useSchedulerMetrics();
+const internal = props.metrics ? null : useSchedulerMetrics();
+const { metrics, currentTickRel } = props.metrics ?? internal!;
 
 const WINDOW_TICKS = 200;
 const LANE_HEIGHT = 22;
