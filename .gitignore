@@ -71,3 +71,7 @@ state-dump-*.db
 # repo for convenience but is not part of the simulator itself.
 /paper/
 docs/
+# Private demo credentials for talks (never commit).
+/presentacion/*.local.md
+/presentacion/guion-presentacion.md
+/presentacion/guion-presentacion-es.md
