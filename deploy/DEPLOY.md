@@ -48,7 +48,7 @@ docker run -d \
   modos-cpu:latest
 ```
 
-Variables opcionales: `MAX_PUBLIC_SESSIONS` (default 10), `MAX_PRIVILEGED_SESSIONS` (default 5), `SESSION_TTL` (default 30m), `INVITE_TTL` (default 24h), `CLEANUP_INTERVAL` (default 60s).
+Variables opcionales: `MAX_PUBLIC_SESSIONS` (default 10), `MAX_PRIVILEGED_SESSIONS` (default 5), `SESSION_TTL` (default 30m), `INVITE_TTL` (default 24h), `CLEANUP_INTERVAL` (default 60s), `AUTH_LOGIN_LIMIT` (intentos de login de estudiantes por IP cada 15 minutos, default 5; el login del admin queda fijo en 5), `EMBEDDER_MAX_CONCURRENCY` (consultas simultáneas de ARCHIUS al embedder Jina, default 2).
 
 ## Opción B — Binario + systemd
 
