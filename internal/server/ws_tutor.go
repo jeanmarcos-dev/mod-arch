@@ -11,6 +11,11 @@ import (
 	"github.com/jeanmarcos/modos-cpu/internal/tutor"
 )
 
+const (
+	tutorUnavailableCode    = "tutor_unavailable"
+	tutorUnavailableMessage = "ARCHIUS no está disponible en este momento."
+)
+
 // handleTutorAsk runs the tutor pipeline for the student's question and
 // pushes the answer (or a friendly error) back through the WebSocket.
 //
@@ -25,7 +30,8 @@ func (s *Server) handleTutorAsk(cmd Command, sess *sessions.Session, c *sim.Clie
 		c.Send <- map[string]any{
 			"type":       "tutor_answer",
 			"request_id": cmd.RequestID,
-			"error":      "tutor desactivado en este servidor",
+			"error":      tutorUnavailableMessage,
+			"code":       tutorUnavailableCode,
 		}
 		return
 	}
@@ -62,7 +68,7 @@ func (s *Server) handleTutorAsk(cmd Command, sess *sessions.Session, c *sim.Clie
 		if len(hist) > historyHardCap {
 			hist = hist[len(hist)-historyHardCap:]
 		}
-		ans, err := svc.AskWithOptions(ctx, sess, cmd.Question, tutor.AskOptions{Mode: cmd.TutorMode, History: hist, DetectionContext: cmd.DetectionContext}, progress)
+		ans, err := svc.AskWithOptions(ctx, sess, cmd.Question, tutor.AskOptions{Mode: cmd.TutorMode, History: hist, DetectionContext: cmd.DetectionContext, RequestID: cmd.RequestID}, progress)
 		if err != nil {
 			var rl *tutor.RateLimitError
 			if errors.As(err, &rl) {

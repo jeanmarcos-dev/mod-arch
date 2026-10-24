@@ -8,7 +8,6 @@
 package server
 
 import (
-
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,6 +24,7 @@ import (
 	"github.com/jeanmarcos/modos-cpu/internal/programs"
 	"github.com/jeanmarcos/modos-cpu/internal/server/i18n"
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
+	"github.com/jeanmarcos/modos-cpu/internal/store"
 	"github.com/jeanmarcos/modos-cpu/internal/tutor"
 )
 
@@ -46,6 +46,8 @@ type Server struct {
 
 	fullTmpl    *template.Template
 	admin       adminConfig
+	usage       *store.UsageRecorder
+	live        liveCache
 	loginLimit  *RateLimiter
 	authLimit   *RateLimiter
 	reportLimit *RateLimiter
@@ -75,13 +77,21 @@ const (
 	reportLimitWindow = time.Hour
 )
 
+func studentLoginLimit(configured int) int {
+	if configured > 0 {
+		return configured
+	}
+	return loginLimitMax
+}
+
 // Config holds the Server construction parameters.
 type Config struct {
-	Manager       *sessions.Manager
-	Logger        *slog.Logger
-	StaticFS      fs.FS
-	TutorRegistry *tutor.Registry  // optional; empty registry disables the tutor surface
-	TutorBuild    *tutor.BuildDeps // optional; required by /admin/api/tutor/reload to rebuild on config changes
+	Manager        *sessions.Manager
+	Logger         *slog.Logger
+	StaticFS       fs.FS
+	TutorRegistry  *tutor.Registry  // optional; empty registry disables the tutor surface
+	TutorBuild     *tutor.BuildDeps // optional; required by /admin/api/tutor/reload to rebuild on config changes
+	AuthLoginLimit int
 }
 
 // New builds a Server around a *sessions.Manager.
@@ -90,17 +100,20 @@ func New(cfg Config) *Server {
 		cfg.Logger = slog.Default()
 	}
 	s := &Server{
-		manager:    cfg.Manager,
-		logger:     cfg.Logger,
-		staticFS:   cfg.StaticFS,
-		fullTmpl:   mustParseTemplate("full", "templates/full.html"),
-		admin:      loadAdminConfig(),
-		loginLimit:  NewRateLimiter(context.Background(), loginLimitMax, loginLimitWindow, rateLimitCleanupTick),
-		authLimit:   NewRateLimiter(context.Background(), loginLimitMax, loginLimitWindow, rateLimitCleanupTick),
-		reportLimit: NewRateLimiter(context.Background(), reportLimitMax, reportLimitWindow, rateLimitCleanupTick),
+		manager:       cfg.Manager,
+		logger:        cfg.Logger,
+		staticFS:      cfg.StaticFS,
+		fullTmpl:      mustParseTemplate("full", "templates/full.html"),
+		admin:         loadAdminConfig(),
+		loginLimit:    NewRateLimiter(context.Background(), loginLimitMax, loginLimitWindow, rateLimitCleanupTick),
+		authLimit:     NewRateLimiter(context.Background(), studentLoginLimit(cfg.AuthLoginLimit), loginLimitWindow, rateLimitCleanupTick),
+		reportLimit:   NewRateLimiter(context.Background(), reportLimitMax, reportLimitWindow, rateLimitCleanupTick),
 		tutorRegistry: cfg.TutorRegistry,
 		tutorBuild:    cfg.TutorBuild,
 		encKey:        crypto.DeriveKey([]byte(os.Getenv("SESSION_SECRET"))),
+	}
+	if cfg.Manager != nil && cfg.Manager.Store() != nil {
+		s.usage = store.NewUsageRecorder(cfg.Manager.Store(), cfg.Logger)
 	}
 	if s.admin.enabled {
 		cfg.Logger.Info("admin enabled", "user", s.admin.user)
@@ -586,7 +599,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	s.Routes(mux)
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           WithClientCtx([]byte(os.Getenv("SESSION_SECRET")), NoopGeoResolver{}, RevealIPEnabled())(mux),
+		Handler:           WithClientCtx([]byte(os.Getenv("SESSION_SECRET")), CloudflareGeoResolver{}, RevealIPEnabled())(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -596,8 +609,16 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 		_ = srv.Shutdown(shutCtx)
 	}()
 	s.logger.Info("server listening", "url", "http://"+addr)
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	err := srv.ListenAndServe()
+	s.Close()
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil
+}
+
+func (s *Server) Close() {
+	if s.usage != nil {
+		s.usage.Close()
+	}
 }

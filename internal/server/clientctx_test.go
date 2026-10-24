@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -126,5 +127,48 @@ func TestClientCtxFrom_NoMiddleware(t *testing.T) {
 	}
 	if cc.IPHash != "" || cc.UAShort != "" {
 		t.Error("expected zero-valued ClientCtx when middleware did not run")
+	}
+}
+
+func TestCloudflareGeoResolver(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+		want   string
+	}{
+		{name: "venezuela", header: "VE", want: "VE"},
+		{name: "lowercase is normalized", header: "ve", want: "VE"},
+		{name: "unknown country XX is ignored", header: "XX", want: ""},
+		{name: "tor T1 is ignored", header: "T1", want: ""},
+		{name: "missing header", header: "", want: ""},
+		{name: "three letters rejected", header: "VEN", want: ""},
+		{name: "digits rejected", header: "1A", want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+			if tc.header != "" {
+				req.Header.Set("CF-IPCountry", tc.header)
+			}
+			if got := (CloudflareGeoResolver{}).Country(req); got != tc.want {
+				t.Fatalf("Country = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWithClientCtx_CapturesCloudflareCountry(t *testing.T) {
+	var captured *ClientCtx
+	handler := WithClientCtx([]byte("salt"), CloudflareGeoResolver{}, false)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		captured = ClientCtxFrom(r)
+	}))
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("CF-IPCountry", "VE")
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+	if captured == nil || captured.GeoCountry != "VE" {
+		t.Fatalf("GeoCountry = %+v, want VE", captured)
+	}
+	if got := clientInfoFrom(req.WithContext(context.WithValue(req.Context(), clientCtxKey{}, captured))).GeoCountry; got != "VE" {
+		t.Fatalf("clientInfoFrom country = %q, want VE", got)
 	}
 }

@@ -18,6 +18,8 @@ type Metrics struct {
 	Snapshot1to5ms   int64 `json:"snapshot_1_to_5ms"`
 	Snapshot5to20ms  int64 `json:"snapshot_5_to_20ms"`
 	SnapshotOver20ms int64 `json:"snapshot_over_20ms"`
+
+	UsageEventsDropped int64 `json:"usage_events_dropped"`
 }
 
 var globalMetrics Metrics
@@ -40,6 +42,10 @@ func TrackLLMQuery(start time.Time, err error) {
 	if err != nil {
 		atomic.AddInt64(&globalMetrics.LLMErrors, 1)
 	}
+}
+
+func TrackUsageDropped() {
+	atomic.AddInt64(&globalMetrics.UsageEventsDropped, 1)
 }
 
 // TrackSnapshotLatency records the execution time of the simulator's Snapshot function.
@@ -70,6 +76,7 @@ func Snapshot() Metrics {
 		Snapshot1to5ms:      atomic.LoadInt64(&globalMetrics.Snapshot1to5ms),
 		Snapshot5to20ms:     atomic.LoadInt64(&globalMetrics.Snapshot5to20ms),
 		SnapshotOver20ms:    atomic.LoadInt64(&globalMetrics.SnapshotOver20ms),
+		UsageEventsDropped:  atomic.LoadInt64(&globalMetrics.UsageEventsDropped),
 	}
 
 	totalLat := atomic.LoadInt64(&globalMetrics.TotalLLMLatencyMs)

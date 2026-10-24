@@ -64,6 +64,8 @@ type Answer struct {
 	// of the wire payload (json:"-") because the message can include request
 	// dumps useful only for server-side metrics / debugging.
 	LastError string `json:"-"`
+
+	RetrievedCount int `json:"-"`
 }
 
 // Options configures Service behavior. Zero values get reasonable defaults.
@@ -135,6 +137,7 @@ type Service struct {
 	logger    *slog.Logger
 	opts      Options
 	metrics   *MetricsStore
+	qaLog     QALog
 
 	toolDefs    []llm.ToolDef
 	toolByName  map[string]ToolHandler
@@ -234,6 +237,7 @@ type AskOptions struct {
 	// When non-empty it is appended to the user message so the tutor explains
 	// the current run; empty adds nothing.
 	DetectionContext string
+	RequestID        string
 }
 
 // Ask runs the full pipeline for a single question from a session. progress
@@ -251,6 +255,7 @@ func (s *Service) AskWithOptions(ctx context.Context, sess *sessions.Session, qu
 	}
 	ans, err := s.askInternal(ctx, sess, question, opts, progress)
 	s.recordMetric(ctx, sess, question, ans, err)
+	s.recordQA(ctx, sess, question, opts, ans, err)
 	return ans, err
 }
 
@@ -466,6 +471,7 @@ func (s *Service) askInternal(ctx context.Context, sess *sessions.Session, quest
 		LatencyMS:      time.Since(start).Milliseconds(),
 		UsageTokens:    totalUsage,
 		ToolsUsedNames: toolNames,
+		RetrievedCount: len(retrieved),
 	}
 
 	// Best-effort: persist for next hit. Failure here does not break the call.
@@ -653,13 +659,14 @@ func (s *Service) fallbackAnswer(retrieved []rag.ScoredChunk, start time.Time, l
 		errMsg = llmErr.Error()
 	}
 	return &Answer{
-		Text:          strings.TrimSpace(b.String()),
-		Citations:     buildCitations(retrieved),
-		CorpusVersion: s.opts.CorpusVersion,
-		Provider:      "",
-		Degraded:      true,
-		LatencyMS:     time.Since(start).Milliseconds(),
-		LastError:     errMsg,
+		Text:           strings.TrimSpace(b.String()),
+		Citations:      buildCitations(retrieved),
+		CorpusVersion:  s.opts.CorpusVersion,
+		Provider:       "",
+		Degraded:       true,
+		LatencyMS:      time.Since(start).Milliseconds(),
+		LastError:      errMsg,
+		RetrievedCount: len(retrieved),
 	}
 }
 

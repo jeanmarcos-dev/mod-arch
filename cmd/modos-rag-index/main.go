@@ -47,6 +47,9 @@ func main() {
 	version := flag.Int("version", 0, "corpus_version a escribir (0 = auto)")
 	purge := flag.Bool("purge", false, "borrar rag_chunks de esa version antes de insertar")
 	batchSize := flag.Int("batch", 16, "batch del embedder")
+	timeout := flag.Duration("timeout", 10*time.Minute, "tiempo máximo total de la indexación")
+	rateLimitRetries := flag.Int("rate-limit-retries", 5, "reintentos por batch cuando el embedder responde rate limited")
+	rateLimitWait := flag.Duration("rate-limit-wait", 65*time.Second, "espera antes de reintentar un batch rate limited")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -78,7 +81,7 @@ func main() {
 	defer func() { _ = st.Close() }()
 
 	rs := rag.NewStore(st.DB())
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
 	resolvedVersion, err := resolveVersion(ctx, st, *version)
@@ -137,7 +140,7 @@ func main() {
 	}
 
 	start := time.Now()
-	chunks, err := embedDocs(ctx, embedder, rawDocs, *batchSize, resolvedVersion, logger)
+	chunks, err := embedDocs(ctx, embedder, rawDocs, *batchSize, resolvedVersion, retryOptions{maxRetries: *rateLimitRetries, wait: *rateLimitWait}, logger)
 	if err != nil {
 		fail("embedding: " + err.Error())
 	}
@@ -189,7 +192,7 @@ func setActiveCorpusVersion(ctx context.Context, st *store.Store, version int) e
 
 // embedDocs runs the embedder in batches so a 1000-chunk corpus does not get
 // shipped as one giant HTTP body. Each batch is a single round-trip.
-func embedDocs(ctx context.Context, emb rag.Embedder, docs []rag.RawDoc, batch, version int, logger *slog.Logger) ([]rag.Chunk, error) {
+func embedDocs(ctx context.Context, emb rag.Embedder, docs []rag.RawDoc, batch, version int, retry retryOptions, logger *slog.Logger) ([]rag.Chunk, error) {
 	if batch <= 0 {
 		batch = 16
 	}
@@ -200,7 +203,7 @@ func embedDocs(ctx context.Context, emb rag.Embedder, docs []rag.RawDoc, batch, 
 		for j, d := range docs[i:end] {
 			texts[j] = d.Text
 		}
-		vecs, err := emb.Embed(ctx, texts)
+		vecs, err := embedWithRetry(ctx, emb, texts, retry, logger)
 		if err != nil {
 			return nil, fmt.Errorf("batch %d-%d: %w", i, end, err)
 		}
@@ -220,6 +223,26 @@ func embedDocs(ctx context.Context, emb rag.Embedder, docs []rag.RawDoc, batch, 
 		logger.Info("batch embebido", "rango", fmt.Sprintf("%d-%d", i, end))
 	}
 	return out, nil
+}
+
+type retryOptions struct {
+	maxRetries int
+	wait       time.Duration
+}
+
+func embedWithRetry(ctx context.Context, emb rag.Embedder, texts []string, retry retryOptions, logger *slog.Logger) ([][]float32, error) {
+	for attempt := 0; ; attempt++ {
+		vecs, err := emb.Embed(ctx, texts)
+		if err == nil || !errors.Is(err, rag.ErrEmbedderRateLimited) || attempt >= retry.maxRetries {
+			return vecs, err
+		}
+		logger.Info("rate limited, reintentando", "intento", attempt+1, "espera", retry.wait)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(retry.wait):
+		}
+	}
 }
 
 // defaultGlossaryPath assumes the binary is run from the repo root.

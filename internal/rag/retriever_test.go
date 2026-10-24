@@ -2,7 +2,9 @@ package rag
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 )
 
 // stubEmbedder maps each text to a fixed deterministic vector so tests can
@@ -113,4 +115,30 @@ func normalize(s string) string {
 		out = append(out, r)
 	}
 	return string(out)
+}
+
+type blockingEmbedder struct{}
+
+func (blockingEmbedder) Embed(ctx context.Context, _ []string) ([][]float32, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func (blockingEmbedder) Model() string { return "blocking" }
+func (blockingEmbedder) Dim() int      { return 3 }
+
+func TestRetrieveBoundsEmbedWithOwnDeadline(t *testing.T) {
+	r := NewRetriever(NewStore(openTestDB(t)), blockingEmbedder{}, 1)
+	if r.queryTimeout != queryEmbedTimeout {
+		t.Fatalf("queryTimeout = %v, want %v", r.queryTimeout, queryEmbedTimeout)
+	}
+	r.queryTimeout = 20 * time.Millisecond
+
+	start := time.Now()
+	_, err := r.Retrieve(context.Background(), "pregunta", 3)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want deadline exceeded", err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("embed was not bounded by the query timeout")
+	}
 }

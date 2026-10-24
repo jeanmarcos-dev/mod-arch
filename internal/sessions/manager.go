@@ -134,14 +134,14 @@ type Presence struct {
 // optional — nil means "no opinion from the owner, viewer keeps its local
 // value". This way the wire only carries explicit choices.
 type Focus struct {
-	MiddleTab        *string  `json:"middle_tab,omitempty"`
-	MobileTab        *string  `json:"mobile_tab,omitempty"`
-	MemoryBaseAddr   *uint64  `json:"memory_base_addr,omitempty"`
-	MemoryAutoFollow *bool    `json:"memory_auto_follow,omitempty"`
-	PinnedPID        *int     `json:"pinned_pid,omitempty"`
-	SimBarMode       *string  `json:"sim_bar_mode,omitempty"`
-	SidebarCollapsed *bool    `json:"sidebar_collapsed,omitempty"`
-	IsMobile         *bool    `json:"is_mobile,omitempty"`
+	MiddleTab        *string `json:"middle_tab,omitempty"`
+	MobileTab        *string `json:"mobile_tab,omitempty"`
+	MemoryBaseAddr   *uint64 `json:"memory_base_addr,omitempty"`
+	MemoryAutoFollow *bool   `json:"memory_auto_follow,omitempty"`
+	PinnedPID        *int    `json:"pinned_pid,omitempty"`
+	SimBarMode       *string `json:"sim_bar_mode,omitempty"`
+	SidebarCollapsed *bool   `json:"sidebar_collapsed,omitempty"`
+	IsMobile         *bool   `json:"is_mobile,omitempty"`
 }
 
 // Session is an isolated instance for an owner plus its viewers.
@@ -160,6 +160,7 @@ type Session struct {
 	userID       string // empty when no user is attached
 	lastActiveAt time.Time
 	presence     Presence
+	program      string
 
 	// Tracking metadata captured at session creation. Sticky for the session
 	// lifetime so the row written to session_history reflects the original
@@ -324,6 +325,18 @@ func (s *Session) SetUserID(uid string) {
 	if s.mgr != nil {
 		s.mgr.persistUserID(s.ID, uid)
 	}
+}
+
+func (s *Session) Program() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.program
+}
+
+func (s *Session) SetProgram(name string) {
+	s.mu.Lock()
+	s.program = name
+	s.mu.Unlock()
 }
 
 // LastActiveAt returns the last touch timestamp (thread-safe).

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/jeanmarcos/modos-cpu/internal/programs"
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
@@ -165,7 +166,10 @@ func (s *Server) demoBlockedForSession(sess *sessions.Session, name string) bool
 	if st == nil {
 		return false
 	}
-	disabled := readStringArraySetting(context.Background(), st, SettingUIDisabledDemos)
+	// Resolve through the schedule engine so a demo re-enabled by an active
+	// window is not blocked, and one hidden by a window is, even if the base
+	// disabled-demos setting says otherwise.
+	disabled := s.effectiveUIConfig(context.Background(), time.Now()).DisabledDemos
 	if !slices.Contains(disabled, name) {
 		return false
 	}

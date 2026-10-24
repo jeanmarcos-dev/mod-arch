@@ -184,10 +184,18 @@ func (s *Server) registerAdminRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /admin/api/settings", s.requireAdminAPI(s.handleAdminGetSettings))
 	mux.HandleFunc("GET /admin/api/metrics", s.requireAdminAPI(s.handleAdminMetrics))
+	mux.HandleFunc("GET /admin/api/live", s.requireEnvAdmin(s.handleAdminLive))
 	mux.HandleFunc("PUT /admin/api/settings", s.requireAdminAPI(s.requireCSRF(s.handleAdminSetSetting)))
 
 	// Demo catalog: read-only listing used by the admin "habilitar demos" UI.
 	mux.HandleFunc("GET /admin/api/demos", s.requireAdminAPI(s.handleAdminListDemos))
+
+	// Scheduled delivery: time-windowed show/hide of demos, panels, routes and
+	// default sets. CRUD on the rule list; reads are gated to admins only.
+	mux.HandleFunc("GET /admin/api/schedules", s.requireAdminAPI(s.handleAdminListSchedules))
+	mux.HandleFunc("POST /admin/api/schedules", s.requireAdminAPI(s.requireCSRF(s.handleAdminCreateSchedule)))
+	mux.HandleFunc("PUT /admin/api/schedules/{id}", s.requireAdminAPI(s.requireCSRF(s.handleAdminUpdateSchedule)))
+	mux.HandleFunc("DELETE /admin/api/schedules/{id}", s.requireAdminAPI(s.requireCSRF(s.handleAdminDeleteSchedule)))
 
 	mux.HandleFunc("POST /admin/api/users/{id}/role", s.requireAdminAPI(s.requireCSRF(s.handleAdminSetUserRole)))
 

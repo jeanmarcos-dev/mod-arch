@@ -168,23 +168,25 @@ func runServer(args []string) {
 	tutorRegistry := tutor.NewRegistry()
 	defer tutorRegistry.Close()
 	tutorBuild := &tutor.BuildDeps{
-		Store:        st,
-		Logger:       logger,
-		EncKey:       tutor.EncKeyFromSecret(os.Getenv("SESSION_SECRET")),
-		TopK:         envInt("RAG_TOP_K", 5),
-		MaxAnswerTok: envInt("TUTOR_MAX_TOKENS", 600),
-		RateLimitMax: envInt("TUTOR_RATE_LIMIT", 20),
+		Store:                  st,
+		Logger:                 logger,
+		EncKey:                 tutor.EncKeyFromSecret(os.Getenv("SESSION_SECRET")),
+		TopK:                   envInt("RAG_TOP_K", 5),
+		MaxAnswerTok:           envInt("TUTOR_MAX_TOKENS", 600),
+		RateLimitMax:           envInt("TUTOR_RATE_LIMIT", 20),
+		EmbedderMaxConcurrency: envInt("EMBEDDER_MAX_CONCURRENCY", 2),
 	}
 	if err := reloadTutor(context.Background(), tutorBuild, tutorRegistry); err != nil {
 		logger.Info("tutor disabled at boot", "reason", err)
 	}
 
 	s := server.New(server.Config{
-		Manager:       manager,
-		Logger:        logger,
-		StaticFS:      files,
-		TutorRegistry: tutorRegistry,
-		TutorBuild:    tutorBuild,
+		Manager:        manager,
+		Logger:         logger,
+		StaticFS:       files,
+		TutorRegistry:  tutorRegistry,
+		TutorBuild:     tutorBuild,
+		AuthLoginLimit: envInt("AUTH_LOGIN_LIMIT", 0),
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -347,7 +349,6 @@ func reloadTutor(ctx context.Context, deps *tutor.BuildDeps, reg *tutor.Registry
 	reg.Set(svc)
 	return nil
 }
-
 
 // envInt reads an env var as int or returns the default. Logs to stderr when
 // the value is set but unparseable so deploys do not fail silently.

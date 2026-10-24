@@ -91,12 +91,17 @@ func (s *Server) handleAdminSecurityPut(w http.ResponseWriter, r *http.Request) 
 // login page is worse than showing nothing.
 func (s *Server) handlePublicConfig(w http.ResponseWriter, r *http.Request) {
 	st := s.manager.Store()
+	// Resolve the surface through the schedule engine so a window that is
+	// active right now is reflected the moment a student loads the page.
+	eff := s.effectiveUIConfig(r.Context(), time.Now())
 	out := map[string]any{
 		"turnstile_sitekey": "",
-		"disabled_routes":   []string{},
-		"disabled_panels":   []string{},
-		"disabled_demos":    []string{},
-		"default_route":     DefaultRouteName,
+		"disabled_routes":   eff.DisabledRoutes,
+		"disabled_panels":   eff.DisabledPanels,
+		"disabled_demos":    eff.DisabledDemos,
+		"default_route":     eff.DefaultRoute,
+		"defaults":          eff.Defaults,
+		"schedule_tz":       readScheduleTZ(r.Context(), st),
 	}
 	if st != nil {
 		if cfg, err := loadSecurityConfig(r.Context(), st, s.encKey); err == nil {
@@ -104,10 +109,6 @@ func (s *Server) handlePublicConfig(w http.ResponseWriter, r *http.Request) {
 				out["turnstile_sitekey"] = cfg.TurnstileSitekey
 			}
 		}
-		out["disabled_routes"] = readStringArraySetting(r.Context(), st, SettingUIDisabledRoutes)
-		out["disabled_panels"] = readStringArraySetting(r.Context(), st, SettingUIDisabledPanels)
-		out["disabled_demos"] = readStringArraySetting(r.Context(), st, SettingUIDisabledDemos)
-		out["default_route"] = readDefaultRoute(r.Context(), st)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -115,6 +115,27 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_by TEXT
 );
 
+-- Time-windowed overrides of the admin-curated UI surface. Each rule shows or
+-- hides a demo/panel/route (or applies a defaults blob) while the wall clock
+-- is inside [starts_at, ends_at). ends_at NULL = open-ended. Times are epoch
+-- UTC; timezone records the IANA zone the window was authored in, for display.
+CREATE TABLE IF NOT EXISTS schedule_rules (
+    id         TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL,            -- demo | panel | route | defaults
+    target     TEXT NOT NULL DEFAULT '',
+    action     TEXT NOT NULL,            -- show | hide | apply
+    starts_at  INTEGER NOT NULL,         -- epoch UTC
+    ends_at    INTEGER,                  -- epoch UTC, NULL = open-ended
+    timezone   TEXT NOT NULL DEFAULT 'UTC',
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    created_by TEXT,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_rules_window  ON schedule_rules(starts_at, ends_at);
+CREATE INDEX IF NOT EXISTS idx_schedule_rules_enabled ON schedule_rules(enabled);
+
 -- User-submitted reports (feedback, bug, idea). Created via POST /api/reports.
 -- session_id and user_id are nullable so anonymous reports are accepted. The
 -- admin panel triages by status.
@@ -220,3 +241,41 @@ CREATE TABLE IF NOT EXISTS tutor_metrics (
 
 CREATE INDEX IF NOT EXISTS idx_tutor_metrics_ts ON tutor_metrics(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_tutor_metrics_session ON tutor_metrics(session_id, ts DESC);
+
+CREATE TABLE IF NOT EXISTS usage_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          INTEGER NOT NULL,
+    session_id  TEXT NOT NULL,
+    user_id     TEXT,
+    kind        TEXT NOT NULL,
+    name        TEXT NOT NULL DEFAULT '',
+    duration_ms INTEGER,
+    role        TEXT NOT NULL DEFAULT 'owner'
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_events_ts   ON usage_events(ts);
+CREATE INDEX IF NOT EXISTS idx_usage_events_kind ON usage_events(kind, ts);
+CREATE INDEX IF NOT EXISTS idx_usage_events_user ON usage_events(user_id, ts);
+
+CREATE TABLE IF NOT EXISTS tutor_qa (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts             INTEGER NOT NULL,
+    session_id     TEXT NOT NULL,
+    user_id        TEXT,
+    request_id     TEXT NOT NULL,
+    question       TEXT NOT NULL,
+    answer         TEXT NOT NULL DEFAULT '',
+    citations_json TEXT NOT NULL DEFAULT '[]',
+    degraded       INTEGER NOT NULL DEFAULT 0,
+    cache_hit      INTEGER NOT NULL DEFAULT 0,
+    retrieved      INTEGER NOT NULL DEFAULT 0,
+    latency_ms     INTEGER NOT NULL DEFAULT 0,
+    provider       TEXT NOT NULL DEFAULT '',
+    model          TEXT NOT NULL DEFAULT '',
+    error          TEXT NOT NULL DEFAULT '',
+    rating         INTEGER,
+    rated_at       INTEGER
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tutor_qa_req ON tutor_qa(session_id, request_id);
+CREATE INDEX IF NOT EXISTS idx_tutor_qa_ts ON tutor_qa(ts);

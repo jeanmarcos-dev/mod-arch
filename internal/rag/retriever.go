@@ -6,19 +6,23 @@ import (
 	"math"
 	"sort"
 	"sync"
+	"time"
 )
+
+const queryEmbedTimeout = 20 * time.Second
 
 // Retriever performs cosine similarity search over an in-memory copy of the
 // corpus. Loading is O(N) once at startup; subsequent queries are O(N×D)
 // arithmetic, which is fast enough for the tutor scale (<10K chunks).
 type Retriever struct {
-	store       *Store
-	embedder    Embedder
-	queryTask   string
-	corpus      []Chunk
-	corpusNorms []float32 // L2 norm precomputed per chunk
-	corpusVer   int
-	mu          sync.RWMutex
+	store        *Store
+	embedder     Embedder
+	queryTask    string
+	corpus       []Chunk
+	corpusNorms  []float32 // L2 norm precomputed per chunk
+	corpusVer    int
+	queryTimeout time.Duration
+	mu           sync.RWMutex
 }
 
 // NewRetriever wires a store, an embedder configured for QUERY embeddings,
@@ -26,9 +30,10 @@ type Retriever struct {
 // in-memory copy before the first query.
 func NewRetriever(store *Store, embedder Embedder, corpusVersion int) *Retriever {
 	return &Retriever{
-		store:     store,
-		embedder:  embedder,
-		corpusVer: corpusVersion,
+		store:        store,
+		embedder:     embedder,
+		corpusVer:    corpusVersion,
+		queryTimeout: queryEmbedTimeout,
 	}
 }
 
@@ -105,7 +110,9 @@ func (r *Retriever) embedQuery(ctx context.Context, query string) ([]float32, er
 	if cached, ok, err := r.store.GetCachedQueryEmbedding(ctx, hash); err == nil && ok {
 		return cached, nil
 	}
-	vecs, err := r.embedder.Embed(ctx, []string{query})
+	embedCtx, cancel := context.WithTimeout(ctx, r.queryTimeout)
+	defer cancel()
+	vecs, err := r.embedder.Embed(embedCtx, []string{query})
 	if err != nil {
 		return nil, fmt.Errorf("rag/retriever: embed query: %w", err)
 	}

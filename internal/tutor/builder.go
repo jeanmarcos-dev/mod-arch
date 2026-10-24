@@ -17,13 +17,14 @@ import (
 // from main.go so /admin/api/tutor/reload can rebuild the service without
 // re-reading flags or env vars beyond Config + DB.
 type BuildDeps struct {
-	Store         *store.Store
-	Logger        *slog.Logger
-	CorpusVersion int    // 0 = auto-detect from settings
-	EncKey        [32]byte
-	TopK          int
-	MaxAnswerTok  int
-	RateLimitMax  int
+	Store                  *store.Store
+	Logger                 *slog.Logger
+	CorpusVersion          int // 0 = auto-detect from settings
+	EncKey                 [32]byte
+	TopK                   int
+	MaxAnswerTok           int
+	RateLimitMax           int
+	EmbedderMaxConcurrency int
 }
 
 // Build wires up a fresh tutor.Service from a Config. Returns nil + an
@@ -48,7 +49,7 @@ func Build(ctx context.Context, deps BuildDeps, cfg Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	embedder, err := buildEmbedder(cfg, deps.Logger)
+	embedder, err := buildEmbedder(cfg, deps.Logger, deps.EmbedderMaxConcurrency)
 	if err != nil {
 		return nil, err
 	}
@@ -95,6 +96,7 @@ func Build(ctx context.Context, deps BuildDeps, cfg Config) (*Service, error) {
 		HistoryWindowTurns: cfg.HistoryWindowTurns,
 	})
 	svc.SetMetricsStore(NewMetricsStore(deps.Store.DB()))
+	svc.SetQALog(deps.Store)
 	svc.SetDefaultMode(cfg.Mode)
 
 	if cfg.LLMRPM > 0 {
@@ -144,8 +146,10 @@ func buildLLM(cfg Config, logger *slog.Logger) (llm.Provider, error) {
 	}
 }
 
+const defaultEmbedderConcurrency = 2
+
 // buildEmbedder mirrors buildLLM for the embedding side.
-func buildEmbedder(cfg Config, logger *slog.Logger) (rag.Embedder, error) {
+func buildEmbedder(cfg Config, logger *slog.Logger, maxConcurrency int) (rag.Embedder, error) {
 	provider := cfg.EmbedderProvider
 	if provider == "" {
 		provider = "ollama"
@@ -165,7 +169,14 @@ func buildEmbedder(cfg Config, logger *slog.Logger) (rag.Embedder, error) {
 		if cfg.JinaAPIKey == "" {
 			return nil, errors.New("JINA_API_KEY no configurada")
 		}
-		return rag.NewJina(rag.JinaConfig{APIKey: cfg.JinaAPIKey, Task: "retrieval.query"})
+		jina, err := rag.NewJina(rag.JinaConfig{APIKey: cfg.JinaAPIKey, Task: "retrieval.query"})
+		if err != nil {
+			return nil, err
+		}
+		if maxConcurrency <= 0 {
+			maxConcurrency = defaultEmbedderConcurrency
+		}
+		return rag.NewLimitedEmbedder(jina, maxConcurrency, logger), nil
 	default:
 		return nil, fmt.Errorf("EMBEDDER_PROVIDER desconocido: %q", provider)
 	}

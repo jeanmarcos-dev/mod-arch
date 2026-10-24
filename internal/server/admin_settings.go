@@ -13,15 +13,17 @@ import (
 )
 
 type settingsResponse struct {
-	AccessMode             string   `json:"access_mode"`
-	ViewerPasswordRequired bool     `json:"viewer_password_required"`
-	ViewerPasswordSet      bool     `json:"viewer_password_set"`
-	DisabledRoutes         []string `json:"disabled_routes"`
-	DisabledPanels         []string `json:"disabled_panels"`
-	DisabledDemos          []string `json:"disabled_demos"`
-	DefaultRoute           string   `json:"default_route"`
-	AllowedDomains         []string `json:"allowed_domains"`
-	AllowedEmails          []string `json:"allowed_emails"`
+	AccessMode             string     `json:"access_mode"`
+	ViewerPasswordRequired bool       `json:"viewer_password_required"`
+	ViewerPasswordSet      bool       `json:"viewer_password_set"`
+	DisabledRoutes         []string   `json:"disabled_routes"`
+	DisabledPanels         []string   `json:"disabled_panels"`
+	DisabledDemos          []string   `json:"disabled_demos"`
+	DefaultRoute           string     `json:"default_route"`
+	Defaults               UIDefaults `json:"defaults"`
+	ScheduleTZ             string     `json:"schedule_tz"`
+	AllowedDomains         []string   `json:"allowed_domains"`
+	AllowedEmails          []string   `json:"allowed_emails"`
 }
 
 // handleAdminGetSettings returns the access-related settings as a flat object
@@ -49,6 +51,8 @@ func (s *Server) handleAdminGetSettings(w http.ResponseWriter, r *http.Request) 
 		DisabledPanels:         readStringArraySetting(r.Context(), st, SettingUIDisabledPanels),
 		DisabledDemos:          readStringArraySetting(r.Context(), st, SettingUIDisabledDemos),
 		DefaultRoute:           readDefaultRoute(r.Context(), st),
+		Defaults:               readUIDefaults(r.Context(), st),
+		ScheduleTZ:             readScheduleTZ(r.Context(), st),
 		AllowedDomains:         nonNilStringSlice(allow.Domains),
 		AllowedEmails:          nonNilStringSlice(allow.Emails),
 	})
@@ -123,6 +127,10 @@ func (s *Server) applySetting(r *http.Request, st *store.Store, key, value strin
 		return applyUIArraySetting(r, st, key, value, isValidDemoName, actor, now)
 	case SettingUIDefaultRoute:
 		return applyUIDefaultRoute(r, st, value, actor, now)
+	case SettingUIDefaults:
+		return applyUIDefaults(r, st, value, actor, now)
+	case SettingUIScheduleTZ:
+		return applyScheduleTZ(r, st, value, actor, now)
 	case SettingAllowedDomains:
 		return persistSetting(r, st, key, joinList(parseList(value, normalizeDomain)), actor, now)
 	case SettingAllowedEmails:

@@ -32,10 +32,10 @@ int main(void) {
 // OS rejects it with -EFAULT; this demo highlights the missing copy_from_user
 // check in the toy simulator.
 func buildSyscallKernelPointer() Proc {
-	b := asm.NewProc("syscall_kernel_pointer").Source(`// Puntero inválido en syscall. En un OS real copy_from_user validaría
-// que el buffer sea accesible desde user mode antes de leerlo.
+	b := asm.NewProc("syscall_kernel_pointer").Source(`// Puntero inválido en syscall. El kernel valida que el buffer sea
+// accesible desde user mode antes de leerlo (como access_ok en Linux).
 int main(void) {
-    write(1, (char *)0x100000, 8);  // kernel pointer: debería ser -EFAULT
+    write(1, (char *)0x100000, 8);  // kernel pointer: devuelve -1 (Linux: -EFAULT)
     exit(0);
 }
 `)

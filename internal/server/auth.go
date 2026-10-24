@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jeanmarcos/modos-cpu/internal/server/i18n"
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
@@ -261,12 +263,21 @@ func (s *Server) issueMagicLink(r *http.Request, email string) (string, error) {
 		scheme = "https"
 	}
 	url := fmt.Sprintf("%s://%s/auth/magic?t=%s", scheme, r.Host, token)
-	s.logger.Info("magic link", "email", email, "url", url, "expires_in", magicLinkTTL.String())
+	s.logger.Info("magic link", "email", maskEmail(email), "expires_in", magicLinkTTL.String())
 
 	if err := s.sendMagicLinkEmail(r.Context(), email, url); err != nil {
 		return url, err
 	}
 	return url, nil
+}
+
+func maskEmail(email string) string {
+	at := strings.LastIndexByte(email, '@')
+	if at <= 0 {
+		return "***"
+	}
+	first, _ := utf8.DecodeRuneInString(email)
+	return string(first) + "***" + email[at:]
 }
 
 // handleAuthMe reports the user attached to the caller's session, if any.

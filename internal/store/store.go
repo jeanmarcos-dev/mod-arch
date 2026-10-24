@@ -20,23 +20,39 @@ var schemaSQL string
 //
 // v3: users.role column ('student' | 'moderator' | 'admin').
 // v4: users.deleted_at column + email/student_id uniqueness via partial
-//     indexes (so a soft-deleted row releases its identifiers).
+//
+//	indexes (so a soft-deleted row releases its identifiers).
+//
 // v5: rag_chunks, rag_query_cache, rag_answer_cache for the tutor's RAG
-//     pipeline. All three are additive; no programmatic step needed beyond
-//     bumping user_version.
+//
+//	pipeline. All three are additive; no programmatic step needed beyond
+//	bumping user_version.
+//
 // v6: tutor_metrics — one row per Ask() with latency, tools used, cache
-//     hits. Drives the admin dashboard.
+//
+//	hits. Drives the admin dashboard.
+//
 // v7: session tracking columns (client_ip_hash, client_ip, ua_short,
-//     geo_country, referrer_host) on sessions, plus the session_history
-//     append-only table. Enables per-user activity reports and persists
-//     session metadata past expiry.
+//
+//	geo_country, referrer_host) on sessions, plus the session_history
+//	append-only table. Enables per-user activity reports and persists
+//	session metadata past expiry.
+//
 // v8: user_profiles table — extended student identity (cohort, institution,
-//     career, bio, github, linkedin, preferred_language). One row per user,
-//     ON DELETE CASCADE so soft-deleting a user removes its profile too.
+//
+//	career, bio, github, linkedin, preferred_language). One row per user,
+//	ON DELETE CASCADE so soft-deleting a user removes its profile too.
+//
 // v9: user_reports table — feedback/bug/idea submissions from students,
-//     persisted for admin triage. Anonymous reports are accepted; user_id
-//     nullifies on user delete so the report survives soft-delete.
-const SchemaVersion = 9
+//
+//	persisted for admin triage. Anonymous reports are accepted; user_id
+//	nullifies on user delete so the report survives soft-delete.
+//
+// v10: schedule_rules table — time-windowed overrides of the UI surface
+//
+//	(show/hide demos/panels/routes, or apply a defaults blob). Additive;
+//	CREATE TABLE IF NOT EXISTS in schema.sql covers fresh and upgraded DBs.
+const SchemaVersion = 11
 
 // Store is the database handle. Methods on Store are safe for concurrent use:
 // SQLite serializes writes internally and the connection pool handles reads.

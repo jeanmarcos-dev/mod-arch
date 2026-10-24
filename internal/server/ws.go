@@ -18,6 +18,7 @@ import (
 	"github.com/jeanmarcos/modos-cpu/internal/server/i18n"
 	"github.com/jeanmarcos/modos-cpu/internal/sessions"
 	"github.com/jeanmarcos/modos-cpu/internal/sim"
+	"github.com/jeanmarcos/modos-cpu/internal/store"
 	"github.com/jeanmarcos/modos-cpu/internal/tutor"
 )
 
@@ -142,6 +143,11 @@ type Command struct {
 	// concurrency detectors (lost updates, deadlock cycle) the client computes
 	// so the tutor can explain this run instead of generic theory.
 	DetectionContext string `json:"detection_context,omitempty"`
+
+	Event      string `json:"event,omitempty"`
+	Name       string `json:"name,omitempty"`
+	DurationMS *int64 `json:"duration_ms,omitempty"`
+	Rating     *int   `json:"rating,omitempty"`
 }
 
 // FocusInput mirrors the wire shape the owner sends inside a presence
@@ -210,6 +216,23 @@ func (c *Command) Validate() error {
 		}
 		if c.TutorMode != "" && c.TutorMode != "direct" && c.TutorMode != "socratic" {
 			return fmt.Errorf("invalid tutor mode")
+		}
+	case "track":
+		if c.Event != trackEventPageView {
+			return fmt.Errorf("unknown track event")
+		}
+		if len(c.Name) == 0 || len(c.Name) > trackMaxNameLen || c.Name[0] != '/' {
+			return fmt.Errorf("invalid track name")
+		}
+		if c.DurationMS == nil || *c.DurationMS < 0 || *c.DurationMS > trackMaxDurationMS {
+			return fmt.Errorf("track duration out of range")
+		}
+	case "tutor_feedback":
+		if len(c.RequestID) == 0 || len(c.RequestID) > 100 {
+			return fmt.Errorf("invalid request ID")
+		}
+		if c.Rating == nil || *c.Rating < -1 || *c.Rating > 1 {
+			return fmt.Errorf("rating must be -1, 0 or 1")
 		}
 	case "presence":
 		if c.Section == "" {
@@ -299,7 +322,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		defer sess.RemoveViewer(viewerID)
 	}
 
-	go s.wsReadLoop(ctx, conn, sess, role, c, cancel)
+	go s.wsReadLoop(ctx, conn, sess, role, c, s.wsUserIDFunc(r, sess, role), cancel)
 	s.wsWriteLoop(ctx, conn, c)
 
 	sess.Sim.RemoveClient(c)
@@ -367,8 +390,9 @@ func (s *Server) sessionInfoMessage(sess *sessions.Session, role sessions.Role) 
 
 // wsReadLoop receives commands from the client and dispatches them to the
 // Simulator.
-func (s *Server) wsReadLoop(ctx context.Context, conn *websocket.Conn, sess *sessions.Session, role sessions.Role, c *sim.Client, cancel context.CancelFunc) {
+func (s *Server) wsReadLoop(ctx context.Context, conn *websocket.Conn, sess *sessions.Session, role sessions.Role, c *sim.Client, userID func() string, cancel context.CancelFunc) {
 	defer cancel()
+	limiter := newTrackLimiter(trackLimitPerMinute, time.Minute)
 	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
@@ -385,6 +409,9 @@ func (s *Server) wsReadLoop(ctx context.Context, conn *websocket.Conn, sess *ses
 			continue
 		}
 		if err := cmd.Validate(); err != nil {
+			if cmd.Cmd == "track" || cmd.Cmd == "tutor_feedback" {
+				continue
+			}
 			c.Send <- map[string]any{
 				"type":    "error",
 				"code":    "validation_error",
@@ -392,7 +419,10 @@ func (s *Server) wsReadLoop(ctx context.Context, conn *websocket.Conn, sess *ses
 			}
 			continue
 		}
-		s.dispatch(cmd, sess, role, c)
+		if cmd.Cmd == "track" && !limiter.allow() {
+			continue
+		}
+		s.dispatch(cmd, sess, role, c, userID)
 	}
 }
 
@@ -429,9 +459,11 @@ func (s *Server) wsWriteLoop(ctx context.Context, conn *websocket.Conn, c *sim.C
 // "ask" is allowed for viewers too: a student watching another's session can
 // still ask the tutor questions without taking control.
 var viewerSafeCommands = map[string]bool{
-	"snapshot":   true,
-	"hand_raise": true,
-	"ask":        true,
+	"snapshot":       true,
+	"hand_raise":     true,
+	"ask":            true,
+	"track":          true,
+	"tutor_feedback": true,
 }
 
 // ownerOnlyCommands lists commands that only the owner may issue. presence is
@@ -451,7 +483,7 @@ var ownerOnlyCommands = map[string]bool{
 // mutating commands are filtered out.
 //
 //nolint:gocyclo // command dispatcher; cases are a flat switch by design.
-func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Role, c *sim.Client) {
+func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Role, c *sim.Client, userID func() string) {
 	sess.Touch()
 	if role == sessions.RoleViewer && !viewerSafeCommands[cmd.Cmd] {
 		c.Send <- map[string]any{
@@ -469,6 +501,14 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 		}
 		return
 	}
+	switch cmd.Cmd {
+	case "track":
+		s.handleTrack(cmd, sess, role, userID)
+		return
+	case "tutor_feedback":
+		s.handleTutorFeedback(cmd, sess)
+		return
+	}
 	sess.IncCommandCounter()
 	switch cmd.Cmd {
 	case "load":
@@ -482,11 +522,15 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 		}
 		if err := sess.Sim.LoadProgram(cmd.Program); err != nil {
 			c.Send <- map[string]any{"type": "error", "message": err.Error()}
+			return
 		}
+		sess.SetProgram(cmd.Program)
+		s.recordUsage(sess, role, userID, store.UsageKindDemoLoad, cmd.Program, nil)
 	case "step":
 		_ = sess.Sim.StepOnce()
 	case "run":
 		sess.Sim.StartRun(cmd.Speed)
+		s.recordUsage(sess, role, userID, store.UsageKindDemoRun, sess.Program(), nil)
 	case "set_speed":
 		sess.Sim.SetSpeed(cmd.Speed)
 	case "set_clock_hz":
@@ -495,8 +539,10 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 		sess.Sim.SetSpeedMul(cmd.SpeedMul)
 	case "pause":
 		sess.Sim.Pause()
+		s.recordUsage(sess, role, userID, store.UsageKindDemoPause, sess.Program(), nil)
 	case "reset":
 		sess.Sim.Reset()
+		s.recordUsage(sess, role, userID, store.UsageKindDemoReset, sess.Program(), nil)
 	case "snapshot":
 		c.Send <- sess.Sim.Snapshot()
 	case "timer_quantum":

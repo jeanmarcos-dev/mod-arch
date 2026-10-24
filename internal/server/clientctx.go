@@ -42,7 +42,7 @@ func WithClientCtx(salt []byte, geo GeoResolver, revealIP bool) func(http.Handle
 				cc.IPPlain = ip
 			}
 			if geo != nil {
-				cc.GeoCountry = geo.Country(ip)
+				cc.GeoCountry = geo.Country(r)
 			}
 			r = r.WithContext(context.WithValue(r.Context(), clientCtxKey{}, cc))
 			next.ServeHTTP(w, r)
@@ -199,16 +199,31 @@ func extractReferrerHost(referer string) string {
 	return u.Hostname()
 }
 
-// GeoResolver returns an ISO 3166-1 alpha-2 country code for an IP, or "" when
-// the resolver cannot determine one. A nil resolver is treated as "off".
+// GeoResolver returns an ISO 3166-1 alpha-2 country code for a request, or ""
+// when the resolver cannot determine one. A nil resolver is treated as "off".
 type GeoResolver interface {
-	Country(ip string) string
+	Country(r *http.Request) string
 }
 
 // NoopGeoResolver is the zero-cost default when geo lookup is disabled.
 type NoopGeoResolver struct{}
 
-func (NoopGeoResolver) Country(string) string { return "" }
+func (NoopGeoResolver) Country(*http.Request) string { return "" }
+
+type CloudflareGeoResolver struct{}
+
+func (CloudflareGeoResolver) Country(r *http.Request) string {
+	code := strings.ToUpper(strings.TrimSpace(r.Header.Get("CF-IPCountry")))
+	if len(code) != 2 || code == "XX" || code == "T1" {
+		return ""
+	}
+	for _, ch := range code {
+		if ch < 'A' || ch > 'Z' {
+			return ""
+		}
+	}
+	return code
+}
 
 // RevealIPEnabled reports whether plain IPs should be captured into the
 // store. The toggle is intentionally env-only: a privacy decision the

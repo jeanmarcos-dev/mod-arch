@@ -231,7 +231,7 @@ func Demos() []Demo {
 		},
 		{
 			Name:         "scheduler_demo",
-			Description:  "TRES procesos: 2 contadores + 1 reader. Cuando el reader hace sys_read sin teclas, va al WAITING. Los otros 2 siguen alternando. Escriba para despertarlo.",
+			Description:  "TRES procesos: 2 contadores + 1 reader. Cuando el reader hace sys_read sin teclas, pasa a BLOCKED. Los otros 2 siguen alternando. Escriba para despertarlo.",
 			Category:     CategoryScheduling,
 			Difficulty:   DifficultyIntermediate,
 			Topics:       []string{"round-robin", "blocking-io", "wait-queue"},
@@ -314,7 +314,7 @@ func Demos() []Demo {
 		// times doing load → inc → store.
 		{
 			Name:         "race_counter",
-			Description:  "Tres procesos: el setup pone el contador en 0, dos workers lo incrementan 200 veces cada uno SIN lock. El resultado final raramente es 400 porque el timer preempt el load/store y se pierden updates.",
+			Description:  "Tres procesos: el setup pone el contador en 0, dos workers lo incrementan 200 veces cada uno SIN lock. El resultado final puede quedar por debajo de 400 cuando el timer interrumpe entre el load y el store; cuántos updates se pierden depende del quantum. En el simulador los workers comparten un único espacio plano de memoria de usuario; en un SO real eso equivaldría a memoria compartida (shm/mmap) o a hilos.",
 			Category:     CategorySincronizacion,
 			Difficulty:   DifficultyIntermediate,
 			Topics:       []string{"race-condition", "load-inc-store", "lost-updates"},
@@ -327,7 +327,7 @@ func Demos() []Demo {
 		},
 		{
 			Name:         "safe_counter",
-			Description:  "Mismo loop que race_counter, pero los workers piden un mutex (id=1) antes de modificar el contador. Resultado final SIEMPRE 400 porque el lock serializa la sección crítica.",
+			Description:  "Mismo loop que race_counter, pero los workers piden un mutex (id=1) antes de modificar el contador. Resultado final SIEMPRE 400 porque el lock serializa la sección crítica. Igual que en race_counter, los workers comparten un espacio plano de memoria de usuario para la demo.",
 			Category:     CategorySincronizacion,
 			Difficulty:   DifficultyIntermediate,
 			Topics:       []string{"mutex", "critical-section", "serialization"},
@@ -345,7 +345,7 @@ func Demos() []Demo {
 		// invariant "producer ≤ consumer + 1" is what the semaphore enforces.
 		{
 			Name:         "producer_consumer",
-			Description:  "Productor y consumidor con un buffer de un slot, sincronizados por dos semáforos. Demuestra el patrón sem_wait/sem_signal sin necesidad de mutex porque solo hay un productor y un consumidor.",
+			Description:  "Productor y consumidor con un buffer de un slot, sincronizados por dos semáforos. Demuestra el patrón sem_wait/sem_signal sin necesidad de mutex porque solo hay un productor y un consumidor. La demo solo muestra la sincronización: no transfiere datos reales por el buffer.",
 			Category:     CategorySincronizacion,
 			Difficulty:   DifficultyIntermediate,
 			Topics:       []string{"semaphores", "producer-consumer", "bounded-buffer"},
@@ -426,7 +426,7 @@ int main(void) {
 		},
 		{
 			Name:         "syscall_kernel_pointer",
-			Description:  "Pasa un puntero kernel a sys_write. Un kernel real debe rechazarlo con -EFAULT; esta demo existe para contrastar esa regla con la simplificación actual del simulador.",
+			Description:  "Pasa un puntero kernel a sys_write. El kernel valida el buffer (como access_ok en Linux): la syscall devuelve -1 en EAX, la bitácora muestra el intento como falla de página y el proceso sigue hasta exit. Linux real devolvería -EFAULT.",
 			Category:     CategoryFallosExcepciones,
 			Difficulty:   DifficultyIntermediate,
 			Topics:       []string{"invalid-pointer", "copy-from-user", "efault"},

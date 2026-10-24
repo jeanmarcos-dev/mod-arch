@@ -26,8 +26,8 @@ const (
 	// GeminiDefaultModel is Flash-Lite, not Flash, because Flash-Lite's free
 	// tier (15 RPM / 1000 RPD) is 4× more generous than Flash (10 RPM /
 	// 250 RPD). Quality is good enough for tutorial-style Q&A with tools;
-	// override with LLM_MODEL=gemini-2.5-flash when reasoning matters more.
-	GeminiDefaultModel = "gemini-2.5-flash-lite"
+	// override with LLM_MODEL=gemini-3.5-flash when reasoning matters more.
+	GeminiDefaultModel = "gemini-3.5-flash-lite"
 )
 
 // OpenAICompatConfig is the construction parameter set shared by every
@@ -253,7 +253,7 @@ type GeminiConfig struct {
 	HTTP    *http.Client
 }
 
-// NewGemini returns an OpenAICompat preconfigured for Gemini 2.5 Flash.
+// NewGemini returns an OpenAICompat preconfigured for Gemini Flash-Lite.
 func NewGemini(cfg GeminiConfig) (*OpenAICompat, error) {
 	model := cfg.Model
 	if model == "" {

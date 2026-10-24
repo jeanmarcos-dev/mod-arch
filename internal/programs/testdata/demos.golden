@@ -40,7 +40,7 @@ showcase/producer                                bytes=9c9bbc07d532ea2d(41)  sou
 showcase/reader                                  bytes=a9fca4d2fcc36b1e(61)  source=e4cc084d53211c85(14L)  sourcemap=5ed14588566f815f(16)
 soft_int/soft_int                                bytes=c680dcb74d8e345b(17)  source=084e9bfd7ea1181f(8L)  sourcemap=76b4e80210a30487(6)
 stack_overflow/stack_overflow                    bytes=d5e74ad65a8b3e9e(22)  source=2f23ddda184e8a20(11L)  sourcemap=d977e278fd8e51ed(5)
-syscall_kernel_pointer/syscall_kernel_pointer    bytes=50ce36455ab0c544(31)  source=78787e9bab9fc4c3(6L)  sourcemap=67523428859d011e(8)
+syscall_kernel_pointer/syscall_kernel_pointer    bytes=50ce36455ab0c544(31)  source=e4831ceb3c95dca1(6L)  sourcemap=67523428859d011e(8)
 threads_join/thread_join                         bytes=27f7c6ec79b5fefa(200)  source=dd0b503d6cec6fb3(13L)  sourcemap=d3a0488312372690(21)
 threads_race/thread_race                         bytes=ab756d5ad449aede(165)  source=c8f7519895ac0d2e(22L)  sourcemap=89c2b95df8ae5400(36)
 threads_safe/thread_safe                         bytes=8790f8e2aabcaee5(193)  source=4c22d0ec7d2c2532(26L)  sourcemap=e570abb09cbae15b(47)
