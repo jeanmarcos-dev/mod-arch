@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { Gauge, Monitor, Users, Mail, Lock, Send, ScrollText, ExternalLink, LogOut, ShieldUser, BotMessageSquare, SlidersHorizontal, ShieldCheck, MonitorCog, Clock, Inbox } from '@lucide/vue';
+import { Gauge, Monitor, Users, Mail, Lock, Send, ScrollText, ExternalLink, LogOut, ShieldUser, BotMessageSquare, SlidersHorizontal, ShieldCheck, MonitorCog, Clock, Inbox, CalendarClock, Radio } from '@lucide/vue';
 import { useAdminStore } from '../stores/admin';
 import { useToastStore } from '../stores/toast';
 import Sidebar from '../components/shell/Sidebar.vue';
@@ -48,10 +48,14 @@ const items = computed(() => {
     { to: '/admin/tutor/config', label: t('router.titles.adminTutorConfig'), icon: SlidersHorizontal, group: groupContent },
     { to: '/admin/reportes', label: t('router.titles.adminReports'), icon: Inbox, group: groupContent },
     { to: '/admin/simulador', label: t('router.titles.adminSimulator'), icon: MonitorCog, group: groupContent },
+    { to: '/admin/agenda', label: t('router.titles.adminSchedule'), icon: CalendarClock, group: groupContent },
     { to: '/admin/accesos', label: t('router.titles.adminAccess'), icon: Lock, group: groupConfig },
     { to: '/admin/smtp', label: t('router.titles.adminSmtp'), icon: Send, group: groupConfig },
     { to: '/admin/seguridad', label: t('router.titles.adminSecurity'), icon: ShieldCheck, group: groupConfig },
   ];
+  if (admin.viaEnv) {
+    baseAll.splice(1, 0, { to: '/admin/live', label: t('router.titles.adminLive'), icon: Radio, group: groupOverview });
+  }
   if (admin.isModerator) {
     return baseAll.filter(item =>
       item.to !== '/admin/invitaciones' &&
@@ -59,7 +63,8 @@ const items = computed(() => {
       item.to !== '/admin/smtp' &&
       item.to !== '/admin/tutor/config' &&
       item.to !== '/admin/seguridad' &&
-      item.to !== '/admin/simulador'
+      item.to !== '/admin/simulador' &&
+      item.to !== '/admin/agenda'
     );
   }
   return baseAll;

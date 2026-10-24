@@ -126,7 +126,7 @@ export function useNarrators(opts: NarratorOptions = {}) {
   let seq = 0;
 
   function isEnabled(): boolean {
-    return opts.force === true || prefs.narratorsEnabled;
+    return opts.force === true || prefs.effectiveNarratorsEnabled;
   }
 
   function fire(channel: keyof typeof handlers, payload: unknown) {

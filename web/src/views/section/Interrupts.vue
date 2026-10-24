@@ -130,7 +130,7 @@ function activeFrame(coreId: number) {
 }
 
 const narratorHint = computed(() =>
-  prefs.narratorsEnabled
+  prefs.effectiveNarratorsEnabled
     ? null
     : t('sections.interrupts.narratorHint'),
 );
@@ -308,16 +308,21 @@ const narratorHint = computed(() =>
   position: relative;
   z-index: 1;
   flex: 1;
-  /* Page-level scroll disabled on purpose: the IDT/feed/stack panels each
-     own their internal scroll so the layout never grows past the viewport
-     and the user does not have to chase a frame that just appeared. */
-  overflow: hidden;
+  /* On tall viewports the panels fill the frame and own their internal scroll;
+     when the viewport is too short to hold them, the page scrolls instead of
+     collapsing the IDT/feed grid to a sliver (its min-height below keeps it
+     usable). */
+  overflow-y: auto;
   padding: var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   min-height: 0;
 }
+
+/* Keep each section at its intrinsic/min height: flex-shrink would otherwise
+   squeeze the IDT/feed grid below its content in a short column. */
+.ints-page__content > * { flex-shrink: 0; }
 
 .ints-page__hero {
   display: flex;
@@ -407,9 +412,11 @@ const narratorHint = computed(() =>
   grid-template-columns: 1fr 1fr;
   gap: var(--space-4);
   /* Grid claims the leftover height so the stack panel sits at the true
-     bottom edge without dancing as the feed grows. */
+     bottom edge without dancing as the feed grows. The min-height keeps the
+     IDT/feed panels usable on short viewports, where the page scrolls instead
+     of squeezing this row to a sliver. */
   flex: 1;
-  min-height: 0;
+  min-height: 320px;
 }
 
 @media (max-width: 768px) {
@@ -462,7 +469,7 @@ const narratorHint = computed(() =>
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
 }
 
 .ints-table {

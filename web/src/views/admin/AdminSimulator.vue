@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useAdminStore } from '../../stores/admin';
+import { useAdminStore, type AdminDefaults } from '../../stores/admin';
 import { useToastStore } from '../../stores/toast';
 import { apiFetch } from '../../lib/api';
 import type { CategoryMeta, Difficulty } from '../../stores/cpu';
@@ -239,6 +239,38 @@ async function setDefaultRoute(name: string) {
   await run(() => admin.setSetting('ui.default_route', name), t('admin.simulator.default.okUpdated'));
 }
 
+// Default experience: the baseline narrators / mode / theme / density / speed a
+// fresh student inherits. Applied client-side per-field and sticky, so it only
+// touches options the student has not changed themselves.
+const DEFAULTS_FALLBACK: AdminDefaults = {
+  narratorsEnabled: true,
+  mode: 'pedagogic',
+  theme: 'amber',
+  density: 'comfortable',
+  speed: 2,
+  narratorMinTickMs: 200,
+};
+const MODE_OPTIONS: AdminDefaults['mode'][] = ['pedagogic', 'compact', 'projector'];
+const THEME_OPTIONS: AdminDefaults['theme'][] = ['amber', 'green', 'dark', 'accesible'];
+const DENSITY_OPTIONS: AdminDefaults['density'][] = ['comfortable', 'compact'];
+
+const defaults = computed<AdminDefaults>(() => admin.settings?.defaults ?? DEFAULTS_FALLBACK);
+
+async function patchDefaults(patch: Partial<AdminDefaults>) {
+  const next: AdminDefaults = { ...defaults.value, ...patch };
+  await run(() => admin.setSetting('ui.defaults', JSON.stringify(next)), t('admin.simulator.defaults.okUpdated'));
+}
+
+function onDefaultSpeed(e: Event) {
+  const v = Number((e.target as HTMLInputElement).value);
+  if (Number.isFinite(v)) void patchDefaults({ speed: Math.max(1, Math.min(60, Math.round(v))) });
+}
+
+function onDefaultTick(e: Event) {
+  const v = Number((e.target as HTMLInputElement).value);
+  if (Number.isFinite(v)) void patchDefaults({ narratorMinTickMs: Math.max(0, Math.min(5000, Math.round(v))) });
+}
+
 function routeLabel(name: string): string {
   const key = `router.titles.${name === 'x86-real' ? 'x86' : name}`;
   return t(key);
@@ -310,6 +342,79 @@ onMounted(() => {
           :value="r"
         >{{ routeLabel(r) }} ({{ r }})</option>
       </select>
+    </div>
+  </Card>
+
+  <Card :title="t('admin.simulator.defaults.heading')">
+    <p class="sim-admin__hint">{{ t('admin.simulator.defaults.hint') }}</p>
+    <ul class="sim-admin__grid">
+      <li class="sim-admin__row">
+        <label class="sim-admin__check">
+          <input
+            type="checkbox"
+            :checked="defaults.narratorsEnabled"
+            @change="patchDefaults({ narratorsEnabled: ($event.target as HTMLInputElement).checked })"
+          />
+          <span class="sim-admin__name">{{ t('admin.simulator.defaults.narrators') }}</span>
+        </label>
+      </li>
+    </ul>
+    <div class="sim-admin__defaults-grid">
+      <label class="sim-admin__field">
+        <span class="sim-admin__field-label">{{ t('admin.simulator.defaults.mode') }}</span>
+        <select
+          class="sim-admin__select sim-admin__select--narrow"
+          :value="defaults.mode"
+          @change="patchDefaults({ mode: ($event.target as HTMLSelectElement).value as AdminDefaults['mode'] })"
+        >
+          <option v-for="m in MODE_OPTIONS" :key="m" :value="m">{{ t(`admin.simulator.defaults.modes.${m}`) }}</option>
+        </select>
+      </label>
+      <label class="sim-admin__field">
+        <span class="sim-admin__field-label">{{ t('admin.simulator.defaults.theme') }}</span>
+        <select
+          class="sim-admin__select sim-admin__select--narrow"
+          :value="defaults.theme"
+          @change="patchDefaults({ theme: ($event.target as HTMLSelectElement).value as AdminDefaults['theme'] })"
+        >
+          <option v-for="th in THEME_OPTIONS" :key="th" :value="th">{{ t(`admin.simulator.defaults.themes.${th}`) }}</option>
+        </select>
+      </label>
+      <label class="sim-admin__field">
+        <span class="sim-admin__field-label">{{ t('admin.simulator.defaults.density') }}</span>
+        <select
+          class="sim-admin__select sim-admin__select--narrow"
+          :value="defaults.density"
+          @change="patchDefaults({ density: ($event.target as HTMLSelectElement).value as AdminDefaults['density'] })"
+        >
+          <option v-for="d in DENSITY_OPTIONS" :key="d" :value="d">{{ t(`admin.simulator.defaults.densities.${d}`) }}</option>
+        </select>
+      </label>
+      <label class="sim-admin__field">
+        <span class="sim-admin__field-label">{{ t('admin.simulator.defaults.speed') }}</span>
+        <input
+          type="number"
+          min="1"
+          max="60"
+          class="sim-admin__num"
+          :value="defaults.speed"
+          @change="onDefaultSpeed"
+        />
+        <span class="sim-admin__field-help">{{ t('admin.simulator.defaults.speedHint') }}</span>
+      </label>
+      <label class="sim-admin__field">
+        <span class="sim-admin__field-label">{{ t('admin.simulator.defaults.tick') }}</span>
+        <input
+          type="number"
+          min="0"
+          max="5000"
+          step="50"
+          class="sim-admin__num"
+          :value="defaults.narratorMinTickMs"
+          @change="onDefaultTick"
+        />
+        <span class="sim-admin__field-help">{{ t('admin.simulator.defaults.tickHint') }}</span>
+      </label>
     </div>
   </Card>
 
@@ -509,6 +614,43 @@ onMounted(() => {
 
 .sim-admin__select--narrow {
   min-width: 180px;
+}
+
+.sim-admin__defaults-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.sim-admin__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sim-admin__field-label {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.sim-admin__field-help {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.sim-admin__num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  background: var(--surface-1);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .sim-admin__demo-controls {

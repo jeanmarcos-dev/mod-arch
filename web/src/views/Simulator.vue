@@ -10,6 +10,7 @@ import { useSimBarStore } from '../stores/simBar';
 import { useIsStudent } from '../composables/useIsStudent';
 import { useResizableColumn } from '../composables/useResizableColumn';
 import { useResizableRow } from '../composables/useResizableRow';
+import { useBreakpoint } from '../composables/useBreakpoint';
 import CpuPanel from '../components/CpuPanel.vue';
 import EventsLog from '../components/EventsLog.vue';
 import ProcessesPanel from '../components/ProcessesPanel.vue';
@@ -222,10 +223,9 @@ watch(() => cpu.pendingMemoryJump, (addr) => {
   setMiddleTab('memory');
 });
 
-const isMobile = ref(false);
-function checkMobile() {
-  isMobile.value = window.matchMedia('(max-width: 768px)').matches;
-}
+// Single source of truth for the responsive cut, shared with the @media
+// queries in the component <style> blocks via the breakpoint convention.
+const { isMobile } = useBreakpoint();
 
 // Whole-column collapse. When a side aside is folded, render a 28px vertical
 // handle in its place and skip the ColumnResizer on that edge — there is no
@@ -277,12 +277,9 @@ watch(
 
 onMounted(() => {
   cpu.connect();
-  checkMobile();
-  window.addEventListener('resize', checkMobile);
 });
 
 onUnmounted(() => {
-  window.removeEventListener('resize', checkMobile);
   bar.setConsoleMobileActive(false);
   bar.setKeyboardHwActive(false);
 });
@@ -645,12 +642,12 @@ onUnmounted(() => {
   .col-left {
     width: 100% !important;
     min-height: 0;
-    flex: 1 1 auto;
+    flex: 0 0 auto;
   }
   .col-right--stack {
     width: 100% !important;
     min-height: 0;
-    flex: 1 1 auto;
+    flex: 0 0 auto;
   }
   .col-left--stack > *,
   .col-right--stack > * { min-height: 160px; }
@@ -819,10 +816,31 @@ onUnmounted(() => {
    El layout pasa a columna vertical y la mobile-tabs bar es la única forma
    de navegar entre paneles. */
 @media (max-width: 768px) {
+  /* Mobile uses a single page-scroll (the shell content area scrolls). The
+     view root and layout grow to their content instead of trapping it behind
+     the desktop overflow:hidden chain, so a tab that stacks two panels
+     (cpu+ipc, procs+colas) taller than the viewport stays reachable. */
+  .root {
+    height: auto;
+    min-height: 100%;
+  }
   .layout {
     flex-direction: column;
     padding: 6px;
     gap: 6px;
+    min-height: 0;
+    overflow: visible;
+    flex: 1 0 auto;
+  }
+  .middle {
+    flex: 0 0 auto;
+    min-height: 0;
+  }
+  .middle__tabs-stack {
+    min-height: 0;
+  }
+  .middle__tabs-stack > * {
+    flex: 0 0 auto;
     min-height: 0;
   }
 

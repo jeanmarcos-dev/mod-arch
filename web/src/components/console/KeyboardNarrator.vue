@@ -112,7 +112,7 @@ function pruneCards() {
 // non-printable chars and the IRQ event has no char payload.
 const originalPushKey = cpu.pushKey;
 cpu.pushKey = (key: string) => {
-  if (prefs.narratorsEnabled && key !== '') {
+  if (prefs.effectiveNarratorsEnabled && key !== '') {
     const ch = key[0];
     const seq = ++seqCounter;
     cards.value.push({
@@ -152,7 +152,7 @@ function resolveBuffered(seq: number) {
 }
 
 const unsubscribe = cpu.subscribe((ev: CpuEvent) => {
-  if (!prefs.narratorsEnabled) return;
+  if (!prefs.effectiveNarratorsEnabled) return;
   if (ev.type === 'process_state' && ev.reason === 'keyboard delivered') {
     resolveDelivered(ev.pid);
   }

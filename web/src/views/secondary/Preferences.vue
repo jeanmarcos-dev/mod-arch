@@ -186,6 +186,7 @@ const locales: { id: Locale; labelKey: 'es' | 'en' | 'pt' }[] = [
   overflow: hidden;
   background: var(--surface-0);
   width: fit-content;
+  max-width: 100%;
 }
 
 .prefs__lang-pick {
@@ -215,5 +216,21 @@ const locales: { id: Locale; labelKey: 'es' | 'en' | 'pt' }[] = [
   background: rgba(var(--accent-rgb), 0.18);
   color: var(--accent);
   text-shadow: var(--shadow-glow-amber);
+}
+
+@media (max-width: 480px) {
+  .prefs__lang-switch {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+  }
+  .prefs__lang-pick {
+    min-width: 0;
+    min-height: 44px;
+  }
+  .prefs__lang-pick + .prefs__lang-pick {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
 }
 </style>

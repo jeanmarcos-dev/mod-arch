@@ -285,6 +285,8 @@ function ensureTicker() {
           :class="['hexgrid__cell', { 'hexgrid__cell--disputed': isDisputed(row.addr + idx) }]"
           :style="cellHeatStyle(row.addr + idx)"
           :data-mem-addr="`0x${(row.addr + idx).toString(16).toLowerCase()}`"
+          :role="isDisputed(row.addr + idx) ? 'img' : undefined"
+          :aria-label="isDisputed(row.addr + idx) ? t('shell.memoryHexGrid.popover.disputed', { lost: disputedLost ?? 0 }) : undefined"
           @mousedown="onCellMouseDown(row.addr + idx, $event)"
           @mouseup="onCellMouseUp(row.addr + idx, $event)"
         >
@@ -293,6 +295,7 @@ function ensureTicker() {
             :key="heat.get(row.addr + idx)!.seq"
             :class="['hexgrid__heat', `hexgrid__heat--${heat.get(row.addr + idx)!.kind}`]"
           />
+          <span v-if="isDisputed(row.addr + idx)" class="hexgrid__disputed-mark" aria-hidden="true">!</span>
           <transition name="digit-fade">
             <span :key="byte" class="hexgrid__digit">{{ fmtByte(byte) }}</span>
           </transition>
@@ -531,8 +534,23 @@ function ensureTicker() {
    marks it as the contended byte. The ring lives on the cell while a soft
    background pulse rides a ::before layer behind the heat overlay and digit
    (z-index 0), so heat animations and the digit stay readable on top. */
+.hexgrid__disputed-mark {
+  position: absolute;
+  top: 0;
+  right: 1px;
+  z-index: 3;
+  font-family: var(--font-code);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--red);
+  pointer-events: none;
+}
+
 .hexgrid__cell--disputed {
   z-index: 4;
+  outline: 1.5px dashed var(--red);
+  outline-offset: -1px;
   animation: disputed-ring 1.4s ease-in-out infinite;
   border-radius: 2px;
 }

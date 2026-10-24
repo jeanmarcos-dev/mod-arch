@@ -13,6 +13,18 @@ export type PresentationMode = 'compact' | 'pedagogic' | 'projector';
 
 export type Density = 'comfortable' | 'compact';
 
+export type TextScale = 'normal' | 'large' | 'xlarge';
+
+export const TEXT_SCALE_FACTORS: Record<TextScale, number> = {
+  normal: 1,
+  large: 1.25,
+  xlarge: 1.5,
+};
+
+function isTextScale(v: unknown): v is TextScale {
+  return v === 'normal' || v === 'large' || v === 'xlarge';
+}
+
 // Theme controls the color palette + font family of the whole shell. The
 // active theme is reflected on <html data-theme="..."> so it reaches portals
 // and modals mounted outside the shell root.
@@ -122,6 +134,9 @@ interface PrefsState {
   // the realistic "the CPU never stops" behavior.
   autoPauseOnIdle: boolean;
   theme: Theme;
+  legibleFont: boolean;
+  textScale: TextScale;
+  screenReaderAnnounce: boolean;
   locale: Locale;
   panelsCollapsed: PanelsCollapsed;
   asidesCollapsed: AsidesCollapsed;
@@ -162,6 +177,9 @@ const DEFAULTS: PrefsState = {
   clearLogOnLoad: true,
   autoPauseOnIdle: true,
   theme: 'amber',
+  legibleFont: false,
+  textScale: 'normal',
+  screenReaderAnnounce: true,
   locale: DEFAULT_LOCALE,
   panelsCollapsed: {
     cores: false,
@@ -196,6 +214,31 @@ const DEFAULTS: PrefsState = {
     heightPx: CONSOLE_DRAWER_DEFAULT_PX,
   },
 };
+
+// AdminDefaults is the admin-curated baseline a fresh visitor inherits. It is
+// delivered by GET /api/config and applied per-field ONLY where the user has
+// not made their own pick (see PrefsTouched / applyAdminDefaults). `speed` is
+// the simulated clock in Hz; it lives in the cpu store, so applyAdminDefaults
+// ignores it and the boot orchestrator forwards it to cpu.applyDefaultClockHz.
+export interface AdminDefaults {
+  narratorsEnabled: boolean;
+  mode: PresentationMode;
+  theme: Theme;
+  density: Density;
+  speed: number;
+  narratorMinTickMs: number;
+}
+
+// PrefsTouched records which editorial prefs the user changed by hand. Once a
+// field is touched its local value wins and admin defaults stop applying to it
+// — the sticky contract. Generalizes the showInitTouched pattern to a map so
+// every defaultable field is tracked uniformly.
+export type TouchableField = 'narratorsEnabled' | 'mode' | 'theme' | 'density' | 'narratorMinTickMs';
+export type PrefsTouched = Record<TouchableField, boolean>;
+
+function freshTouched(): PrefsTouched {
+  return { narratorsEnabled: false, mode: false, theme: false, density: false, narratorMinTickMs: false };
+}
 
 function sanitizePanelsCollapsed(input: unknown): PanelsCollapsed {
   const base: PanelsCollapsed = { ...DEFAULTS.panelsCollapsed };
@@ -273,11 +316,31 @@ export function applyTheme(theme: Theme) {
   document.documentElement.setAttribute('data-theme', theme);
 }
 
+export function applyLegibleFont(on: boolean) {
+  if (typeof document === 'undefined') return;
+  document.documentElement.setAttribute('data-legible-font', on ? 'true' : 'false');
+}
+
+export function applyTextScale(scale: TextScale) {
+  if (typeof document === 'undefined') return;
+  document.documentElement.setAttribute('data-text-scale', scale);
+}
+
+export function detectA11yPreferences(): Partial<Pick<PrefsState, 'theme' | 'legibleFont'>> {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return {};
+  try {
+    if (window.matchMedia('(prefers-contrast: more)').matches) {
+      return { theme: 'accesible', legibleFont: true };
+    }
+  } catch { /* unsupported query */ }
+  return {};
+}
+
 export function readStoredTheme(): Theme {
   if (typeof window === 'undefined') return DEFAULTS.theme;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULTS.theme;
+    if (!raw) return detectA11yPreferences().theme ?? DEFAULTS.theme;
     const parsed = JSON.parse(raw) as Partial<PrefsState>;
     const t = parsed.theme as string | undefined;
     // The "modern" theme was merged into "dark" — silently migrate any
@@ -289,6 +352,28 @@ export function readStoredTheme(): Theme {
   return DEFAULTS.theme;
 }
 
+export function readStoredLegibleFont(): boolean {
+  if (typeof window === 'undefined') return DEFAULTS.legibleFont;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return detectA11yPreferences().legibleFont ?? DEFAULTS.legibleFont;
+    const parsed = JSON.parse(raw) as Partial<PrefsState>;
+    if (typeof parsed.legibleFont === 'boolean') return parsed.legibleFont;
+  } catch { /* corrupt entry → default */ }
+  return DEFAULTS.legibleFont;
+}
+
+export function readStoredTextScale(): TextScale {
+  if (typeof window === 'undefined') return DEFAULTS.textScale;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULTS.textScale;
+    const parsed = JSON.parse(raw) as Partial<PrefsState>;
+    if (isTextScale(parsed.textScale)) return parsed.textScale;
+  } catch { /* corrupt entry → default */ }
+  return DEFAULTS.textScale;
+}
+
 // Bumped when the meaning of the right-column panel toggles changed. Storage
 // written before this version may carry collapsed/height values that no
 // longer correspond to the current layout; we discard those toggle-specific
@@ -297,19 +382,48 @@ export function readStoredTheme(): Theme {
 // since their schemas have not changed.
 const PANELS_RESET_VERSION = 4;
 
-function loadFromStorage(): PrefsState {
-  if (typeof window === 'undefined') return DEFAULTS;
+type LoadedPrefs = PrefsState & { touched: PrefsTouched };
+
+// migrateTouched resolves the sticky-tracking map. A stored payload that
+// already carries an explicit `touched` map is sanitized field-by-field.
+// Legacy payloads (written before sticky defaults existed) have no map, so we
+// infer it: a stored value that diverges from the code default is the best
+// available signal of a conscious pick, and is treated as touched to shield it
+// from admin defaults. Values equal to the default stay untouched and remain
+// eligible to receive the admin's curated baseline.
+function migrateTouched(parsed: Partial<PrefsState> & { touched?: unknown }, state: PrefsState): PrefsTouched {
+  const raw = parsed.touched;
+  if (raw && typeof raw === 'object') {
+    const base = freshTouched();
+    const src = raw as Record<string, unknown>;
+    for (const k of Object.keys(base) as TouchableField[]) {
+      if (typeof src[k] === 'boolean') base[k] = src[k] as boolean;
+    }
+    return base;
+  }
+  return {
+    narratorsEnabled: state.narratorsEnabled !== DEFAULTS.narratorsEnabled,
+    mode: state.mode !== DEFAULTS.mode,
+    theme: state.theme !== DEFAULTS.theme,
+    density: state.density !== DEFAULTS.density,
+    narratorMinTickMs: state.narratorMinTickMs !== DEFAULTS.narratorMinTickMs,
+  };
+}
+
+function loadFromStorage(): LoadedPrefs {
+  if (typeof window === 'undefined') return { ...DEFAULTS, touched: freshTouched() };
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     // No stored prefs yet: keep DEFAULTS but resolve the locale via the same
     // detection the i18n module used at boot (navigator.language → 'en',
     // else 'es'). Without this the i18n instance would start in 'en' while
     // the store ref reads 'es', leaving the Preferences switch out of sync
-    // with the actual UI language on the user's first visit.
-    if (!raw) return { ...DEFAULTS, locale: i18nReadStoredLocale() };
-    const parsed = JSON.parse(raw) as Partial<PrefsState> & { panelsResetVersion?: number };
+    // with the actual UI language on the user's first visit. A fresh visitor
+    // has touched nothing, so every field is eligible for admin defaults.
+    if (!raw) return { ...DEFAULTS, ...detectA11yPreferences(), locale: i18nReadStoredLocale(), touched: freshTouched() };
+    const parsed = JSON.parse(raw) as Partial<PrefsState> & { panelsResetVersion?: number; touched?: unknown };
     const upToDate = parsed.panelsResetVersion === PANELS_RESET_VERSION;
-    return {
+    const state: PrefsState = {
       ...DEFAULTS,
       ...parsed,
       // Nested objects need a deep merge so older storage payloads (missing
@@ -329,8 +443,9 @@ function loadFromStorage(): PrefsState {
       columnWidths: sanitizeColumnWidths(parsed.columnWidths),
       consoleDrawer: sanitizeConsoleDrawer(parsed.consoleDrawer),
     };
+    return { ...state, touched: migrateTouched(parsed, state) };
   } catch {
-    return { ...DEFAULTS, locale: i18nReadStoredLocale() };
+    return { ...DEFAULTS, locale: i18nReadStoredLocale(), touched: freshTouched() };
   }
 }
 
@@ -350,23 +465,47 @@ export const usePreferencesStore = defineStore('preferences', () => {
   const clearLogOnLoad = ref(initial.clearLogOnLoad ?? DEFAULTS.clearLogOnLoad);
   const autoPauseOnIdle = ref(initial.autoPauseOnIdle ?? DEFAULTS.autoPauseOnIdle);
   const theme = ref<Theme>(initial.theme);
+  const legibleFont = ref(initial.legibleFont ?? DEFAULTS.legibleFont);
+  const textScale = ref<TextScale>(isTextScale(initial.textScale) ? initial.textScale : DEFAULTS.textScale);
+  const screenReaderAnnounce = ref(initial.screenReaderAnnounce ?? DEFAULTS.screenReaderAnnounce);
   const locale = ref<Locale>(isLocale(initial.locale) ? initial.locale : DEFAULT_LOCALE);
   const panelsCollapsed = ref<PanelsCollapsed>({ ...initial.panelsCollapsed });
   const asidesCollapsed = ref<AsidesCollapsed>({ ...initial.asidesCollapsed });
   const columnWidths = ref<ColumnWidths>({ ...initial.columnWidths });
   const panelHeights = ref<PanelHeights>({ ...initial.panelHeights });
   const consoleDrawer = ref<ConsoleDrawerState>({ ...initial.consoleDrawer });
+  const touched = ref<PrefsTouched>({ ...initial.touched });
 
   // Mobile drawer state is volatile by design: always starts closed so a
   // fresh reload doesn't reveal the sidebar over the content. Kept separate
   // from sidebarCollapsed (desktop, persisted) so the two never fight.
   const sidebarMobileOpen = ref(false);
 
+  // Presenter mirror: a viewer in autofollow reflects the host's presentation
+  // mode and narrators flag WITHOUT touching their own persisted preference.
+  // These refs are volatile (never serialized, never in the persistence watch)
+  // so the spectator's local choice survives a reset or refresh — the host's
+  // broadcast only drives the live view, not localStorage. Consumers read the
+  // effective* computeds, which fall back to the local pref when no mirror is
+  // active (owners and standalone students never activate it).
+  const mirrorActive = ref(false);
+  const mirrorMode = ref<PresentationMode | null>(null);
+  const mirrorNarrators = ref<boolean | null>(null);
+
+  const effectiveMode = computed<PresentationMode>(() =>
+    mirrorActive.value && mirrorMode.value !== null ? mirrorMode.value : mode.value,
+  );
+  const effectiveNarratorsEnabled = computed<boolean>(() =>
+    mirrorActive.value && mirrorNarrators.value !== null ? mirrorNarrators.value : narratorsEnabled.value,
+  );
+
   // Keep the document attribute in sync with the store. main.ts already calls
   // applyTheme() before mount to avoid a flash, but if the theme changes at
   // runtime this watcher handles the swap without each component having to
   // observe the store itself.
   watch(theme, (t) => applyTheme(t), { immediate: false });
+  watch(legibleFont, (v) => applyLegibleFont(v), { immediate: false });
+  watch(textScale, (s) => applyTextScale(s), { immediate: false });
 
   function serialize(): string {
     return JSON.stringify({
@@ -382,17 +521,21 @@ export const usePreferencesStore = defineStore('preferences', () => {
       clearLogOnLoad: clearLogOnLoad.value,
       autoPauseOnIdle: autoPauseOnIdle.value,
       theme: theme.value,
+      legibleFont: legibleFont.value,
+      textScale: textScale.value,
+      screenReaderAnnounce: screenReaderAnnounce.value,
       locale: locale.value,
       panelsCollapsed: panelsCollapsed.value,
       asidesCollapsed: asidesCollapsed.value,
       columnWidths: columnWidths.value,
       panelHeights: panelHeights.value,
       consoleDrawer: consoleDrawer.value,
+      touched: touched.value,
     });
   }
 
   watch(
-    [sidebarCollapsed, showInit, showInitTouched, mode, density, narratorsEnabled, schedulerAnimationEnabled, narratorMinTickMs, clearLogOnLoad, autoPauseOnIdle, theme, locale, panelsCollapsed, asidesCollapsed, columnWidths, panelHeights, consoleDrawer],
+    [sidebarCollapsed, showInit, showInitTouched, mode, density, narratorsEnabled, schedulerAnimationEnabled, narratorMinTickMs, clearLogOnLoad, autoPauseOnIdle, theme, legibleFont, textScale, screenReaderAnnounce, locale, panelsCollapsed, asidesCollapsed, columnWidths, panelHeights, consoleDrawer, touched],
     () => {
       try {
         window.localStorage.setItem(STORAGE_KEY, serialize());
@@ -533,6 +676,11 @@ export const usePreferencesStore = defineStore('preferences', () => {
     sidebarMobileOpen.value = !sidebarMobileOpen.value;
   }
 
+  function markTouched(field: TouchableField) {
+    if (touched.value[field]) return;
+    touched.value = { ...touched.value, [field]: true };
+  }
+
   function setMode(m: PresentationMode) {
     mode.value = m;
     // Pedagogic / projector default to narrators on for first-time users; they
@@ -546,10 +694,85 @@ export const usePreferencesStore = defineStore('preferences', () => {
     } else {
       schedulerAnimationEnabled.value = false;
     }
+    // The coupling above flips narrators alongside the mode, so a manual mode
+    // change counts as touching both — admin defaults must not later override
+    // either against the user's deliberate pick.
+    markTouched('mode');
+    markTouched('narratorsEnabled');
   }
 
   function setTheme(t: Theme) {
     theme.value = t;
+    markTouched('theme');
+  }
+
+  function setLegibleFont(v: boolean) {
+    legibleFont.value = v;
+  }
+
+  function setTextScale(s: TextScale) {
+    textScale.value = s;
+  }
+
+  function setScreenReaderAnnounce(v: boolean) {
+    screenReaderAnnounce.value = v;
+  }
+
+  function setNarratorsEnabled(v: boolean) {
+    narratorsEnabled.value = v;
+    markTouched('narratorsEnabled');
+  }
+
+  function setDensity(d: Density) {
+    density.value = d;
+    markTouched('density');
+  }
+
+  function setNarratorMinTickMs(ms: number) {
+    narratorMinTickMs.value = ms;
+    markTouched('narratorMinTickMs');
+  }
+
+  // setMirror reflects the host's presentation into the volatile mirror layer.
+  // Called by the viewer shell on each presence broadcast while autofollowing;
+  // it never touches the persisted preference, so the spectator's own choice is
+  // intact the moment they stop following (clearMirror) or reload.
+  function setMirror(p: { mode?: string | null; narrators?: boolean | null }) {
+    if (p.mode === 'compact' || p.mode === 'pedagogic' || p.mode === 'projector') {
+      mirrorMode.value = p.mode;
+    }
+    if (typeof p.narrators === 'boolean') mirrorNarrators.value = p.narrators;
+    mirrorActive.value = true;
+  }
+
+  function clearMirror() {
+    mirrorActive.value = false;
+    mirrorMode.value = null;
+    mirrorNarrators.value = null;
+  }
+
+  // applyAdminDefaults writes the admin-curated baseline onto every field the
+  // user has NOT touched. It assigns the refs directly (not via setMode/setTheme)
+  // so it neither fires the mode→narrators coupling nor marks the field touched
+  // — keeping those fields eligible if the admin later revises the default.
+  function applyAdminDefaults(d: Partial<AdminDefaults> | null | undefined) {
+    if (!d) return;
+    if (!touched.value.narratorsEnabled && typeof d.narratorsEnabled === 'boolean') {
+      narratorsEnabled.value = d.narratorsEnabled;
+    }
+    if (!touched.value.mode && (d.mode === 'compact' || d.mode === 'pedagogic' || d.mode === 'projector')) {
+      mode.value = d.mode;
+    }
+    if (!touched.value.theme && (d.theme === 'amber' || d.theme === 'green' || d.theme === 'dark' || d.theme === 'accesible')) {
+      theme.value = d.theme;
+    }
+    if (!touched.value.density && (d.density === 'comfortable' || d.density === 'compact')) {
+      density.value = d.density;
+    }
+    if (!touched.value.narratorMinTickMs && typeof d.narratorMinTickMs === 'number'
+      && Number.isFinite(d.narratorMinTickMs) && d.narratorMinTickMs >= 0) {
+      narratorMinTickMs.value = d.narratorMinTickMs;
+    }
   }
 
   // setLocale is the canonical mutation point for switching languages. It
@@ -594,7 +817,22 @@ export const usePreferencesStore = defineStore('preferences', () => {
     setClearLogOnLoad,
     setAutoPauseOnIdle,
     theme,
+    legibleFont,
+    textScale,
+    screenReaderAnnounce,
+    setLegibleFont,
+    setTextScale,
+    setScreenReaderAnnounce,
     locale,
+    touched,
+    effectiveMode,
+    effectiveNarratorsEnabled,
+    setNarratorsEnabled,
+    setDensity,
+    setNarratorMinTickMs,
+    setMirror,
+    clearMirror,
+    applyAdminDefaults,
     panelsCollapsed,
     asidesCollapsed,
     columnWidths,

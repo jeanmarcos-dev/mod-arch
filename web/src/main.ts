@@ -2,7 +2,14 @@ import { createApp } from 'vue';
 import { createPinia } from 'pinia';
 import App from './App.vue';
 import { router } from './router';
-import { applyTheme, readStoredTheme } from './stores/preferences';
+import {
+  applyTheme,
+  readStoredTheme,
+  applyLegibleFont,
+  readStoredLegibleFont,
+  applyTextScale,
+  readStoredTextScale,
+} from './stores/preferences';
 import { i18n, applyLocale, readStoredLocale } from './i18n';
 import './style.css';
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css';
@@ -12,6 +19,8 @@ import 'vue-virtual-scroller/dist/vue-virtual-scroller.css';
 // page would flash amber/Spanish for a frame before the preferences store
 // boots and the watcher catches up.
 applyTheme(readStoredTheme());
+applyLegibleFont(readStoredLegibleFont());
+applyTextScale(readStoredTextScale());
 applyLocale(readStoredLocale());
 
 const app = createApp(App);

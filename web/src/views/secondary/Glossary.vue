@@ -191,7 +191,7 @@ const totalEntries = GLOSSARY_ENTRIES.length;
 }
 
 .gloss-page__search {
-  flex: 1;
+  flex: 1 1 240px;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -217,6 +217,7 @@ const totalEntries = GLOSSARY_ENTRIES.length;
 
 .gloss-page__search input {
   flex: 1;
+  min-width: 0;
   background: transparent;
   border: 0;
   color: var(--text);
@@ -227,6 +228,7 @@ const totalEntries = GLOSSARY_ENTRIES.length;
 
 .gloss-page__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
 }
 

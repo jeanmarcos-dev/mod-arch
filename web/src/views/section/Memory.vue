@@ -401,7 +401,7 @@ function onOwnerJumpStack(addr: number) {
     </header>
 
     <div
-      v-if="!prefs.narratorsEnabled"
+      v-if="!prefs.effectiveNarratorsEnabled"
       class="memory-page__hint"
       :title="t('sections.memory.narratorsOffTitle')"
     >

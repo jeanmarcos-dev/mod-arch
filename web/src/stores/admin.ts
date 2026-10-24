@@ -10,6 +10,73 @@ export interface TelemetryMetrics {
   avg_llm_latency_ms: number;
 }
 
+export interface LiveCount { name: string; count: number }
+export interface LivePageView { name: string; views: number; avg_ms: number }
+export interface LiveDemoUse { name: string; loads: number; runs: number }
+export interface LiveActivityPoint { minute: number; events: number; questions: number }
+export interface LiveTopic { label: string; count: number }
+export interface LiveQuestion { ts: number; question: string; rating?: number | null; degraded: boolean }
+export interface LiveCountry { code: string; count: number }
+
+export interface LiveStats {
+  generated_at: number;
+  window_minutes: number;
+  now: {
+    sessions_active: number;
+    ws_connections: number;
+    sessions_with_user: number;
+    sessions_anonymous: number;
+    peak_sessions: number;
+    sessions_created_total: number;
+    sections: LiveCount[];
+    demos: LiveCount[];
+  };
+  window: {
+    unique_users: number;
+    unique_sessions: number;
+    page_views: LivePageView[];
+    demos: LiveDemoUse[];
+    activity_per_minute: LiveActivityPoint[];
+  };
+  tutor: {
+    questions: number;
+    askers: number;
+    latency_p50_ms: number;
+    latency_p95_ms: number;
+    degraded: number;
+    thumbs_up: number;
+    thumbs_down: number;
+    top_topics: LiveTopic[];
+    recent: LiveQuestion[];
+  };
+  countries: LiveCountry[];
+}
+
+export const LIVE_WINDOWS_MINUTES = [30, 120, 1440] as const;
+
+export function normalizeLive(raw: LiveStats): LiveStats {
+  return {
+    ...raw,
+    now: {
+      ...raw.now,
+      sections: raw.now?.sections ?? [],
+      demos: raw.now?.demos ?? [],
+    },
+    window: {
+      ...raw.window,
+      page_views: raw.window?.page_views ?? [],
+      demos: raw.window?.demos ?? [],
+      activity_per_minute: raw.window?.activity_per_minute ?? [],
+    },
+    tutor: {
+      ...raw.tutor,
+      top_topics: raw.tutor?.top_topics ?? [],
+      recent: raw.tutor?.recent ?? [],
+    },
+    countries: raw.countries ?? [],
+  };
+}
+
 export interface AdminStats {
   full: number;
   privileged: number;
@@ -37,6 +104,15 @@ export interface InviteRow {
   url: string;
 }
 
+export interface AdminDefaults {
+  narratorsEnabled: boolean;
+  mode: 'compact' | 'pedagogic' | 'projector';
+  theme: 'amber' | 'green' | 'dark' | 'accesible';
+  density: 'comfortable' | 'compact';
+  speed: number;
+  narratorMinTickMs: number;
+}
+
 export interface AccessSettings {
   access_mode: 'open' | 'invite_only' | 'closed';
   viewer_password_required: boolean;
@@ -45,8 +121,41 @@ export interface AccessSettings {
   disabled_panels: string[];
   disabled_demos: string[];
   default_route: string;
+  defaults: AdminDefaults;
+  schedule_tz: string;
   allowed_domains: string[];
   allowed_emails: string[];
+}
+
+export type ScheduleKind = 'demo' | 'panel' | 'route' | 'defaults';
+export type ScheduleAction = 'show' | 'hide' | 'apply';
+
+// ScheduleRule mirrors the server wire shape: starts_at/ends_at are epoch UTC
+// for sorting/status, while starts_local/ends_local are pre-formatted wall-clock
+// strings in `timezone` so the UI never has to do IANA math itself.
+export interface ScheduleRule {
+  id: string;
+  kind: ScheduleKind;
+  target: string;
+  action: ScheduleAction;
+  starts_at: number;
+  ends_at: number | null;
+  starts_local: string;
+  ends_local: string;
+  timezone: string;
+  enabled: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface ScheduleRuleInput {
+  kind: ScheduleKind;
+  target: string;
+  action: ScheduleAction;
+  starts_local: string;
+  ends_local: string;
+  timezone: string;
+  enabled: boolean;
 }
 
 export interface UserSessionBrief {
@@ -252,7 +361,10 @@ export const useAdminStore = defineStore('admin', () => {
   const auditPage = ref<AuditPage | null>(null);
   const sessionHistory = ref<SessionHistoryPage | null>(null);
   const userActivity = ref<Record<string, UserActivity>>({});
+  const schedules = ref<ScheduleRule[]>([]);
+  const scheduleTZ = ref<string>('UTC');
   const lastError = ref<string | null>(null);
+  const live = ref<LiveStats | null>(null);
 
   // Capability derivatives. Admins do everything; moderators are limited to
   // observation + kick. Components gate UI off these instead of reading the
@@ -331,13 +443,14 @@ export const useAdminStore = defineStore('admin', () => {
   // from invites/settings, so those calls are best-effort and fall through to
   // empty/null on 401/403 without breaking the rest of the dashboard.
   async function refresh() {
-    const [s, i, me, set, u, a] = await Promise.all([
+    const [s, i, me, set, u, a, m] = await Promise.all([
       send<SessionRow[]>('GET', '/admin/api/sessions').catch(() => []),
       send<InviteRow[]>('GET', '/admin/api/invites').catch(() => []),
       send<MeResponse>('GET', '/admin/api/me'),
       send<AccessSettings>('GET', '/admin/api/settings').catch(() => null),
       send<UserRow[]>('GET', '/admin/api/users').catch(() => []),
       send<AuditRow[]>('GET', '/admin/api/audit').catch(() => []),
+      send<TelemetryMetrics>('GET', '/admin/api/metrics').catch(() => null),
     ]);
     sessions.value = s ?? [];
     invites.value = i ?? [];
@@ -345,6 +458,7 @@ export const useAdminStore = defineStore('admin', () => {
     settings.value = set;
     users.value = u ?? [];
     audit.value = a ?? [];
+    if (m) metrics.value = m;
   }
 
   async function killSession(id: string) {
@@ -537,9 +651,39 @@ export const useAdminStore = defineStore('admin', () => {
   }
 
 
+  async function loadLive(windowMinutes: number = 120): Promise<LiveStats> {
+    const data = await send<LiveStats>('GET', `/admin/api/live?window=${windowMinutes}`);
+    live.value = normalizeLive(data);
+    return live.value;
+  }
+
   async function loadMetrics() {
     const data = await send<TelemetryMetrics>('GET', '/admin/api/metrics');
     metrics.value = data;
+  }
+
+  // Scheduled delivery: CRUD over the time-windowed rule list. The list
+  // endpoint also returns the configured authoring timezone so the form can
+  // default to it.
+  async function loadSchedules(): Promise<void> {
+    const data = await send<{ rules: ScheduleRule[]; timezone: string }>('GET', '/admin/api/schedules');
+    schedules.value = data.rules ?? [];
+    scheduleTZ.value = data.timezone || 'UTC';
+  }
+
+  async function createSchedule(input: ScheduleRuleInput): Promise<void> {
+    await send<ScheduleRule>('POST', '/admin/api/schedules', input);
+    await loadSchedules();
+  }
+
+  async function updateSchedule(id: string, input: ScheduleRuleInput): Promise<void> {
+    await send<ScheduleRule>('PUT', `/admin/api/schedules/${id}`, input);
+    await loadSchedules();
+  }
+
+  async function deleteSchedule(id: string): Promise<void> {
+    await send<{ ok: boolean }>('DELETE', `/admin/api/schedules/${id}`);
+    await loadSchedules();
   }
 
   return {
@@ -556,7 +700,10 @@ export const useAdminStore = defineStore('admin', () => {
     auditPage,
     sessionHistory,
     userActivity,
+    schedules,
+    scheduleTZ,
     lastError,
+    live,
     isAdmin,
     isModerator,
     canManageSettings,
@@ -591,5 +738,10 @@ export const useAdminStore = defineStore('admin', () => {
     updateReportStatus,
     metrics,
     loadMetrics,
+    loadLive,
+    loadSchedules,
+    createSchedule,
+    updateSchedule,
+    deleteSchedule,
   };
 });

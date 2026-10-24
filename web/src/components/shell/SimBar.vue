@@ -233,7 +233,7 @@ const pauseTooltip = computed(() => {
           <span>{{ t('simbar.dock') }}</span>
         </button>
 
-        <ReportButton class="sim-bar__report-btn" @pointerdown.stop @dblclick.stop />
+        <ReportButton compact class="sim-bar__report-btn" @pointerdown.stop @dblclick.stop />
       </header>
 
       <div class="sim-bar__row sim-bar__row--main">
@@ -336,7 +336,7 @@ const pauseTooltip = computed(() => {
             :title="t('simbar.undockHint')"
             @click="bar.float()"
           ><PinOff :size="14" :stroke-width="2" /></button>
-          <ReportButton class="sim-bar__report-btn" />
+          <ReportButton compact class="sim-bar__report-btn" />
         </div>
       </div>
 
@@ -558,7 +558,7 @@ const pauseTooltip = computed(() => {
 .sim-bar__btns {
   display: flex;
   gap: var(--space-1);
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 
 /* Phone + tablet portrait layout (≤ 768px) requested by the user:
@@ -626,7 +626,7 @@ const pauseTooltip = computed(() => {
     /* Rows shape the cell height; the button itself stretches into the
        cell via the grid's default `align-items: stretch`, so we don't
        need to fix the button's own height. */
-    grid-template-rows: 40px 40px;
+    grid-template-rows: 48px 48px;
     gap: 4px;
     width: 100%;
   }
@@ -641,7 +641,16 @@ const pauseTooltip = computed(() => {
   /* Bump the icon up a notch on mobile so it doesn't look lost in the
      button cell. */
   .sim-bar__btns .sim-btn > svg { width: 18px; height: 18px; }
-  .sim-bar__btns .sim-btn > span { display: none; }
+  .sim-bar__btns .sim-btn { flex-direction: column; gap: 3px; }
+  .sim-bar__btns .sim-btn > span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9px;
+    letter-spacing: 0.5px;
+    line-height: 1;
+  }
   .sim-bar__btns .sim-btn--reset-ui { display: inline-flex; }
 
   /* Explicit cell placement: secondary (destructive/danger) actions on
@@ -684,6 +693,7 @@ const pauseTooltip = computed(() => {
     width: 12px;
     height: 12px;
   }
+  .sim-bar__btns .sim-btn > span { display: none; }
 }
 
 .sim-btn {
@@ -781,6 +791,11 @@ const pauseTooltip = computed(() => {
   transition: background var(--transition-fast);
   min-height: 24px;
   box-sizing: border-box;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 .sim-core-row + .sim-core-row {
   margin-top: 2px;

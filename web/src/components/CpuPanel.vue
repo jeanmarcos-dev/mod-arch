@@ -5,23 +5,58 @@ import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Maximize2, Minimize2, ChevronDown, ChevronRight } from '@lucide/vue';
 import CollapsiblePanel from './ui/CollapsiblePanel.vue';
+import { useTouchInput } from '../composables/useTouchInput';
 
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
 const { t } = useI18n();
+const isTouch = useTouchInput();
+
+interface ActiveTip {
+  key: string;
+  coreId: number;
+  text: string;
+  term: string | null;
+}
+
+const activeTip = ref<ActiveTip | null>(null);
+
+function explain(coreId: number, id: string, text: string, term: string | null) {
+  if (!isTouch.value) {
+    if (term) cpu.openGlossary(term);
+    return;
+  }
+  const key = `${coreId}:${id}`;
+  activeTip.value = activeTip.value?.key === key ? null : { key, coreId, text, term };
+}
+
+function closeTip() {
+  activeTip.value = null;
+}
+
+function openTipGlossary() {
+  const term = activeTip.value?.term;
+  if (term) cpu.openGlossary(term);
+}
 
 function hex(n: number, w = 8) {
   return '0x' + (n >>> 0).toString(16).padStart(w, '0').toUpperCase();
 }
 
+function regText(reg: string): string {
+  return t(`cpu.regHelp.${reg}` as const);
+}
 function regHelp(reg: string): string {
-  return `${t(`cpu.regHelp.${reg}` as const)}${t('cpu.glossaryHint')}`;
+  return `${regText(reg)}${t('cpu.glossaryHint')}`;
 }
 function instrHelp(): string {
   return t('cpu.instrHelp');
 }
+function plText(): string {
+  return t('cpu.plHelp');
+}
 function plHelp(): string {
-  return `${t('cpu.plHelp')}${t('cpu.glossaryHint')}`;
+  return `${plText()}${t('cpu.glossaryHint')}`;
 }
 
 // Mirror of pkg/cpu/cpu.go FlagCF/ZF/SF/IF/OF; same chip strip used by
@@ -286,14 +321,20 @@ function pcbChipTitle(c: CoreInfo, p: PCBInfo): string {
               :key="r"
               :class="{ flash: shouldFlash(core, r) }"
               :title="regHelp(r)"
-              @click="cpu.openGlossary(r)"
+              :data-explain="`reg-${r}`"
+              @click="explain(core.id, `reg-${r}`, regText(r), r)"
             >
               <span class="r-name">{{ r }}</span>
               <span class="r-val">{{ hex(core.regs[r] ?? 0) }}</span>
             </span>
           </div>
 
-          <div class="core-card__instr" :title="instrHelp()">
+          <div
+            class="core-card__instr"
+            :title="instrHelp()"
+            data-explain="instr"
+            @click="explain(core.id, 'instr', instrHelp(), null)"
+          >
             <span class="r-name">{{ t('panels.cores.instrLabel') }}</span>
             <span class="r-val instr-val">{{ cpu.lastMnemonic[core.id] ?? '—' }}</span>
           </div>
@@ -306,17 +347,20 @@ function pcbChipTitle(c: CoreInfo, p: PCBInfo): string {
             <span
               class="core-card__seg"
               :title="regHelp('CS')"
-              @click="cpu.openGlossary('CS')"
+              data-explain="seg-CS"
+              @click="explain(core.id, 'seg-CS', regText('CS'), 'CS')"
             ><span class="seg-name">CS</span><span class="seg-val">{{ hex(core.segments.CS, 4) }}</span></span>
             <span
               class="core-card__seg"
               :title="regHelp('DS')"
-              @click="cpu.openGlossary('DS')"
+              data-explain="seg-DS"
+              @click="explain(core.id, 'seg-DS', regText('DS'), 'DS')"
             ><span class="seg-name">DS</span><span class="seg-val">{{ hex(core.segments.DS, 4) }}</span></span>
             <span
               class="core-card__seg"
               :title="regHelp('SS')"
-              @click="cpu.openGlossary('SS')"
+              data-explain="seg-SS"
+              @click="explain(core.id, 'seg-SS', regText('SS'), 'SS')"
             ><span class="seg-name">SS</span><span class="seg-val">{{ hex(core.segments.SS, 4) }}</span></span>
           </div>
 
@@ -324,7 +368,8 @@ function pcbChipTitle(c: CoreInfo, p: PCBInfo): string {
             <span
               class="core-card__flags-label clickable-label"
               :title="t('panels.processes.eflagsHint')"
-              @click="cpu.openGlossary('EFLAGS')"
+              data-explain="eflags"
+              @click="explain(core.id, 'eflags', t('panels.processes.eflagsHint'), 'EFLAGS')"
             >{{ t('panels.processes.eflagsTitle') }}</span>
             <span
               v-for="f in EFLAGS_BITS"
@@ -332,14 +377,45 @@ function pcbChipTitle(c: CoreInfo, p: PCBInfo): string {
               class="pcb-flag"
               :class="{ 'pcb-flag--on': flagOn(core.regs.EFLAGS ?? 0, f.mask) }"
               :title="flagChipTitle(f.name, flagOn(core.regs.EFLAGS ?? 0, f.mask))"
+              :data-explain="`flag-${f.name}`"
+              @click="explain(core.id, `flag-${f.name}`, flagChipTitle(f.name, flagOn(core.regs.EFLAGS ?? 0, f.mask)), null)"
             >{{ f.name }}</span>
           </div>
 
-          <div class="core-card__pl clickable" :title="plHelp()" @click="cpu.openGlossary('PL')">
+          <div
+            class="core-card__pl clickable"
+            :title="plHelp()"
+            data-explain="pl"
+            @click="explain(core.id, 'pl', plText(), 'PL')"
+          >
             <span class="r-name">PL</span>
             <span class="r-val" :style="{ color: core.mode === 3 ? 'var(--green)' : 'var(--red-soft)' }">
               {{ core.mode }} ({{ core.mode === 3 ? t('cpu.plUser') : t('cpu.plKernel') }})
             </span>
+          </div>
+
+          <div
+            v-if="activeTip && activeTip.coreId === core.id"
+            class="core-card__tip"
+            role="status"
+            data-testid="cpu-tip"
+          >
+            <p class="core-card__tip-text">{{ activeTip.text }}</p>
+            <div class="core-card__tip-actions">
+              <button
+                v-if="activeTip.term"
+                type="button"
+                class="core-card__tip-btn"
+                data-testid="cpu-tip-glossary"
+                @click.stop="openTipGlossary"
+              >{{ t('cpu.tipOpenGlossary') }}</button>
+              <button
+                type="button"
+                class="core-card__tip-btn"
+                data-testid="cpu-tip-close"
+                @click.stop="closeTip"
+              >{{ t('cpu.tipClose') }}</button>
+            </div>
           </div>
         </div>
       </section>
@@ -348,6 +424,39 @@ function pcbChipTitle(c: CoreInfo, p: PCBInfo): string {
 </template>
 
 <style scoped>
+.core-card__tip {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.core-card__tip-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.core-card__tip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.core-card__tip-btn {
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
 .cpu {
   container-type: inline-size;
 }

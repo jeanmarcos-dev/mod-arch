@@ -174,6 +174,20 @@ function openGlossary() {
   overflow-y: auto;
 }
 
+@media (max-width: 768px) {
+  /* On mobile the shell content is the single scroll container. A flex-basis:0
+     grow child would collapse to a zero-height shell inside that auto-height
+     page, so each panel sizes to its content and lets the page scroll instead
+     of trapping rows behind an inner overflow. */
+  .cpanel {
+    flex: 0 0 auto;
+    flex-basis: auto;
+  }
+  .cpanel__body {
+    overflow-y: visible;
+  }
+}
+
 @media (max-width: 480px) {
   .cpanel__head { gap: 4px; padding-bottom: 4px; margin-bottom: 6px; }
   .cpanel__title { font-size: 12px; }

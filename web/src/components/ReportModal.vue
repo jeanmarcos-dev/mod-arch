@@ -300,6 +300,10 @@ function pick(k: Kind) {
   text-transform: uppercase;
   cursor: pointer;
 }
+.kind > span {
+  line-height: 1;
+  text-box: trim-both cap alphabetic;
+}
 .kind:last-child { border-right: none; }
 .kind:hover {
   background: rgba(var(--accent-rgb), 0.06);

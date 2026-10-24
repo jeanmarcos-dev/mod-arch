@@ -2,7 +2,7 @@ import { onBeforeUnmount, onMounted } from 'vue';
 
 import { useConcurrencyState } from './useConcurrencyState';
 import { useCpuStore } from '../stores/cpu';
-import { useTutorStore, type IncomingAnswer, type IncomingProgress } from '../stores/tutor';
+import { useTutorStore, type IncomingAnswer, type IncomingProgress, type TutorRating } from '../stores/tutor';
 
 /**
  * useTutor wires the tutor store to the WebSocket. cpu.ts re-dispatches
@@ -83,5 +83,10 @@ export function useTutor() {
     }
   }
 
-  return { ask, tutor };
+  function rate(messageId: string, value: TutorRating) {
+    const result = tutor.rate(messageId, value);
+    if (result) cpu.sendTutorFeedback(result.requestId, result.rating);
+  }
+
+  return { ask, rate, tutor };
 }

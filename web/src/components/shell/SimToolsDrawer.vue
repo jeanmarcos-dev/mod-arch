@@ -23,7 +23,7 @@ const settings = useSimSettings();
 const { t } = useI18n();
 
 function toggleNarrators() {
-  prefs.narratorsEnabled = !prefs.narratorsEnabled;
+  prefs.setNarratorsEnabled(!prefs.narratorsEnabled);
 }
 
 function toggleSchedulerAnimation() {

@@ -8,7 +8,7 @@ export const GLOSSARY_PT: Record<string, { short: string; detail: string }> = {
   // ─── Modes ──────────────────────────────────────────────────────────────
   'PL — Privilege Level': {
     short: 'Nível de privilégio da CPU. PL3 = user, PL0 = kernel.',
-    detail: 'O x86 define 4 níveis de privilégio (0-3). Por convenção PL0 = kernel (todas as permissões) e PL3 = user (acesso restrito). Os níveis intermediários quase nunca são usados. O HW verifica o PL em cada acesso de memória, em cada execução de instrução privilegiada, etc. O SW NÃO pode mudar o PL diretamente — apenas o HW o faz em INT/IRET/exceções.',
+    detail: 'O x86 define 4 níveis de privilégio (0-3). Por convenção PL0 = kernel (todas as permissões) e PL3 = user (acesso restrito). Os níveis intermediários quase nunca são usados. O HW verifica o PL em cada acesso de memória, em cada execução de instrução privilegiada, etc. O programa de usuário NÃO pode escrever seu PL diretamente: a mudança é feita pelo HW em INT/IRET/exceções (no x86 real também em SYSCALL/SYSENTER e call gates).',
   },
   'RPL — Requested Privilege Level': {
     short: 'Bits 0-1 de um seletor de segmento. Indicam o privilégio "solicitado" por esse seletor.',
@@ -24,7 +24,7 @@ export const GLOSSARY_PT: Record<string, { short: string; detail: string }> = {
   },
   'Mode switch': {
     short: 'Transição entre user e kernel. Feita pelo HW, nunca pelo SW.',
-    detail: 'Quando chega uma IRQ ou o user executa `int N`, o HW salva o estado (EFLAGS/CS/EIP) e troca de modo automaticamente. O kernel apenas configura QUAL handler invocar (via IDT); a mudança de modo é função do HW. No IRET, o HW desempilha o frame e restaura o modo original.',
+    detail: 'Quando chega uma IRQ ou o user executa `int N`, o HW salva o estado (EFLAGS/CS/EIP, e também o SS:ESP do user ao passar de PL3 para PL0) e troca de modo automaticamente. O kernel apenas configura QUAL handler invocar (via IDT); a mudança de modo é função do HW. No IRET, o HW desempilha o frame e restaura o modo original.',
   },
 
   // ─── Registers ──────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ export const GLOSSARY_PT: Record<string, { short: string; detail: string }> = {
   // ─── Flags ──────────────────────────────────────────────────────────────
   'ZF — Zero Flag': {
     short: '1 quando o último resultado foi 0.',
-    detail: 'Atualizado por ADD/SUB/CMP/AND/etc. Lido por JE/JZ (salta se ZF=1) e JNE/JNZ (salta se ZF=0). CMP é um SUB que só atualiza flags sem gravar o resultado.',
+    detail: 'Atualizado por ADD/SUB/CMP/INC/DEC/XOR, entre outras. Lido por JE/JZ (salta se ZF=1) e JNE/JNZ (salta se ZF=0). CMP é um SUB que só atualiza flags sem gravar o resultado.',
   },
   'SF — Sign Flag': {
     short: '1 quando o último resultado foi negativo.',
@@ -98,19 +98,19 @@ export const GLOSSARY_PT: Record<string, { short: string; detail: string }> = {
   },
   'Software interrupt': {
     short: 'Trap disparado pela instrução INT N a partir do código.',
-    detail: 'O user ou o kernel executa `INT N`. O HW lê IDT[N], empilha EFLAGS/CS/EIP, troca para kernel mode e salta para o handler. Funcionalmente idêntico ao dispatch de uma IRQ de HW; a diferença é a origem (`source = SW` vs `HW`). Classicamente usado para syscalls (o Linux i386 usa INT 0x80). NÃO é uma IRQ em sentido estrito, ainda que compartilhe o mecanismo.',
+    detail: 'O user ou o kernel executa `INT N`. O HW lê IDT[N], empilha EFLAGS/CS/EIP, troca para kernel mode e salta para o handler. Usa o mesmo mecanismo de dispatch de uma IRQ de HW, mas difere por ser síncrona, não depender do flag IF e ser originada pelo próprio programa (`source = SW` vs `HW`). Classicamente usado para syscalls (o Linux i386 usa INT 0x80). NÃO é uma IRQ em sentido estrito, ainda que compartilhe o mecanismo.',
   },
   'Vector 0x00 — Divide error': {
     short: 'Exceção quando uma divisão inteira divide por zero (ou estoura).',
-    detail: 'Disparada pela própria CPU quando DIV ou IDIV roda com divisor zero, ou quando o quociente não cabe no registrador de destino. Exceção do tipo fault: EIP aponta para a instrução ofensora, não para a seguinte. O kernel normalmente termina o processo ofensor.',
+    detail: 'No x86 real a CPU a dispara quando DIV ou IDIV roda com divisor zero, ou quando o quociente não cabe no registrador de destino; é uma exceção do tipo fault (EIP aponta para a instrução ofensora). Neste simulador o vetor está instalado na IDT, mas o ISA não tem instruções de divisão, então ele nunca é disparado.',
   },
   'IRQ 0x20 — Timer': {
     short: 'Tick periódico do timer programável (PIT).',
-    detail: 'A cada `quantum` ticks de CPU essa IRQ de HW dispara. O scheduler a usa para fazer preempção: salvar o PCB atual, escolher o próximo processo, restaurar seu PCB. É isso que torna o SO multitarefa preemptivo. Diferentemente dos vetores 0x00 / 0x0E / 0x80 / 0x81, este SIM é uma IRQ em sentido estrito: HW externo (PIT), assíncrono.',
+    detail: 'A cada `quantum` ticks de CPU essa IRQ de HW dispara. O scheduler a usa para fazer preempção: salvar o PCB atual, escolher o próximo processo, restaurar seu PCB. É isso que torna o SO multitarefa preemptivo. Diferentemente dos vetores 0x00 / 0x0E / 0x80 / 0x81, este SIM é uma IRQ em sentido estrito: no x86 real é disparada por HW externo (PIT), de forma assíncrona. No simulador o tick é modelado contando passos da CPU, por isso é determinístico.',
   },
   'IRQ 0x21 — Keyboard': {
     short: 'Uma tecla foi pressionada.',
-    detail: 'O controlador do teclado deposita o scancode/byte em um buffer e dispara essa IRQ de HW. O handler do kernel lê o byte e, se houver um processo BLOCKED aguardando o teclado, entrega o byte e o acorda. Como o timer, uma IRQ em sentido estrito (HW externo, assíncrono).',
+    detail: 'O controlador do teclado deposita o byte em um buffer e dispara essa IRQ de HW (no x86 real chegam scancodes; o simulador entrega diretamente caracteres ASCII). O handler do kernel lê o byte e, se houver um processo BLOCKED aguardando o teclado, entrega o byte e o acorda. Como o timer, uma IRQ em sentido estrito (HW externo, assíncrono).',
   },
   KeyboardBuf: {
     short: 'Fila FIFO interna do kernel que guarda bytes ainda não entregues a um leitor.',
@@ -128,7 +128,7 @@ O badge do console mostra "KBuf {used}/{cap}" com cap = 16, que é um teto puram
   },
   'INT 0x81 — Mutex/Semáforo': {
     short: 'Interrupção de software específica do simulador para operações de mutex e semáforo.',
-    detail: 'Não é Linux padrão — uma convenção deste simulador. EAX escolhe a operação (mutex_lock=1, mutex_unlock=2, sem_wait=3, sem_signal=4); EBX carrega o ID do recurso. O handler vive no kernel e manipula as listas de mutex e semáforos que você vê em /concurrencia.',
+    detail: 'Não é Linux padrão — uma convenção deste simulador. EAX escolhe a operação (mutex_create=0x10, mutex_lock=0x11, mutex_unlock=0x12, sem_create=0x20, sem_wait=0x21, sem_signal=0x22); EBX carrega o ID do recurso. O handler vive no kernel e manipula as listas de mutex e semáforos que você vê em /concurrencia.',
   },
   'Vector 0x0E — Page Fault': {
     short: 'Vetor da exceção de page fault, levantada pela MMU.',
@@ -140,11 +140,11 @@ O badge do console mostra "KBuf {used}/{cap}" com cap = 16, que é um teto puram
   },
   'INT N': {
     short: 'Instrução que dispara uma interrupção de software.',
-    detail: 'O user executa `int N`. O HW lê IDT[N], empilha EFLAGS/CS/EIP, troca para kernel mode, salta para o handler. Funcionalmente IDÊNTICO ao dispatch de uma IRQ de HW; a diferença é apenas a origem (SW vs HW).',
+    detail: 'O user executa `int N`. O HW lê IDT[N], empilha EFLAGS/CS/EIP, troca para kernel mode, salta para o handler. Compartilha o mecanismo de dispatch com uma IRQ de HW, mas é síncrona, não é mascarada por IF e é originada pelo programa (source SW vs HW).',
   },
   IRET: {
     short: 'Retorno de interrupção. Desfaz o que INT/dispatch fez.',
-    detail: 'Desempilha da stack, NESTA ORDEM DE POP: primeiro EIP (porque está no topo), depois CS, depois EFLAGS. Se o CS desempilhado for user (RPL=3), também desempilha ESP e SS e troca para user mode (isso se chama "inter-privilege IRET"). É o único modo "limpo" de retornar do kernel para o user. A memória física do frame, lida de endereços baixos para altos, é [EIP][CS][EFLAGS][ESP_user][SS_user]: o inverso da ordem de pop porque a pilha cresce para baixo.',
+    detail: 'Desempilha da stack, NESTA ORDEM DE POP: primeiro EIP (porque está no topo), depois CS, depois EFLAGS. Se o CS desempilhado for user (RPL=3), também desempilha ESP e SS e troca para user mode (isso se chama "inter-privilege IRET"). É o único modo "limpo" de retornar do kernel para o user. A memória física do frame, lida de endereços baixos para altos, é [EIP][CS][EFLAGS][ESP_user][SS_user]: exatamente a ordem em que o IRET desempilha; o HW os havia empilhado no sentido inverso (SS primeiro) porque a pilha cresce para baixo.',
   },
   'IDT — Interrupt Descriptor Table': {
     short: 'Tabela com 256 entradas: vetor → handler.',
@@ -158,7 +158,7 @@ O badge do console mostra "KBuf {used}/{cap}" com cap = 16, que é um teto puram
   },
   'PID — Process ID': {
     short: 'Identificador único do processo.',
-    detail: 'O kernel atribui um PID monotonicamente ao criar cada processo. PID 1 é tipicamente o init. Em nosso simulador, PID 1 = primeiro processo do demo, PID 2 = segundo, etc.',
+    detail: 'O kernel atribui um PID monotonicamente ao criar cada processo. PID 1 é o init, também neste simulador: ao carregar qualquer demo o init é criado e os processos do demo recebem os PIDs seguintes (2, 3, …).',
   },
   RUN: {
     short: 'Processo atualmente em execução na CPU.',
@@ -178,7 +178,7 @@ O badge do console mostra "KBuf {used}/{cap}" com cap = 16, que é um teto puram
   },
   'Context switch': {
     short: 'Mudança do processo que está em RUN.',
-    detail: 'Quando ocorre: 1) Salva o estado do processo atual em seu PCB. 2) Escolhe o próximo. 3) Carrega seu PCB na CPU. 4) Continua. Em nosso simulador isso acontece entre o dispatch da IRQ e o IRET — o frame na kernel stack é "patcheado" com os registradores do novo processo.',
+    detail: 'Quando ocorre: 1) Salva o estado do processo atual em seu PCB. 2) Escolhe o próximo. 3) Carrega seu PCB na CPU. 4) Continua. Em nosso simulador isso acontece entre o dispatch da IRQ e o IRET — o frame na kernel stack é "patcheado" com os registradores do novo processo. No x86 real também se troca o espaço de endereços (CR3) e o TLB é invalidado, o que é boa parte do custo real.',
   },
   'Ready queue': {
     short: 'Fila FIFO de processos READY.',
@@ -198,7 +198,7 @@ O badge do console mostra "KBuf {used}/{cap}" com cap = 16, que é um teto puram
   },
   'clone()': {
     short: 'Syscall primitiva do Linux para criar tasks com flags de compartilhamento.',
-    detail: 'fork(), vfork() e pthread_create() são casos particulares de clone(). As flags relevantes aqui: CLONE_VM (compartilha espaço de endereços), CLONE_FILES (compartilha tabela de fds), CLONE_THREAD (herda o TGID, vira uma thread irmã), CLONE_VFORK (bloqueia o pai até o filho terminar). Combiná-las produz o comportamento clássico do pthread_create: CLONE_VM | CLONE_FILES | CLONE_THREAD.',
+    detail: 'fork(), vfork() e pthread_create() são casos particulares de clone(). As flags relevantes aqui: CLONE_VM (compartilha espaço de endereços), CLONE_FILES (compartilha tabela de fds), CLONE_THREAD (herda o TGID, vira uma thread irmã), CLONE_VFORK (bloqueia o pai até o filho terminar). No Linux, o pthread_create combina, entre outras, CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD (CLONE_THREAD exige CLONE_SIGHAND, que por sua vez exige CLONE_VM); o simulador modela apenas um subconjunto dessas flags.',
   },
   pthread_create: {
     short: 'API POSIX para criar uma thread. Na glibc traduz para clone().',
@@ -206,7 +206,7 @@ O badge do console mostra "KBuf {used}/{cap}" com cap = 16, que é um teto puram
   },
   'Race condition': {
     short: 'Bug em que duas tasks competem por um dado sem sincronização e o resultado depende da intercalação.',
-    detail: 'O demo threads_race o mostra: duas threads fazem counter++, que na verdade é load-inc-store. Se o timer interrompe entre load e store, a outra thread pode ler o mesmo valor desatualizado e ambas acabam gravando o mesmo número — um incremento é perdido. Com quantum pequeno e 200 iterações, o counter final fica bem abaixo de 400. A correção didática é threads_safe: envolver a seção crítica com mutex_lock/unlock.',
+    detail: 'O demo threads_race o mostra: duas threads fazem counter++, que na verdade é load-inc-store. Se o timer interrompe entre load e store, a outra thread pode ler o mesmo valor desatualizado e ambas acabam gravando o mesmo número — um incremento é perdido. Com 200 iterações por thread, o counter final pode ficar abaixo de 400; quantos incrementos se perdem depende do quantum e do instante da preempção. A correção didática é threads_safe: envolver a seção crítica com mutex_lock/unlock.',
   },
 
   // ─── Scheduler ──────────────────────────────────────────────────────────
@@ -216,7 +216,7 @@ O badge do console mostra "KBuf {used}/{cap}" com cap = 16, que é um teto puram
   },
   'Round-Robin (RR)': {
     short: 'Cada processo recebe a CPU em turnos iguais.',
-    detail: 'O scheduler mais simples e justo. Mantém uma fila circular de prontos. Quando o timer dispara, o processo atual vai para a cauda e o da cabeça vira RUN. Todos os processos recebem o mesmo tempo.',
+    detail: 'Um dos schedulers mais simples. Mantém uma fila circular de prontos. Quando o timer dispara, o processo atual vai para a cauda e o da cabeça vira RUN. Cada turno dura no máximo um quantum; um processo que bloqueia antes cede o resto do seu turno.',
   },
   Preemption: {
     short: 'O kernel tira a CPU do processo mesmo que ele não quisesse ceder.',
@@ -250,15 +250,15 @@ O badge do console mostra "KBuf {used}/{cap}" com cap = 16, que é um teto puram
   },
   Semaphore: {
     short: 'Semáforo: contador com operações atômicas de wait (P) e signal (V).',
-    detail: 'Generaliza o mutex: o contador permite até N threads concorrentes na seção protegida. wait decrementa o contador (bloqueia a thread se 0); signal incrementa (acorda um waiter, se houver). Útil para limitar acesso a um pool de recursos ou coordenar produtor-consumidor.',
+    detail: 'Contador que permite até N threads concorrentes na seção protegida. Um semáforo com contador 1 se parece com um mutex, mas não tem proprietário: qualquer um pode fazer signal (o demo double_unlock mostra por que um mutex exige isso). wait decrementa o contador (bloqueia a thread se 0); signal incrementa (acorda um waiter, se houver). Útil para limitar acesso a um pool de recursos ou coordenar produtor-consumidor.',
   },
   'Atomic operation': {
     short: 'Operação atômica: o hardware garante que executa sem ser interrompida.',
-    detail: 'No x86, instruções como LOCK XADD, LOCK CMPXCHG ou XCHG travam o barramento durante o load-modify-store. São a primitiva sobre a qual mutexes, spinlocks e contadores lock-free são construídos. Sem atomicidade, i++ se decompõe em MOV/INC/MOV — interruptível e portanto inseguro entre threads.',
+    detail: 'No x86, instruções como LOCK XADD, LOCK CMPXCHG ou XCHG travam a linha de cache (historicamente, o barramento) durante o load-modify-store. São a primitiva sobre a qual mutexes, spinlocks e contadores lock-free são construídos. Sem atomicidade, i++ se decompõe em MOV/INC/MOV — interruptível e portanto inseguro entre threads.',
   },
   Deadlock: {
     short: 'Bloqueio mútuo: duas ou mais threads esperam umas pelas outras em ciclo e nenhuma progride.',
-    detail: 'As quatro condições de Coffman devem valer simultaneamente: exclusão mútua, hold-and-wait, sem preempção e espera circular. O demo dining_philosophers reproduz o caso clássico — cada filósofo pega um garfo e espera pelo outro, formando um ciclo. Previne-se quebrando qualquer uma das quatro (por exemplo, pegando garfos em uma ordem global).',
+    detail: 'As quatro condições de Coffman devem valer simultaneamente: exclusão mútua, hold-and-wait, sem preempção e espera circular. O demo philos_deadlock reproduz o caso clássico — cada filósofo pega um garfo e espera pelo outro, formando um ciclo. Previne-se quebrando qualquer uma das quatro (por exemplo, pegando garfos em uma ordem global).',
   },
   'Lock contention': {
     short: 'Contenção: muitas threads competem pelo mesmo lock e serializam.',
@@ -270,15 +270,15 @@ O badge do console mostra "KBuf {used}/{cap}" com cap = 16, que é um teto puram
   },
   'Dining philosophers': {
     short: 'Filósofos jantando: exemplo canônico de deadlock com N threads compartilhando N recursos.',
-    detail: 'Cinco filósofos compartilham uma mesa com cinco garfos; cada um precisa de dois garfos para comer. Se todos pegam o garfo da esquerda ao mesmo tempo, esperam para sempre pelo da direita (deadlock). Soluções clássicas: ordenar globalmente os garfos, ou limitar a N-1 filósofos comendo simultaneamente. Este simulador tem dois demos separados: `philos_deadlock` (os filósofos travam em ciclo e o sistema deixa de progredir) e `philos_safe` (um deles inverte a ordem de pegar — garfo de menor id primeiro, depois o de maior — e essa assimetria quebra a espera circular).',
+    detail: 'No problema clássico, cinco filósofos compartilham uma mesa com cinco garfos; cada um precisa de dois garfos para comer. Os demos deste simulador usam três filósofos e três garfos (mutex 1, 2 e 3). Se todos pegam o garfo da esquerda ao mesmo tempo, esperam para sempre pelo da direita (deadlock). Soluções clássicas: ordenar globalmente os garfos, ou limitar a N-1 filósofos comendo simultaneamente. Este simulador tem dois demos separados: `philos_deadlock` (os filósofos travam em ciclo e o sistema deixa de progredir) e `philos_safe` (um deles inverte a ordem de pegar — garfo de menor id primeiro, depois o de maior — e essa assimetria quebra a espera circular).',
   },
   safe_counter: {
     short: 'Demo de incremento protegido por mutex — o contador termina exato.',
-    detail: 'Dois workers rodam em paralelo um loop que pega o mutex, incrementa um contador compartilhado e libera. Comparado com race_counter, aqui o resultado final é determinístico (sempre 2 × iterações) porque a seção crítica está protegida.',
+    detail: 'Dois workers rodam em paralelo um loop que pega o mutex, incrementa um contador compartilhado e libera. Comparado com race_counter, aqui o resultado final é determinístico (sempre 2 × iterações) porque a seção crítica está protegida. Nota: neste simulador os workers são processos que compartilham um único espaço plano de memória de usuário; em um SO real isso equivaleria a memória compartilhada (shm/mmap) ou a threads.',
   },
   race_counter: {
     short: 'Demo SEM proteção — o contador perde incrementos por race condition.',
-    detail: 'Mesmo loop do safe_counter mas sem o mutex. Como load-modify-store não é atômico, dois workers podem ler o mesmo valor antes que o outro escreva, perdendo o incremento. O total final varia entre execuções; o delta para o resultado teórico mede quantos incrementos foram perdidos.',
+    detail: 'Mesmo loop do safe_counter mas sem o mutex. Como load-modify-store não é atômico, dois workers podem ler o mesmo valor antes que o outro escreva, perdendo o incremento. O total final depende do quantum e do instante de cada preempção (em um sistema real também varia entre execuções); o delta para o resultado teórico mede quantos incrementos foram perdidos. Nota: neste simulador os workers são processos que compartilham um único espaço plano de memória de usuário; em um SO real isso equivaleria a memória compartilhada (shm/mmap) ou a threads.',
   },
 
   // ─── Memory ─────────────────────────────────────────────────────────────
@@ -292,10 +292,10 @@ O badge do console mostra "KBuf {used}/{cap}" com cap = 16, que é um teto puram
   },
   'TSS — Task State Segment': {
     short: 'Estrutura por core onde o x86 armazena o kernel SS:ESP e outros dados de task-switch.',
-    detail: 'No x86 real, quando uma interrupção muda o privilégio de PL3 para PL0, o HW consulta o TSS do core para saber qual endereço recarregar em SS:ESP — esse par (SS0, ESP0) é o topo da kernel stack. O TSS vive em memória, seu endereço é carregado em TR (Task Register) e seu descritor reside na GDT. Neste simulador o TSS não existe como estrutura própria: seus dois campos críticos são simplificados em `KernelStackTop` (o papel de ESP0) e manuseio direto dentro da CPU. Cada core carrega seu próprio `KernelStackTop` para que traps concorrentes não pisem nos frames uns dos outros. Na entrada do kernel a partir do user, o ESP do user é salvo em `SavedUserESP` — o papel que no x86 real o TSS cumpre na troca — e o IRET o restaura ao retornar para PL3.',
+    detail: 'No x86 real, quando uma interrupção muda o privilégio de PL3 para PL0, o HW consulta o TSS do core para saber qual endereço recarregar em SS:ESP — esse par (SS0, ESP0) é o topo da kernel stack. O TSS vive em memória, seu endereço é carregado em TR (Task Register) e seu descritor reside na GDT. Neste simulador o TSS não existe como estrutura própria: seus dois campos críticos são simplificados em `KernelStackTop` (o papel de ESP0) e manuseio direto dentro da CPU. Cada core carrega seu próprio `KernelStackTop` para que traps concorrentes não pisem nos frames uns dos outros. Na entrada do kernel a partir do user, o simulador salva o ESP do user em `SavedUserESP` por simplicidade; no x86 real o HW o empilha na pilha do kernel junto com o SS (o TSS apenas indica onde está essa pilha), e o IRET o restaura ao retornar para PL3.',
   },
   'Page fault': {
-    short: 'O acesso à memória é inválido e a MMU o rejeita.',
+    short: 'Exceção 0x0E: o acesso à memória não pôde ser resolvido (neste simulador é sempre fatal).',
     detail: 'Causas típicas: o processo PL3 tenta tocar memória do kernel, escreve em uma página somente leitura (como user_code) ou acessa um endereço fora de sua região alocada. Em kernels reais um page fault NÃO é sempre fatal — também é usado para resolução sob demanda: demand paging, copy-on-write após um fork, mapeamento preguiçoso de heap. O kernel decide caso a caso: resolver (mapeando a página) ou matar o processo. Neste simulador todo page fault é fatal: o processo vira ZOMBIE com BlockedOn="page_fault". O dispatch do HW passa pelo vetor 0x0E (veja a entrada em Interrupções).',
   },
   'Error code (page fault)': {
@@ -332,7 +332,7 @@ O badge do console mostra "KBuf {used}/{cap}" com cap = 16, que é um teto puram
   },
   'JMP / JE / JNE / JG / JL': {
     short: 'Saltos. Os condicionais leem os flags.',
-    detail: 'JMP é incondicional. JE/JZ salta se ZF=1. JNE/JNZ se ZF=0. JG/JL para comparações com sinal (leem SF e OF). Úteis após um CMP para tomar decisões.',
+    detail: 'JMP é incondicional. JE/JZ salta se ZF=1. JNE/JNZ se ZF=0. JG/JL para comparações com sinal (JG lê ZF, SF e OF; JL, quando SF≠OF). Úteis após um CMP para tomar decisões.',
   },
   'CMP a, b': {
     short: 'Compare: faz (a - b) e atualiza flags, sem gravar o resultado.',

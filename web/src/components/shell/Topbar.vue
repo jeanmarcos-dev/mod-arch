@@ -70,7 +70,7 @@ async function doLogout() { await auth.logout(); }
       <span>{{ isShared ? t('topbar.sharing') : t('topbar.share') }}</span>
     </button>
 
-    <ReportButton v-if="!onAdminRoute" />
+    <ReportButton variant="bar" v-if="!onAdminRoute" />
 
     <slot name="actions" />
 

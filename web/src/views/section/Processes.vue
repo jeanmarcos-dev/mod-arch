@@ -151,7 +151,7 @@ function stateClass(state: string): string {
 }
 
 const narratorHint = computed(() =>
-  prefs.narratorsEnabled
+  prefs.effectiveNarratorsEnabled
     ? null
     : t('sections.processes.narratorHint'),
 );
@@ -412,6 +412,11 @@ const cpuRegsForStrip = ['EIP', 'ESP', 'EBP', 'EAX', 'EBX', 'ECX', 'EDX'];
   flex-direction: column;
   gap: var(--space-4);
 }
+
+/* Keep each block at its intrinsic height: flex-shrink would otherwise
+   compress them below their content in the bounded column, so non-shrinking
+   content spills over instead of letting the page scroll. */
+.procs-page__content > * { flex-shrink: 0; }
 
 .procs-page__hero { display: flex; flex-direction: column; gap: var(--space-2); }
 

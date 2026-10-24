@@ -690,8 +690,13 @@ watch(() => props.active, async (active) => {
 }
 
 @media (max-width: 768px) {
+  /* The event log is virtualized (DynamicScroller), which needs a bounded
+     height to measure against. Inside the mobile page-scroll it becomes a
+     fixed-height block with its own internal scroll rather than dumping every
+     row into the page. */
   .log {
     font-size: 12px;
+    height: 60vh;
   }
   .log__scroller {
     font-size: 11px;
@@ -699,11 +704,12 @@ watch(() => props.active, async (active) => {
   .grid__cell {
     padding: 1px 4px;
   }
-  /* Move the jump-to-bottom button to the left edge so it stops competing
-     with the tutor FAB, which is pinned to the bottom-right of the viewport. */
   .follow-tail {
     right: auto;
-    left: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 36px;
+    height: 36px;
   }
 }
 </style>

@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router';
+import { createRouter, createWebHistory, type RouteLocationNormalized } from 'vue-router';
 import { useAdminStore } from '../stores/admin';
 import { useAppConfigStore } from '../stores/appConfig';
 import { useAuthStore } from '../stores/auth';
@@ -11,6 +11,7 @@ declare module 'vue-router' {
     section?: boolean;
     category?: string;
     requiresAuth?: boolean;
+    envAdminOnly?: boolean;
   }
 }
 
@@ -40,9 +41,11 @@ const AdminTutorMetrics = () => import('../views/admin/AdminTutorMetrics.vue');
 const AdminTutorConfig = () => import('../views/admin/AdminTutorConfig.vue');
 const AdminSecurity = () => import('../views/admin/AdminSecurity.vue');
 const AdminSimulator = () => import('../views/admin/AdminSimulator.vue');
+const AdminSchedule = () => import('../views/admin/AdminSchedule.vue');
 const AdminSessionHistory = () => import('../views/admin/AdminSessionHistory.vue');
 const AdminUserActivity = () => import('../views/admin/AdminUserActivity.vue');
 const AdminReports = () => import('../views/admin/AdminReports.vue');
+const AdminLive = () => import('../views/admin/AdminLive.vue');
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -99,6 +102,8 @@ export const router = createRouter({
         { path: 'tutor/config', name: 'admin-tutor-config', component: AdminTutorConfig, meta: { titleKey: 'router.titles.adminTutorConfigLong' } },
         { path: 'seguridad', name: 'admin-security', component: AdminSecurity, meta: { titleKey: 'router.titles.adminSecurity' } },
         { path: 'simulador', name: 'admin-simulator', component: AdminSimulator, meta: { titleKey: 'router.titles.adminSimulator' } },
+        { path: 'agenda', name: 'admin-schedule', component: AdminSchedule, meta: { titleKey: 'router.titles.adminSchedule' } },
+        { path: 'live', name: 'admin-live', component: AdminLive, meta: { titleKey: 'router.titles.adminLive', envAdminOnly: true } },
       ],
     },
     {
@@ -137,6 +142,11 @@ function defaultPath(defaultRoute: string, disabled: Set<string>): string {
   return resolved?.path || SAFE_FALLBACK_PATH;
 }
 
+export function envAdminRedirect(to: Pick<RouteLocationNormalized, 'meta'>, viaEnv: boolean) {
+  if (to.meta.envAdminOnly && !viaEnv) return { name: 'admin-dashboard' };
+  return true;
+}
+
 router.beforeEach(async (to, from) => {
   if (to.name === 'not-found') return true;
   const isAdminPath = to.path === '/admin' || to.path.startsWith('/admin/');
@@ -169,7 +179,7 @@ router.beforeEach(async (to, from) => {
   // navigation pending forever, ending in a blank <main> with no error.
   const fromAdmin = from.path === '/admin' || from.path.startsWith('/admin/');
   if (fromAdmin && admin.role !== null && to.name !== 'admin-login') {
-    return true;
+    return envAdminRedirect(to, admin.viaEnv);
   }
 
   const status = await admin.fetchMeStatus();
@@ -187,7 +197,7 @@ router.beforeEach(async (to, from) => {
   if (status !== 200) {
     return { name: 'admin-login', query: { next: to.fullPath } };
   }
-  return true;
+  return envAdminRedirect(to, admin.viaEnv);
 });
 
 function isLazyRouteLoadError(err: unknown): boolean {

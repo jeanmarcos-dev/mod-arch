@@ -20,9 +20,14 @@ import ConnectionBanner from '../components/shell/ConnectionBanner.vue';
 import { useConnectionBanner } from '../composables/useConnectionBanner';
 import MobileMenuButton from '../components/shell/MobileMenuButton.vue';
 import GlossaryModal from '../components/GlossaryModal.vue';
+import TutorLauncher from '../components/tutor/TutorLauncher.vue';
+import ReportModal from '../components/ReportModal.vue';
 import WhiteboardCursor from '../components/whiteboard/WhiteboardCursor.vue';
 import WhiteboardClickRipple from '../components/whiteboard/WhiteboardClickRipple.vue';
 import WhiteboardFocusPill from '../components/whiteboard/WhiteboardFocusPill.vue';
+import EventAnnouncer from '../components/a11y/EventAnnouncer.vue';
+import AccessibilityMenu from '../components/a11y/AccessibilityMenu.vue';
+import { useI18n } from 'vue-i18n';
 
 const cpu = useCpuStore();
 const viewer = useViewerStore();
@@ -30,7 +35,13 @@ const prefs = usePreferencesStore();
 const toast = useToastStore();
 const route = useRoute();
 const router = useRouter();
+const { t } = useI18n();
 const { visible: bannerVisible } = useConnectionBanner();
+
+function focusA11y(ev: Event) {
+  ev.preventDefault();
+  document.getElementById('a11y-menu')?.focus();
+}
 
 // Sidebar items reflect the section routes the viewer can navigate to.
 // Tool-only routes (preferencias, perfil, sesiones) are hidden — they have no
@@ -79,13 +90,11 @@ function applyPresence(p: ApplyArgs) {
   if (Array.isArray(p.cores) && p.cores.length > 0) {
     cpu.setVisibleCores(p.cores);
   }
-  // Assign the mode ref directly instead of calling setMode — setMode has a
-  // side effect that flips narrators on for non-compact presets, which would
-  // fight against the explicit narrators flag the host just broadcast.
-  if (p.mode === 'compact' || p.mode === 'pedagogic' || p.mode === 'projector') {
-    prefs.mode = p.mode;
-  }
-  prefs.narratorsEnabled = Boolean(p.narrators);
+  // Reflect the host's mode + narrators into the volatile mirror layer instead
+  // of writing the persisted preference. This drives the live view while
+  // following without clobbering the spectator's own choice, which must survive
+  // a reset or refresh (see preferences store: effectiveMode / setMirror).
+  prefs.setMirror({ mode: p.mode, narrators: Boolean(p.narrators) });
 }
 
 watch(
@@ -100,7 +109,14 @@ watch(
       narrators: p.narrators,
     });
   },
-  { deep: true, immediate: true },
+  { deep: true },
+);
+
+// Drop the mirror as soon as autofollow turns off so the spectator falls back
+// to their own persisted mode + narrators preference.
+watch(
+  () => viewer.autofollow,
+  (on) => { if (!on) prefs.clearMirror(); },
 );
 
 // Manual navigation while autofollow is on: respect the user's intent by
@@ -155,14 +171,15 @@ watch(() => cpu.glossaryOpenSignal, (n, prev) => {
 </script>
 
 <template>
-  <div :class="['shell', `shell--mode-${prefs.mode}`, { 'shell--disconnected': bannerVisible }]">
+  <div :class="['shell', `shell--mode-${prefs.effectiveMode}`, { 'shell--disconnected': bannerVisible }]">
+    <a class="skip-link" href="#a11y-menu" @click="focusA11y">{{ t('a11y.skipLink') }}</a>
     <ConnectionBanner />
     <MobileMenuButton />
     <Sidebar :items="items" />
     <div class="shell__main">
       <ViewerTopBar />
       <SimStatusRow v-if="isSimRoute" class="shell__status-row" :readonly="true" />
-      <main class="shell__content" data-pizarra-anchor="shell-content">
+      <main id="main-content" class="shell__content" data-pizarra-anchor="shell-content">
         <RouterView v-slot="{ Component }">
           <Transition name="route" mode="out-in">
             <component :is="Component" />
@@ -177,9 +194,13 @@ watch(() => cpu.glossaryOpenSignal, (n, prev) => {
       @close="glossaryOpen = false"
     />
 
+    <TutorLauncher />
+    <ReportModal />
     <WhiteboardCursor />
     <WhiteboardClickRipple />
     <WhiteboardFocusPill />
+    <EventAnnouncer />
+    <AccessibilityMenu />
   </div>
 </template>
 
@@ -221,8 +242,19 @@ watch(() => cpu.glossaryOpenSignal, (n, prev) => {
   min-height: 0;
 }
 
-.shell--mode-pedagogic { --row-density: 1.15; font-size: 16px; }
-.shell--mode-projector { --row-density: 1.4; font-size: 18px; }
+/* Mobile: the content area becomes the single vertical scroll container so a
+   section taller than the viewport stays reachable. Desktop keeps the fixed
+   layout that fills the viewport with per-panel scrolls. */
+@media (max-width: 768px) {
+  .shell__content {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+.shell--mode-pedagogic { --row-density: 1.15; font-size: calc(16px * var(--a11y-text-scale, 1)); }
+.shell--mode-projector { --row-density: 1.4; font-size: calc(18px * var(--a11y-text-scale, 1)); }
 
 .route-enter-from { opacity: 0; transform: translateY(8px); }
 .route-leave-to   { opacity: 0; transform: translateY(-6px); }

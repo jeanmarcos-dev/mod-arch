@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { LogIn, Minus } from '@lucide/vue';
 
 import TutorPanel from './TutorPanel.vue';
@@ -23,6 +24,7 @@ const prefs = usePreferencesStore();
 const { isMobile } = useBreakpoint();
 const router = useRouter();
 const route = useRoute();
+const { t } = useI18n();
 
 // Dim the FAB whenever a foreground tool needs the bottom of the viewport on
 // mobile. Opacity + pointer-events only — keeping z-index avoids a sudden
@@ -59,20 +61,20 @@ function handleCite(citation: TutorCitation) {
       // Loading the demo names the citation id directly. The student sees
       // the simulator switch to the demo it just heard about.
       cpu.load(citation.id);
-      toast.ok(`Cargando demo "${citation.id}"`);
+      toast.ok(t('tutor.launcher.loadingDemo', { id: citation.id }));
       return;
     case 'isa':
       // ISA chunks are project-internal spec; we surface the topic in a
       // toast for now. A future iteration could open a side panel.
-      toast.info(`ISA — ${citation.label.replace(/^\[ISA:\s*/, '').replace(/\]$/, '')}`);
+      toast.info(t('tutor.launcher.isaRef', { label: citation.label.replace(/^\[ISA:\s*/, '').replace(/\]$/, '') }));
       return;
     case 'docs':
-      toast.info(`Documentación — ${citation.label.replace(/^\[Docs:\s*/, '').replace(/\]$/, '')}`);
+      toast.info(t('tutor.launcher.docsRef', { label: citation.label.replace(/^\[Docs:\s*/, '').replace(/\]$/, '') }));
       return;
     case 'silberschatz':
     default: {
-      const ref = citation.page ? `página ${citation.page}` : citation.id;
-      toast.info(`Referencia: Silberschatz, ${ref}`);
+      const ref = citation.page ? t('tutor.launcher.bookPage', { page: citation.page }) : citation.id;
+      toast.info(t('tutor.launcher.bookRef', { ref }));
     }
   }
 }
@@ -240,11 +242,11 @@ function onBackdropClick() {
       :class="{ has_hint: unreadCount > 0, 'is-dragging': isDragging }"
       :style="dragStyle"
       :title="unreadCount > 0
-        ? `Tutor — ${unreadCount} mensaje(s) nuevo(s) (arrastre para mover)`
-        : 'Hablar con el tutor (arrastre para mover)'"
+        ? t('tutor.launcher.openUnread', { count: unreadCount })
+        : t('tutor.launcher.open')"
       :aria-label="unreadCount > 0
-        ? `Abrir tutor, ${unreadCount} mensajes nuevos. Arrastre para mover`
-        : 'Abrir tutor. Arrastre para mover'"
+        ? t('tutor.launcher.openAriaUnread', { count: unreadCount })
+        : t('tutor.launcher.openAria')"
       @pointerdown="onFabPointerDown"
       @click="tutor.setOpen(true)"
     >
@@ -258,21 +260,18 @@ function onBackdropClick() {
     <!-- Docked mode: panel anchored to the corner with a slide transition. -->
     <transition name="slide">
       <div v-if="tutor.open && !isExpanded" class="panel-wrap docked">
-        <div v-if="needsLogin" class="login-gate" role="dialog" aria-label="Inicie sesión">
-          <button class="gate-close" @click="tutor.setOpen(false)" aria-label="Minimizar" title="Minimizar">
+        <div v-if="needsLogin" class="login-gate" role="dialog" :aria-label="t('tutor.launcher.gateLabel')">
+          <button class="gate-close" @click="tutor.setOpen(false)" :aria-label="t('tutor.launcher.minimize')" :title="t('tutor.launcher.minimize')">
             <Minus :size="14" :stroke-width="2.5" />
           </button>
           <div class="gate-icon"><TutorBotIcon :size="32" :stroke-width="1.4" /></div>
-          <h3 class="gate-title">ARCHIUS protegido</h3>
-          <p class="gate-text">
-            Para conversar con ARCHIUS sobre Sistemas Operativos debe
-            iniciar sesión con su correo institucional.
-          </p>
+          <h3 class="gate-title">{{ t('tutor.launcher.gateTitle') }}</h3>
+          <p class="gate-text">{{ t('tutor.launcher.gateText') }}</p>
           <button class="gate-cta" @click="goToLogin">
             <LogIn :size="14" :stroke-width="2" />
-            Iniciar sesión
+            {{ t('tutor.launcher.gateCta') }}
           </button>
-          <p class="gate-hint">El simulador sigue siendo de uso libre.</p>
+          <p class="gate-hint">{{ t('tutor.launcher.gateHint') }}</p>
         </div>
         <TutorPanel v-else @close="tutor.setOpen(false)" @cite="handleCite" />
       </div>
@@ -289,25 +288,22 @@ function onBackdropClick() {
           class="tutor-modal-root"
           role="dialog"
           aria-modal="true"
-          aria-label="Tutor expandido"
+          :aria-label="t('tutor.launcher.expandedLabel')"
         >
           <div class="tutor-backdrop" @click="onBackdropClick" />
           <div class="panel-wrap expanded" @click.stop>
-            <div v-if="needsLogin" class="login-gate expanded-gate" role="dialog" aria-label="Inicie sesión">
-              <button class="gate-close" @click="tutor.setOpen(false)" aria-label="Minimizar" title="Minimizar">
+            <div v-if="needsLogin" class="login-gate expanded-gate" role="dialog" :aria-label="t('tutor.launcher.gateLabel')">
+              <button class="gate-close" @click="tutor.setOpen(false)" :aria-label="t('tutor.launcher.minimize')" :title="t('tutor.launcher.minimize')">
                 <Minus :size="16" :stroke-width="2.5" />
               </button>
               <div class="gate-icon"><TutorBotIcon :size="44" :stroke-width="1.4" /></div>
-              <h3 class="gate-title">ARCHIUS protegido</h3>
-              <p class="gate-text">
-                Para conversar con ARCHIUS sobre Sistemas Operativos debe
-                iniciar sesión con su correo institucional.
-              </p>
+              <h3 class="gate-title">{{ t('tutor.launcher.gateTitle') }}</h3>
+              <p class="gate-text">{{ t('tutor.launcher.gateText') }}</p>
               <button class="gate-cta" @click="goToLogin">
                 <LogIn :size="14" :stroke-width="2" />
-                Iniciar sesión
+                {{ t('tutor.launcher.gateCta') }}
               </button>
-              <p class="gate-hint">El simulador sigue siendo de uso libre.</p>
+              <p class="gate-hint">{{ t('tutor.launcher.gateHint') }}</p>
             </div>
             <TutorPanel v-else @close="tutor.setOpen(false)" @cite="handleCite" />
           </div>

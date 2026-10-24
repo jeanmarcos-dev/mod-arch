@@ -33,7 +33,10 @@ import WhiteboardCursor from '../components/whiteboard/WhiteboardCursor.vue';
 import WhiteboardClickRipple from '../components/whiteboard/WhiteboardClickRipple.vue';
 import WhiteboardFocusPill from '../components/whiteboard/WhiteboardFocusPill.vue';
 import ViewerShell from './ViewerShell.vue';
+import EventAnnouncer from '../components/a11y/EventAnnouncer.vue';
+import AccessibilityMenu from '../components/a11y/AccessibilityMenu.vue';
 import { useWhiteboardStore } from '../stores/whiteboard';
+import { useViewTracking } from '../composables/useViewTracking';
 
 const cpu = useCpuStore();
 const prefs = usePreferencesStore();
@@ -45,6 +48,7 @@ const route = useRoute();
 const { t, locale } = useI18n();
 const { visible: bannerVisible } = useConnectionBanner();
 const { isMobile } = useBreakpoint();
+useViewTracking();
 
 // Any cpu.openGlossary('EIP') call from a panel opens the popup right where
 // the student clicked. The full /glosario page is still reachable from the
@@ -70,6 +74,33 @@ onMounted(() => {
   // against double-fetch via `loaded`).
   appCfg.load();
 });
+
+// Once the admin-curated bootstrap config has loaded, seed the sticky defaults
+// onto every pref the user has not chosen themselves. applyAdminDefaults skips
+// touched fields, so this never clobbers a deliberate pick and is safe to run
+// for owners and students alike.
+watch(
+  () => appCfg.loaded,
+  (ready) => { if (ready) prefs.applyAdminDefaults(appCfg.adminDefaults); },
+  { immediate: true },
+);
+
+// The default starting clock is a server-synced parameter, so it can only be
+// pushed once the socket is open. Apply it the first time both the config and
+// the connection are ready, and only while the user has not set a speed.
+let clockDefaultApplied = false;
+watch(
+  [() => appCfg.loaded, () => cpu.connected],
+  ([ready, connected]) => {
+    if (clockDefaultApplied || !ready || !connected) return;
+    const speed = appCfg.adminDefaults?.speed;
+    if (typeof speed === 'number') {
+      cpu.applyDefaultClockHz(speed);
+      clockDefaultApplied = true;
+    }
+  },
+  { immediate: true },
+);
 
 // The breadcrumb was removed from the topbar, so the section name now lives
 // only in document.title (and in the active sidebar item). This avoids a
@@ -284,6 +315,11 @@ function observeTopChrome() {
 watch(() => route.path, () => nextTick(observeTopChrome), { flush: 'post' });
 onMounted(() => nextTick(observeTopChrome));
 onBeforeUnmount(() => topChromeObserver?.disconnect());
+
+function focusA11y(ev: Event) {
+  ev.preventDefault();
+  document.getElementById('a11y-menu')?.focus();
+}
 </script>
 
 <template>
@@ -296,13 +332,14 @@ onBeforeUnmount(() => topChromeObserver?.disconnect());
     ref="shellRef"
     :class="['shell', `shell--mode-${prefs.mode}`, { 'shell--disconnected': bannerVisible }]"
   >
+    <a class="skip-link" href="#a11y-menu" @click="focusA11y">{{ t('a11y.skipLink') }}</a>
     <ConnectionBanner />
     <MobileMenuButton />
     <Sidebar :items="items" />
     <div class="shell__main">
       <SimBar v-if="isSimRoute" />
       <Topbar v-else />
-      <main class="shell__content" data-pizarra-anchor="shell-content">
+      <main id="main-content" class="shell__content" data-pizarra-anchor="shell-content">
         <RouterView v-slot="{ Component }">
           <Transition name="route" mode="out-in">
             <component :is="Component" />
@@ -320,6 +357,8 @@ onBeforeUnmount(() => topChromeObserver?.disconnect());
 
     <TutorLauncher />
     <ReportModal />
+    <EventAnnouncer />
+    <AccessibilityMenu />
 
     <!-- Whiteboard overlay: paints the owner's pointer for viewers. Cheap
          to keep mounted (renders nothing until an owner_pointer arrives). -->
@@ -364,10 +403,22 @@ onBeforeUnmount(() => topChromeObserver?.disconnect());
   min-height: 0;
 }
 
+/* Mobile: the content area becomes the single vertical scroll container so a
+   section taller than the viewport (large memory grid, deep process tree,
+   stacked panels) stays reachable. Desktop keeps the fixed three-column layout
+   that fills the viewport with per-panel scrolls. */
+@media (max-width: 768px) {
+  .shell__content {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
 /* Mode-driven density and font-size knobs. Sections opt in by referencing the
    --row-density variable and font-size: inherit. */
-.shell--mode-pedagogic { --row-density: 1.15; font-size: 16px; }
-.shell--mode-projector { --row-density: 1.4; font-size: 18px; }
+.shell--mode-pedagogic { --row-density: 1.15; font-size: calc(16px * var(--a11y-text-scale, 1)); }
+.shell--mode-projector { --row-density: 1.4; font-size: calc(18px * var(--a11y-text-scale, 1)); }
 
 /* Route transition: gentle slide+fade so changing sections feels light but
    noticeable. Honors prefers-reduced-motion via the global rule in style.css. */

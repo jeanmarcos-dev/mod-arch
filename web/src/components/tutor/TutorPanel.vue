@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Send, Trash2, Minus, Maximize2, Minimize2 } from '@lucide/vue';
 
 import TutorMessage from './TutorMessage.vue';
@@ -10,10 +11,12 @@ import { useTutorStore, type TutorCitation } from '../../stores/tutor';
 const emit = defineEmits<{ (e: 'close'): void; (e: 'cite', citation: TutorCitation): void }>();
 
 const tutor = useTutorStore();
-const { ask } = useTutor();
+const { t } = useI18n();
+const { ask, rate } = useTutor();
 const draft = ref('');
 const listRef = ref<HTMLElement | null>(null);
 const isExpanded = computed(() => tutor.displayMode === 'expanded');
+const hints = [{ id: 'pl3' }, { id: 'ctxSwitch' }, { id: 'ready' }] as const;
 
 function submit() {
   const q = draft.value.trim();
@@ -23,7 +26,7 @@ function submit() {
 }
 
 function clear() {
-  if (confirm('¿Borrar la conversación actual con el tutor?')) {
+  if (confirm(t('tutor.panel.clearConfirm'))) {
     tutor.clear();
   }
 }
@@ -45,7 +48,7 @@ onMounted(scrollToBottom);
   <aside
     class="tutor-panel"
     :class="{ 'is-expanded': isExpanded }"
-    aria-label="Tutor ARCHIUS"
+    :aria-label="t('tutor.panel.label')"
   >
     <header class="head">
       <div class="title">
@@ -55,7 +58,7 @@ onMounted(scrollToBottom);
         </div>
         <div class="title-text">
           <span class="title-main">ARCHIUS</span>
-          <span class="title-sub">su guía en MODARCH</span>
+          <span class="title-sub">{{ t('tutor.panel.subtitle') }}</span>
         </div>
       </div>
       <div class="actions">
@@ -63,21 +66,21 @@ onMounted(scrollToBottom);
           v-if="tutor.messages.length > 0"
           class="icon-btn"
           @click="clear"
-          title="Borrar conversación"
-          aria-label="Borrar conversación"
+          :title="t('tutor.panel.clear')"
+          :aria-label="t('tutor.panel.clear')"
         >
           <Trash2 :size="14" :stroke-width="2" />
         </button>
         <button
           class="icon-btn"
           @click="tutor.toggleDisplayMode()"
-          :title="isExpanded ? 'Contraer panel' : 'Expandir panel'"
-          :aria-label="isExpanded ? 'Contraer panel' : 'Expandir panel'"
+          :title="isExpanded ? t('tutor.panel.collapse') : t('tutor.panel.expand')"
+          :aria-label="isExpanded ? t('tutor.panel.collapse') : t('tutor.panel.expand')"
         >
           <Minimize2 v-if="isExpanded" :size="14" :stroke-width="2" />
           <Maximize2 v-else :size="14" :stroke-width="2" />
         </button>
-        <button class="icon-btn" @click="emit('close')" title="Minimizar tutor" aria-label="Minimizar tutor">
+        <button class="icon-btn" @click="emit('close')" :title="t('tutor.panel.minimize')" :aria-label="t('tutor.panel.minimize')">
           <Minus :size="14" :stroke-width="2.5" />
         </button>
       </div>
@@ -87,21 +90,30 @@ onMounted(scrollToBottom);
       <div class="empty-avatar">
         <TutorBotIcon :size="28" :stroke-width="1.4" />
       </div>
-      <p class="empty-hello">¿En qué puedo ayudarle?</p>
-      <p class="empty-sub">Pregunte sobre lo que ve en el simulador.</p>
+      <p class="empty-hello">{{ t('tutor.panel.hello') }}</p>
+      <p class="empty-sub">{{ t('tutor.panel.intro') }}</p>
       <ul class="hints">
-        <li><button class="hint" @click="draft = '¿Qué significa que el CPU esté en modo PL3?'">¿qué es PL3?</button></li>
-        <li><button class="hint" @click="draft = '¿Por qué cambió de proceso en el último context switch?'">¿por qué cambió de proceso?</button></li>
-        <li><button class="hint" @click="draft = '¿Para qué sirve la cola de READY del scheduler?'">cola READY</button></li>
+        <li v-for="hint in hints" :key="hint.id">
+          <button class="hint" @click="draft = t(`tutor.hints.${hint.id}.question`)">{{ t(`tutor.hints.${hint.id}.label`) }}</button>
+        </li>
       </ul>
+      <p class="privacy-note">{{ t('tutor.panel.privacyNotice') }}</p>
     </div>
 
-    <div v-else ref="listRef" class="list">
+    <div
+      v-else
+      ref="listRef"
+      class="list"
+      role="log"
+      aria-live="polite"
+      :aria-label="t('tutor.panel.conversation')"
+    >
       <TutorMessage
         v-for="m in tutor.messages"
         :key="m.id"
         :msg="m"
         @cite="onCite"
+        @rate="(value) => rate(m.id, value)"
       />
     </div>
 
@@ -109,8 +121,8 @@ onMounted(scrollToBottom);
       <textarea
         v-model="draft"
         name="tutor_question"
-        aria-label="Pregunta al tutor"
-        placeholder="Escriba su pregunta…"
+        :aria-label="t('tutor.panel.composerLabel')"
+        :placeholder="t('tutor.panel.composerPlaceholder')"
         rows="1"
         :disabled="tutor.sending"
         @keydown.enter.exact.prevent="submit"
@@ -119,7 +131,8 @@ onMounted(scrollToBottom);
         type="submit"
         class="send-btn"
         :disabled="tutor.sending || !draft.trim()"
-        aria-label="Enviar pregunta"
+        
+        :aria-label="t('tutor.panel.send')"
       >
         <Send :size="16" :stroke-width="2" />
       </button>
@@ -281,6 +294,13 @@ onMounted(scrollToBottom);
   font-size: 0.78rem;
   color: var(--text-muted);
 }
+.privacy-note {
+  margin: 0.85rem 0 0;
+  max-width: 18rem;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
 .hints {
   list-style: none;
   padding: 0;
@@ -353,6 +373,9 @@ onMounted(scrollToBottom);
   outline: none;
   overflow-y: auto;
   transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+@media (max-width: 768px) {
+  .composer textarea { font-size: 16px; }
 }
 .composer textarea::placeholder {
   color: var(--text-muted);

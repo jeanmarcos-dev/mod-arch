@@ -804,6 +804,16 @@ function jumpToRegion(addr: number) {
 }
 
 @media (max-width: 768px) {
+  /* On mobile the shell content is the single scroll container, so the panel
+     grows to its content instead of trapping it behind an inner overflow. */
+  .mem {
+    height: auto;
+    overflow: visible;
+  }
+  .memory-stack {
+    overflow-y: visible;
+  }
+
   .view-tabs button {
     padding: 10px 12px;
     font-size: 13px;

@@ -134,6 +134,8 @@ function continueAnonymous() {
           />
         </div>
 
+        <p class="login-page__privacy" data-testid="login-privacy">{{ t('privacy.loginNotice') }}</p>
+
         <Btn
           type="submit"
           :loading="busy"
@@ -201,6 +203,17 @@ function continueAnonymous() {
 }
 
 .login-page__hint {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.login-page__privacy {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
   color: var(--text-dim);
   font-size: 12px;
   line-height: 1.5;

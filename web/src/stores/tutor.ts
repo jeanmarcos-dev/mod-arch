@@ -9,6 +9,11 @@ const STORAGE_KEY = 'modos-cpu:tutor:v1';
 // session without pushing the per-origin quota.
 const MESSAGES_CAP = 50;
 
+export const INTERRUPTED_ERROR_CODE = 'interrupted';
+export const TUTOR_UNAVAILABLE_CODE = 'tutor_unavailable';
+
+export type TutorRating = 1 | -1;
+
 interface PersistedTutorState {
   displayMode: TutorDisplayMode;
   messages: TutorMessage[];
@@ -46,8 +51,11 @@ function hydrateMessages(raw: unknown[]): TutorMessage[] {
       cacheHit: m.cacheHit,
       degraded: m.degraded,
       error: m.error,
+      errorCode: m.errorCode,
       retryAfterSec: m.retryAfterSec,
       toolsUsed: m.toolsUsed,
+      requestId: m.requestId ?? (m.role === 'tutor' && m.id.startsWith('a-') ? m.id.slice(2) : undefined),
+      rating: m.rating === 1 || m.rating === -1 ? m.rating : undefined,
       createdAt: typeof m.createdAt === 'number' ? m.createdAt : Date.now(),
     };
     if (m.pending || m.toolInFlight) {
@@ -55,7 +63,8 @@ function hydrateMessages(raw: unknown[]): TutorMessage[] {
       message.toolInFlight = undefined;
       message.queueWaitSeconds = undefined;
       if (!message.error) {
-        message.error = 'conexión interrumpida';
+        message.error = INTERRUPTED_ERROR_CODE;
+        message.errorCode = INTERRUPTED_ERROR_CODE;
       }
     }
     out.push(message);
@@ -77,7 +86,10 @@ export interface TutorMessage {
   cacheHit?: boolean;
   degraded?: boolean;
   error?: string;
+  errorCode?: string;
   retryAfterSec?: number;
+  requestId?: string;
+  rating?: TutorRating;
   pending?: boolean;
   // Currently-running tool the agent has called while still pending. Cleared
   // when the answer arrives or the agent moves on.
@@ -120,7 +132,15 @@ export interface IncomingAnswer {
   cache_hit?: boolean;
   degraded?: boolean;
   error?: string;
+  error_code?: string;
+  code?: string;
   retry_after_sec?: number;
+}
+
+export function answerErrorCode(ans: IncomingAnswer): string | undefined {
+  if (!ans.error) return undefined;
+  const code = ans.error_code ?? ans.code ?? (ans.error === TUTOR_UNAVAILABLE_CODE ? ans.error : undefined);
+  return code || undefined;
 }
 
 /**
@@ -225,6 +245,8 @@ export const useTutorStore = defineStore('tutor', () => {
         role: 'tutor',
         text: ans.text ?? '',
         error: ans.error,
+        errorCode: answerErrorCode(ans),
+        requestId: ans.request_id || undefined,
         citations: ans.citations,
         latencyMs: ans.latency_ms,
         cacheHit: ans.cache_hit,
@@ -242,6 +264,8 @@ export const useTutorStore = defineStore('tutor', () => {
     msg.cacheHit = ans.cache_hit;
     msg.degraded = ans.degraded;
     msg.error = ans.error;
+    msg.errorCode = answerErrorCode(ans);
+    msg.requestId = ans.request_id;
     msg.retryAfterSec = ans.retry_after_sec;
     if (!ans.error) bumpUnreadIfClosed(ans.request_id);
   }
@@ -296,6 +320,14 @@ export const useTutorStore = defineStore('tutor', () => {
     msg.error = reason;
   }
 
+  function rate(messageId: string, value: TutorRating): { requestId: string; rating: TutorRating | 0 } | null {
+    const msg = messages.value.find((m) => m.id === messageId);
+    if (!msg || msg.role !== 'tutor' || msg.pending || msg.error || !msg.requestId) return null;
+    const next: TutorRating | 0 = msg.rating === value ? 0 : value;
+    msg.rating = next === 0 ? undefined : next;
+    return { requestId: msg.requestId, rating: next };
+  }
+
   const lastMessage = computed(() => messages.value[messages.value.length - 1] ?? null);
 
   return {
@@ -314,5 +346,6 @@ export const useTutorStore = defineStore('tutor', () => {
     applyAnswer,
     applyProgress,
     failPending,
+    rate,
   };
 });

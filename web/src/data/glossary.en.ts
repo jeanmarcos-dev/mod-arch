@@ -7,7 +7,7 @@ export const GLOSSARY_EN: Record<string, { short: string; detail: string }> = {
   // ─── Modes ──────────────────────────────────────────────────────────────
   'PL — Privilege Level': {
     short: 'CPU privilege level. PL3 = user, PL0 = kernel.',
-    detail: 'x86 defines 4 privilege levels (0-3). Conventionally PL0 = kernel (full permissions) and PL3 = user (restricted access). The intermediate levels are almost never used. The HW checks PL on every memory access, every execution of a privileged instruction, etc. SW CANNOT change the PL directly — only the HW does it on INT/IRET/exceptions.',
+    detail: 'x86 defines 4 privilege levels (0-3). Conventionally PL0 = kernel (full permissions) and PL3 = user (restricted access). The intermediate levels are almost never used. The HW checks PL on every memory access, every execution of a privileged instruction, etc. A user program CANNOT write its PL directly: the HW changes it on INT/IRET/exceptions (on real x86 also on SYSCALL/SYSENTER and call gates).',
   },
   'RPL — Requested Privilege Level': {
     short: 'Bits 0-1 of a segment selector. Mark the privilege "requested" by that selector.',
@@ -23,7 +23,7 @@ export const GLOSSARY_EN: Record<string, { short: string; detail: string }> = {
   },
   'Mode switch': {
     short: 'Transition between user and kernel. Performed by HW, never by SW.',
-    detail: 'When an IRQ arrives or user does `int N`, the HW saves state (EFLAGS/CS/EIP) and switches mode automatically. The kernel only configures WHICH handler to invoke (via IDT); the mode change belongs to HW. On IRET, the HW pops the frame and restores the original mode.',
+    detail: 'When an IRQ arrives or user does `int N`, the HW saves state (EFLAGS/CS/EIP, plus the user SS:ESP when going from PL3 to PL0) and switches mode automatically. The kernel only configures WHICH handler to invoke (via IDT); the mode change belongs to HW. On IRET, the HW pops the frame and restores the original mode.',
   },
 
   // ─── Registers ──────────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ export const GLOSSARY_EN: Record<string, { short: string; detail: string }> = {
   // ─── Flags ──────────────────────────────────────────────────────────────
   'ZF — Zero Flag': {
     short: '1 when the last result was 0.',
-    detail: 'Set by ADD/SUB/CMP/AND/etc. Read by JE/JZ (jumps if ZF=1) and JNE/JNZ (jumps if ZF=0). CMP is a SUB that only updates flags without writing the result.',
+    detail: 'Set by ADD/SUB/CMP/INC/DEC/XOR, among others. Read by JE/JZ (jumps if ZF=1) and JNE/JNZ (jumps if ZF=0). CMP is a SUB that only updates flags without writing the result.',
   },
   'SF — Sign Flag': {
     short: '1 when the last result was negative.',
@@ -97,19 +97,19 @@ export const GLOSSARY_EN: Record<string, { short: string; detail: string }> = {
   },
   'Software interrupt': {
     short: 'Trap triggered by the INT N instruction from code.',
-    detail: 'User or kernel executes `INT N`. The HW reads IDT[N], pushes EFLAGS/CS/EIP, switches to kernel mode and jumps to the handler. Functionally identical to a HW IRQ dispatch; the difference is the origin (`source = SW` vs `HW`). Classically used for syscalls (Linux i386 uses INT 0x80). NOT an IRQ in the strict sense, even if it shares the mechanism.',
+    detail: 'User or kernel executes `INT N`. The HW reads IDT[N], pushes EFLAGS/CS/EIP, switches to kernel mode and jumps to the handler. It uses the same dispatch mechanism as a HW IRQ, but differs in that it is synchronous, does not depend on the IF flag and is originated by the program itself (`source = SW` vs `HW`). Classically used for syscalls (Linux i386 uses INT 0x80). NOT an IRQ in the strict sense, even if it shares the mechanism.',
   },
   'Vector 0x00 — Divide error': {
     short: 'Exception when an integer division divides by zero (or overflows).',
-    detail: 'Raised by the CPU itself when DIV or IDIV runs with a zero divisor, or when the quotient does not fit in the destination register. A fault-type exception: EIP points at the offending instruction, not the next one. The kernel usually terminates the offending process.',
+    detail: 'On real x86 the CPU raises it when DIV or IDIV runs with a zero divisor, or when the quotient does not fit in the destination register; it is a fault-type exception (EIP points at the offending instruction). In this simulator the vector is installed in the IDT, but the ISA has no division instructions, so it never fires.',
   },
   'IRQ 0x20 — Timer': {
     short: 'Periodic tick of the programmable timer (PIT).',
-    detail: 'Every `quantum` CPU ticks this HW IRQ fires. The scheduler uses it to preempt: save the current PCB, pick the next process, restore its PCB. This is what makes the OS preemptive multitasking. Unlike vectors 0x00 / 0x0E / 0x80 / 0x81, this one IS an IRQ in the strict sense: external HW (PIT), asynchronous.',
+    detail: 'Every `quantum` CPU ticks this HW IRQ fires. The scheduler uses it to preempt: save the current PCB, pick the next process, restore its PCB. This is what makes the OS preemptive multitasking. Unlike vectors 0x00 / 0x0E / 0x80 / 0x81, this one IS an IRQ in the strict sense: on real x86 external HW (PIT) fires it, asynchronously. In the simulator the tick is modeled by counting CPU steps, which is why it is deterministic.',
   },
   'IRQ 0x21 — Keyboard': {
     short: 'A key was pressed.',
-    detail: 'The keyboard controller drops the scancode/byte into a buffer and fires this HW IRQ. The kernel handler reads the byte and, if there is a BLOCKED process waiting on the keyboard, hands it the byte and wakes it. Like the timer, an IRQ in the strict sense (external HW, asynchronous).',
+    detail: 'The keyboard controller drops the byte into a buffer and fires this HW IRQ (real x86 delivers scancodes; the simulator delivers ASCII characters directly). The kernel handler reads the byte and, if there is a BLOCKED process waiting on the keyboard, hands it the byte and wakes it. Like the timer, an IRQ in the strict sense (external HW, asynchronous).',
   },
   KeyboardBuf: {
     short: 'Internal kernel FIFO queue holding bytes that have not yet been delivered to a reader.',
@@ -127,7 +127,7 @@ The console badge reads "KBuf {used}/{cap}" with cap = 16, which is a purely did
   },
   'INT 0x81 — Mutex/Semáforo': {
     short: 'Simulator-specific software interrupt for mutex and semaphore operations.',
-    detail: 'Not standard Linux — a convention of this simulator. EAX picks the operation (mutex_lock=1, mutex_unlock=2, sem_wait=3, sem_signal=4); EBX carries the resource ID. The handler lives in the kernel and manipulates the mutex and semaphore lists you see at /concurrencia.',
+    detail: 'Not standard Linux — a convention of this simulator. EAX picks the operation (mutex_create=0x10, mutex_lock=0x11, mutex_unlock=0x12, sem_create=0x20, sem_wait=0x21, sem_signal=0x22); EBX carries the resource ID. The handler lives in the kernel and manipulates the mutex and semaphore lists you see at /concurrencia.',
   },
   'Vector 0x0E — Page Fault': {
     short: 'Vector of the page fault exception, raised by the MMU.',
@@ -139,11 +139,11 @@ The console badge reads "KBuf {used}/{cap}" with cap = 16, which is a purely did
   },
   'INT N': {
     short: 'Instruction that triggers a software interrupt.',
-    detail: 'User executes `int N`. The HW reads IDT[N], pushes EFLAGS/CS/EIP, switches to kernel mode, jumps to the handler. Functionally IDENTICAL to a HW IRQ dispatch; the difference is only the source (SW vs HW).',
+    detail: 'User executes `int N`. The HW reads IDT[N], pushes EFLAGS/CS/EIP, switches to kernel mode, jumps to the handler. It shares the dispatch mechanism with a HW IRQ, but it is synchronous, is not masked by IF and is originated by the program (source SW vs HW).',
   },
   IRET: {
     short: 'Return from interrupt. Undoes what INT/dispatch did.',
-    detail: 'Pops from the stack, IN THIS POP ORDER: first EIP (because it is at the top), then CS, then EFLAGS. If the popped CS is user (RPL=3), it also pops ESP and SS and switches to user mode (this is called "inter-privilege IRET"). It is the only "clean" way to return from kernel to user. The physical memory of the frame, read from low to high addresses, is [EIP][CS][EFLAGS][ESP_user][SS_user]: the reverse of the pop order because the stack grows downward.',
+    detail: 'Pops from the stack, IN THIS POP ORDER: first EIP (because it is at the top), then CS, then EFLAGS. If the popped CS is user (RPL=3), it also pops ESP and SS and switches to user mode (this is called "inter-privilege IRET"). It is the only "clean" way to return from kernel to user. The physical memory of the frame, read from low to high addresses, is [EIP][CS][EFLAGS][ESP_user][SS_user]: exactly the order in which IRET pops them; the HW had pushed them in the opposite direction (SS first) because the stack grows downward.',
   },
   'IDT — Interrupt Descriptor Table': {
     short: 'Table with 256 entries: vector → handler.',
@@ -157,7 +157,7 @@ The console badge reads "KBuf {used}/{cap}" with cap = 16, which is a purely did
   },
   'PID — Process ID': {
     short: 'Unique identifier of the process.',
-    detail: 'The kernel assigns a PID monotonically when creating each process. PID 1 is typically init. In our simulator, PID 1 = first process of the demo, PID 2 = second, etc.',
+    detail: 'The kernel assigns a PID monotonically when creating each process. PID 1 is init, in this simulator too: loading any demo creates init and the demo\'s processes get the following PIDs (2, 3, …).',
   },
   RUN: {
     short: 'Process currently executing on the CPU.',
@@ -177,7 +177,7 @@ The console badge reads "KBuf {used}/{cap}" with cap = 16, which is a purely did
   },
   'Context switch': {
     short: 'Change of the process that is in RUN.',
-    detail: "When it happens: 1) Save the current process's state into its PCB. 2) Pick the next. 3) Load its PCB into the CPU. 4) Continue. In our simulator this happens between the IRQ dispatch and the IRET — the kernel-stack frame is \"patched\" with the new process's registers.",
+    detail: "When it happens: 1) Save the current process's state into its PCB. 2) Pick the next. 3) Load its PCB into the CPU. 4) Continue. In our simulator this happens between the IRQ dispatch and the IRET — the kernel-stack frame is \"patched\" with the new process's registers. On real x86 the address space is also switched (CR3) and the TLB is flushed, which is a large part of the real cost.",
   },
   'Ready queue': {
     short: 'FIFO queue of READY processes.',
@@ -197,7 +197,7 @@ The console badge reads "KBuf {used}/{cap}" with cap = 16, which is a purely did
   },
   'clone()': {
     short: 'Linux primitive syscall for creating tasks with sharing flags.',
-    detail: 'fork(), vfork() and pthread_create() are particular cases of clone(). The relevant flags here: CLONE_VM (share address space), CLONE_FILES (share fd table), CLONE_THREAD (inherit TGID, become a sibling thread), CLONE_VFORK (block the parent until the child exits). Combining them yields the classic pthread_create behavior: CLONE_VM | CLONE_FILES | CLONE_THREAD.',
+    detail: 'fork(), vfork() and pthread_create() are particular cases of clone(). The relevant flags here: CLONE_VM (share address space), CLONE_FILES (share fd table), CLONE_THREAD (inherit TGID, become a sibling thread), CLONE_VFORK (block the parent until the child exits). On Linux, pthread_create combines, among others, CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD (CLONE_THREAD requires CLONE_SIGHAND, which in turn requires CLONE_VM); the simulator models only a subset of these flags.',
   },
   pthread_create: {
     short: 'POSIX API to create a thread. In glibc it translates into clone().',
@@ -205,7 +205,7 @@ The console badge reads "KBuf {used}/{cap}" with cap = 16, which is a purely did
   },
   'Race condition': {
     short: 'Bug where two tasks compete for a datum without synchronization and the result depends on the interleaving.',
-    detail: 'The threads_race demo shows it: two threads do counter++ which is really load-inc-store. If the timer interrupts between load and store, the other thread can read the same stale value and both end up writing the same number — one increment is lost. With a small quantum and 200 iterations the final counter sits well below 400. The didactic fix is threads_safe: bracketing the critical section with mutex_lock/unlock.',
+    detail: 'The threads_race demo shows it: two threads do counter++ which is really load-inc-store. If the timer interrupts between load and store, the other thread can read the same stale value and both end up writing the same number — one increment is lost. With 200 iterations per thread the final counter can end up below 400; how many increments are lost depends on the quantum and on the instant of the preemption. The didactic fix is threads_safe: bracketing the critical section with mutex_lock/unlock.',
   },
 
   // ─── Scheduler ──────────────────────────────────────────────────────────
@@ -215,7 +215,7 @@ The console badge reads "KBuf {used}/{cap}" with cap = 16, which is a purely did
   },
   'Round-Robin (RR)': {
     short: 'Each process gets the CPU in equal turns.',
-    detail: 'The simplest and fairest scheduler. Maintains a circular ready queue. When the timer fires, the current process moves to the tail and the head one becomes RUN. Every process gets the same time.',
+    detail: 'One of the simplest schedulers. Maintains a circular ready queue. When the timer fires, the current process moves to the tail and the head one becomes RUN. Each turn lasts at most one quantum; a process that blocks earlier gives up the rest of its turn.',
   },
   Preemption: {
     short: 'The kernel takes the CPU away from the process even if it did not want to yield.',
@@ -249,15 +249,15 @@ The console badge reads "KBuf {used}/{cap}" with cap = 16, which is a purely did
   },
   Semaphore: {
     short: 'Semaphore: counter with atomic wait (P) and signal (V) operations.',
-    detail: 'Generalises the mutex: the counter allows up to N concurrent threads in the protected section. wait decrements the counter (blocks the thread if 0); signal increments (wakes a waiter if any). Useful for limiting access to a resource pool or coordinating producer-consumer.',
+    detail: 'A counter that allows up to N concurrent threads in the protected section. A semaphore with count 1 resembles a mutex, but it has no owner: anyone can signal (the double_unlock demo shows why a mutex does require one). wait decrements the counter (blocks the thread if 0); signal increments (wakes a waiter if any). Useful for limiting access to a resource pool or coordinating producer-consumer.',
   },
   'Atomic operation': {
     short: 'Atomic operation: the hardware guarantees it runs without being interrupted.',
-    detail: 'In x86, instructions such as LOCK XADD, LOCK CMPXCHG or XCHG lock the bus during the load-modify-store. They are the primitive that mutexes, spinlocks and lock-free counters are built on. Without atomicity, i++ decomposes into MOV/INC/MOV — interruptible and therefore unsafe between threads.',
+    detail: 'In x86, instructions such as LOCK XADD, LOCK CMPXCHG or XCHG lock the cache line (historically, the bus) during the load-modify-store. They are the primitive that mutexes, spinlocks and lock-free counters are built on. Without atomicity, i++ decomposes into MOV/INC/MOV — interruptible and therefore unsafe between threads.',
   },
   Deadlock: {
     short: 'Mutual blocking: two or more threads wait for each other in a cycle and none progresses.',
-    detail: 'Coffman\'s four conditions must all hold simultaneously: mutual exclusion, hold-and-wait, no preemption and circular wait. The dining_philosophers demo reproduces the classic case — each philosopher takes one fork and waits for the other, forming a cycle. Prevented by breaking any of the four (for example, taking forks in a global order).',
+    detail: 'Coffman\'s four conditions must all hold simultaneously: mutual exclusion, hold-and-wait, no preemption and circular wait. The philos_deadlock demo reproduces the classic case — each philosopher takes one fork and waits for the other, forming a cycle. Prevented by breaking any of the four (for example, taking forks in a global order).',
   },
   'Lock contention': {
     short: 'Contention: many threads compete for the same lock and serialize.',
@@ -269,15 +269,15 @@ The console badge reads "KBuf {used}/{cap}" with cap = 16, which is a purely did
   },
   'Dining philosophers': {
     short: 'Dining philosophers: canonical example of deadlock with N threads sharing N resources.',
-    detail: 'Five philosophers share a table with five forks; each needs two forks to eat. If they all pick up the left one at once, they wait forever for the right one (deadlock). Classic solutions: globally order the forks, or limit to N-1 philosophers eating simultaneously. This simulator has two separate demos: `philos_deadlock` (the philosophers wedge in a cycle and the system stops progressing) and `philos_safe` (one of them inverts the take order — lower-id fork first, then higher — and that asymmetry breaks the circular wait).',
+    detail: 'In the classic problem, five philosophers share a table with five forks; each needs two forks to eat. The demos in this simulator use three philosophers and three forks (mutexes 1, 2 and 3). If they all pick up the left one at once, they wait forever for the right one (deadlock). Classic solutions: globally order the forks, or limit to N-1 philosophers eating simultaneously. This simulator has two separate demos: `philos_deadlock` (the philosophers wedge in a cycle and the system stops progressing) and `philos_safe` (one of them inverts the take order — lower-id fork first, then higher — and that asymmetry breaks the circular wait).',
   },
   safe_counter: {
     short: 'Demo of increment protected by a mutex — the counter ends exact.',
-    detail: 'Two workers run a loop in parallel that takes a mutex, increments a shared counter and releases. Compared with race_counter, here the final result is deterministic (always 2 × iterations) because the critical section is protected.',
+    detail: 'Two workers run a loop in parallel that takes a mutex, increments a shared counter and releases. Compared with race_counter, here the final result is deterministic (always 2 × iterations) because the critical section is protected. Note: in this simulator the workers are processes that share a single flat user memory space; in a real OS that would be equivalent to shared memory (shm/mmap) or threads.',
   },
   race_counter: {
     short: 'Demo WITHOUT protection — the counter loses increments due to a race condition.',
-    detail: 'Same loop as safe_counter but without the mutex. Since load-modify-store is not atomic, two workers can read the same value before the other writes it, losing the increment. The final total varies between runs; the delta to the theoretical result measures how many increments were lost.',
+    detail: 'Same loop as safe_counter but without the mutex. Since load-modify-store is not atomic, two workers can read the same value before the other writes it, losing the increment. The final total depends on the quantum and on the instant of each preemption (on a real system it also varies between runs); the delta to the theoretical result measures how many increments were lost. Note: in this simulator the workers are processes that share a single flat user memory space; in a real OS that would be equivalent to shared memory (shm/mmap) or threads.',
   },
 
   // ─── Memory ─────────────────────────────────────────────────────────────
@@ -291,10 +291,10 @@ The console badge reads "KBuf {used}/{cap}" with cap = 16, which is a purely did
   },
   'TSS — Task State Segment': {
     short: 'Per-core structure where x86 stores the kernel SS:ESP and other task-switch data.',
-    detail: 'In real x86, when an interrupt changes the privilege from PL3 to PL0, the HW consults the core\'s TSS to know which address to reload SS:ESP — that pair (SS0, ESP0) is the top of the kernel stack. The TSS lives in memory, its address is loaded into TR (Task Register) and its descriptor sits in the GDT. In this simulator the TSS does not exist as its own structure: its two critical fields are simplified to `KernelStackTop` (the role of ESP0) and direct handling inside the CPU. Each core carries its own `KernelStackTop` so concurrent traps don\'t step on each other\'s frames. On kernel entry from user, the user ESP is saved in `SavedUserESP` — the role that in real x86 the TSS fulfills on the switch — and IRET restores it on returning to PL3.',
+    detail: 'In real x86, when an interrupt changes the privilege from PL3 to PL0, the HW consults the core\'s TSS to know which address to reload SS:ESP — that pair (SS0, ESP0) is the top of the kernel stack. The TSS lives in memory, its address is loaded into TR (Task Register) and its descriptor sits in the GDT. In this simulator the TSS does not exist as its own structure: its two critical fields are simplified to `KernelStackTop` (the role of ESP0) and direct handling inside the CPU. Each core carries its own `KernelStackTop` so concurrent traps don\'t step on each other\'s frames. On kernel entry from user, the simulator saves the user ESP in `SavedUserESP` for simplicity; on real x86 the HW pushes it onto the kernel stack together with SS (the TSS only says where that stack is), and IRET restores it on returning to PL3.',
   },
   'Page fault': {
-    short: 'The memory access is invalid and the MMU rejects it.',
+    short: 'Exception 0x0E: the memory access could not be resolved (in this simulator it is always fatal).',
     detail: 'Typical causes: the PL3 process tries to touch kernel memory, writes to a read-only page (like user_code), or accesses an address outside its allocated region. In real kernels a page fault is NOT always fatal — it is also used for on-demand resolution: demand paging, copy-on-write after a fork, lazy heap mapping. The kernel decides case by case: resolve (mapping the page) or kill the process. In this simulator every page fault is fatal: the process becomes ZOMBIE with BlockedOn="page_fault". The HW dispatch goes through vector 0x0E (see that entry in Interrupts).',
   },
   'Error code (page fault)': {
@@ -331,7 +331,7 @@ The console badge reads "KBuf {used}/{cap}" with cap = 16, which is a purely did
   },
   'JMP / JE / JNE / JG / JL': {
     short: 'Jumps. Conditionals read the flags.',
-    detail: 'JMP is unconditional. JE/JZ jumps if ZF=1. JNE/JNZ if ZF=0. JG/JL for signed comparisons (read SF and OF). Useful after a CMP to make decisions.',
+    detail: 'JMP is unconditional. JE/JZ jumps if ZF=1. JNE/JNZ if ZF=0. JG/JL for signed comparisons (JG reads ZF, SF and OF; JL, when SF≠OF). Useful after a CMP to make decisions.',
   },
   'CMP a, b': {
     short: 'Compare: does (a - b) and updates flags, without writing the result.',

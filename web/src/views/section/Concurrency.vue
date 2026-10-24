@@ -72,7 +72,7 @@ function coreStatus(c: { halted: boolean; mode: number; current_pid: number }): 
     <header class="conc__head">
       <h1><Term term="Critical section" mode="title">{{ t('sections.concurrency.title') }}</Term></h1>
       <div class="conc__hint" v-if="singleCoreHint">
-        {{ t('sections.concurrency.singleCoreHintPrefix') }}<strong>{{ cpu.numCores }}</strong>{{ t('sections.concurrency.singleCoreHintBody') }}<code>{{ t('sections.concurrency.singleCoreHintEnv') }}</code>{{ t('sections.concurrency.singleCoreHintSuffix') }}
+        {{ t('sections.concurrency.singleCoreHintPrefix') }}<strong>{{ cpu.numCores }}</strong>{{ t('sections.concurrency.singleCoreHintBody') }}
       </div>
       <div class="conc__hint" v-else>
         {{ t('sections.concurrency.multiCoreHintPrefix') }}<strong>{{ cpu.numCores }}</strong>{{ t('sections.concurrency.multiCoreHintSuffix') }}
@@ -189,6 +189,12 @@ function coreStatus(c: { halted: boolean; mode: number; current_pid: number }): 
   min-height: 0;
   overflow-y: auto;
 }
+
+/* Each section keeps its intrinsic height. Without this, flex-shrink compresses
+   the children below their content in the bounded column, and fixed-size
+   content (the wait-graph SVG with its locked aspect-ratio) spills over the
+   panels below instead of letting .conc scroll. */
+.conc > * { flex-shrink: 0; }
 
 .conc__head { display: flex; flex-direction: column; gap: var(--space-3); }
 .conc__head h1 {

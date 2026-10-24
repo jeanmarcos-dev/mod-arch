@@ -228,7 +228,7 @@ onMounted(load);
         </label>
         <label class="field">
           <span>Modelo (vacío = default del proveedor)</span>
-          <input type="text" v-model="draft.llm_model" placeholder="gemini-2.5-flash-lite" />
+          <input type="text" v-model="draft.llm_model" placeholder="gemini-3.5-flash-lite" />
         </label>
         <label v-if="needsBaseURL" class="field">
           <span>Base URL</span>

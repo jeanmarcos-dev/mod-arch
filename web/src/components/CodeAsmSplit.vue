@@ -1449,5 +1449,11 @@ onBeforeUnmount(() => {
      reading width. The C panel stays on top because the lesson starts there. */
   .split { grid-template-columns: 1fr; }
   .split .pane--asm { min-height: 260px; }
+  /* Inside the mobile page-scroll the editor keeps a bounded height so each
+     pane scrolls internally instead of stretching the page to the full source
+     length. */
+  .code-asm {
+    height: 70vh;
+  }
 }
 </style>

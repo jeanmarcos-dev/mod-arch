@@ -24,7 +24,7 @@ const pressed = ref(false);
 const capRef = ref<HTMLElement | null>(null);
 
 watch(() => props.bumpSeq, () => {
-  if (!prefs.narratorsEnabled) return;
+  if (!prefs.effectiveNarratorsEnabled) return;
   pressed.value = true;
   const dur = Math.max(120, cpu.tickIntervalMs);
   if (cpu.running) {

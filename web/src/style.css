@@ -547,7 +547,7 @@ html, body {
   background: var(--bg-0);
   color: var(--text);
   font-family: var(--font-body);
-  font-size: 15px;
+  font-size: calc(15px * var(--a11y-text-scale, 1));
   line-height: 1.4;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -774,7 +774,12 @@ select option:checked {
   select, input[type="text"], input[type="number"] {
     min-height: 44px;
     padding: 10px;
-    font-size: 14px;
+  }
+
+  select,
+  textarea,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]) {
+    font-size: 16px !important;
   }
 
   /* Scrollbar más fino en mobile (menos real estate ocupado). */
@@ -848,5 +853,48 @@ select option:checked {
 @keyframes tutor-bounce {
   0%, 100% { transform: translateY(0); }
   50%      { transform: translateY(-5px); }
+}
+
+:root[data-legible-font="true"] {
+  --font-display: 'Atkinson Hyperlegible', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body:    'Atkinson Hyperlegible', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+:root { --a11y-text-scale: 1; }
+:root[data-text-scale="large"]  { --a11y-text-scale: 1.25; }
+:root[data-text-scale="xlarge"] { --a11y-text-scale: 1.5; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  transform: translateY(calc(-100% - 16px));
+  z-index: 1000;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--accent, #0049b0);
+  color: #fff;
+  font-family: var(--font-body);
+  font-weight: 600;
+  text-decoration: none;
+  transition: top 120ms var(--ease-out-soft, ease);
+}
+
+.skip-link:focus {
+  transform: none;
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 

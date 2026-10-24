@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import ReportButton from '../ReportButton.vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { BookOpen, Hand, Eye, EyeOff, LogOut } from '@lucide/vue';
@@ -98,6 +99,8 @@ async function onLeave() {
       <Eye :size="13" :stroke-width="2" class="viewer-bar__host-icon" />
       <span class="viewer-bar__host-label">{{ t('shell.viewerTopBar.watching') }} <strong>{{ hostLabel }}</strong></span>
     </span>
+
+    <ReportButton variant="bar" />
 
     <button
       type="button"

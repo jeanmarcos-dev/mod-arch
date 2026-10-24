@@ -43,6 +43,17 @@ function loadCoresFilterTouched(): boolean {
   return window.localStorage.getItem(CORES_FILTER_TOUCHED_KEY) === '1';
 }
 
+// clockHz is a server-synced simulation parameter, but the admin can set a
+// default starting speed. We track whether the user has changed it by hand so
+// applyDefaultClockHz only steers the untouched case (sticky, mirroring the
+// cores-filter-touched flag above).
+const CLOCK_HZ_TOUCHED_KEY = 'modos-cpu:clock-hz-touched:v1';
+
+function loadClockHzTouched(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem(CLOCK_HZ_TOUCHED_KEY) === '1';
+}
+
 export const REGISTERS = [
   'EAX', 'EBX', 'ECX', 'EDX',
   'ESI', 'EDI', 'ESP', 'EBP',
@@ -76,6 +87,7 @@ export const useCpuStore = defineStore('cpu', () => {
   // as a derived view so legacy consumers (SimBar bindings, snapshots) keep
   // reading the same shape without knowing about the split.
   const clockHz = ref(2);
+  const clockHzTouched = ref<boolean>(loadClockHzTouched());
   const speedMul = ref(1.0);
   const stepHz = computed(() => clockHz.value * speedMul.value);
   const tickIntervalMs = computed(() => {
@@ -523,12 +535,33 @@ export const useCpuStore = defineStore('cpu', () => {
     timerQuantum.value = q;
     send({ cmd: 'timer_quantum', quantum: q });
   }
-  function setClockHz(hz: number) {
+  function setClockHz(hz: number, opts: { userInitiated?: boolean } = {}) {
     // The backend clamps to [1, 60] too; doing it here keeps the optimistic
     // UI in sync with what the server will accept.
     const clamped = Math.max(1, Math.min(60, Math.round(hz)));
     clockHz.value = clamped;
     send({ cmd: 'set_clock_hz', clockHz: clamped });
+    // A hand-driven change pins the speed so later admin defaults leave it
+    // alone. The reducer writes clockHz.value directly from server snapshots,
+    // so it never routes through here and never marks the flag.
+    if (opts.userInitiated !== false) markClockHzTouched();
+  }
+
+  function markClockHzTouched() {
+    if (clockHzTouched.value) return;
+    clockHzTouched.value = true;
+    try {
+      window.localStorage.setItem(CLOCK_HZ_TOUCHED_KEY, '1');
+    } catch { /* ignore */ }
+  }
+
+  // applyDefaultClockHz steers a fresh visitor to the admin's preferred
+  // starting speed without marking the field touched, so a later revision of
+  // the default still applies. No-op once the user has set the speed by hand.
+  function applyDefaultClockHz(hz: number) {
+    if (clockHzTouched.value) return;
+    if (typeof hz !== 'number' || !Number.isFinite(hz)) return;
+    setClockHz(hz, { userInitiated: false });
   }
   function setSpeedMul(mul: number) {
     const clamped = Math.max(0.1, Math.min(5.0, mul));
@@ -687,8 +720,11 @@ export const useCpuStore = defineStore('cpu', () => {
     sessionInfo, isViewer, viewerLink,
     lastPresence, handRaiseSignal, lastHandRaiseLabel, ownerGlossaryHover,
     connect, load, step, run, pause, reset, clearLog, setQuantum,
-    setSpeed, setClockHz, setSpeedMul, pushKey, openGlossary,
+    setSpeed, setClockHz, setSpeedMul, applyDefaultClockHz, clockHzTouched, pushKey, openGlossary,
     share, unshare, setAlias, setNumCores, setIdleTaskEnabled, idleTaskEnabled, setAutoPauseOnIdle, demoFinished, sendPresence, sendFocus, raiseHand, sendPointer, sendPointerOff, sendClick, sendGlossaryHover, sendGlossaryHoverOff,
+    sendTrack: (cmd: object) => send(cmd),
+    sendTutorFeedback: (requestId: string, rating: -1 | 0 | 1) =>
+      send({ cmd: 'tutor_feedback', request_id: requestId, rating }),
     // Tutor: keep the wire shape private to this store so consumers do not
     // have to know the WS command name.
     sendTutorAsk: (

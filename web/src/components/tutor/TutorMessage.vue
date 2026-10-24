@@ -1,16 +1,21 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { BotMessageSquare, User, AlertCircle, Sparkles, ExternalLink, ChevronRight, ChevronDown } from '@lucide/vue';
+import { useI18n } from 'vue-i18n';
+import { BotMessageSquare, User, AlertCircle, Sparkles, ExternalLink, ChevronRight, ChevronDown, ThumbsUp, ThumbsDown } from '@lucide/vue';
 
-import type { TutorMessage, TutorCitation } from '../../stores/tutor';
+import type { TutorMessage, TutorCitation, TutorRating } from '../../stores/tutor';
 import { useToastStore } from '../../stores/toast';
 import { renderMarkdown } from '../../composables/useMarkdown';
 import TutorCopyButton from './TutorCopyButton.vue';
 
 const props = defineProps<{ msg: TutorMessage }>();
-const emit = defineEmits<{ (e: 'cite', citation: TutorCitation): void }>();
+const emit = defineEmits<{
+  (e: 'cite', citation: TutorCitation): void;
+  (e: 'rate', value: TutorRating): void;
+}>();
 
 const toast = useToastStore();
+const { t, te } = useI18n();
 
 // Track which citation chips are expanded. The key is stable across rerenders
 // of the same message (source + id + page).
@@ -34,6 +39,12 @@ const isPending = computed(() => props.msg.pending && !hasError.value);
 // longer empty — show the text + a small caret instead of the spinner.
 const isStreaming = computed(() => isPending.value && props.msg.text.length > 0);
 const renderedHtml = computed(() => renderMarkdown(props.msg.text));
+const canRate = computed(() => !isStudent.value && !isPending.value && !hasError.value && !!props.msg.requestId);
+const errorText = computed(() => {
+  const code = props.msg.errorCode;
+  const key = `tutor.errors.${code}`;
+  return code && te(key) ? t(key) : props.msg.error;
+});
 
 async function onMarkdownClick(ev: MouseEvent) {
   const target = ev.target as HTMLElement | null;
@@ -45,9 +56,9 @@ async function onMarkdownClick(ev: MouseEvent) {
   if (!code) return;
   try {
     await navigator.clipboard.writeText(decodeHtmlEntities(code));
-    toast.ok('Código copiado');
+    toast.ok(t('tutor.message.codeCopied'));
   } catch {
-    toast.err('No se pudo copiar al portapapeles');
+    toast.err(t('tutor.message.codeCopyFailed'));
   }
 }
 
@@ -82,17 +93,17 @@ function decodeHtmlEntities(s: string): string {
         <span class="dot" /><span class="dot" /><span class="dot" />
         <span class="pending-label">
           <template v-if="msg.queueWaitSeconds !== undefined && msg.queueWaitSeconds > 0">
-            en cola — espera <strong>~{{ msg.queueWaitSeconds }}s</strong>
+            {{ t('tutor.message.queued', { seconds: msg.queueWaitSeconds }) }}
           </template>
-          <template v-else-if="msg.toolInFlight">consultando: <code>{{ msg.toolInFlight }}</code>…</template>
-          <template v-else-if="msg.toolsUsed && msg.toolsUsed.length">razonando con datos…</template>
-          <template v-else>consultando al tutor…</template>
+          <template v-else-if="msg.toolInFlight">{{ t('tutor.message.consulting') }} <code>{{ msg.toolInFlight }}</code>…</template>
+          <template v-else-if="msg.toolsUsed && msg.toolsUsed.length">{{ t('tutor.message.reasoning') }}</template>
+          <template v-else>{{ t('tutor.message.asking') }}</template>
         </span>
       </div>
       <p v-else-if="hasError" class="err-text">
-        {{ msg.error }}
+        {{ errorText }}
         <span v-if="msg.retryAfterSec" class="retry">
-          (vuelva a intentar en {{ msg.retryAfterSec }}s)
+          {{ t('tutor.message.retryIn', { seconds: msg.retryAfterSec }) }}
         </span>
       </p>
       <p v-else-if="isStudent" class="text">{{ msg.text }}</p>
@@ -109,7 +120,7 @@ function decodeHtmlEntities(s: string): string {
             type="button"
             class="cite-chip"
             :class="'cite-' + c.source"
-            :title="c.excerpt ? 'Ver extracto' : (c.source === 'glossary' ? 'Abrir en el glosario' : 'Referencia bibliográfica')"
+            :title="c.excerpt ? t('tutor.message.viewExcerpt') : (c.source === 'glossary' ? t('tutor.message.openGlossaryTitle') : t('tutor.message.bookTitle'))"
             @click="c.excerpt ? toggleCite(c, i) : emit('cite', c)"
           >
             {{ c.label }}
@@ -128,7 +139,7 @@ function decodeHtmlEntities(s: string): string {
                 @click="emit('cite', c)"
               >
                 <ExternalLink :size="11" :stroke-width="2" />
-                Abrir en el glosario
+                {{ t('tutor.message.openGlossaryTitle') }}
               </button>
               <button
                 v-else-if="c.source === 'demos'"
@@ -137,16 +148,16 @@ function decodeHtmlEntities(s: string): string {
                 @click="emit('cite', c)"
               >
                 <ExternalLink :size="11" :stroke-width="2" />
-                Cargar demo en el simulador
+                {{ t('tutor.message.loadDemo') }}
               </button>
               <span v-else-if="c.source === 'silberschatz'" class="extract-hint">
-                Consulte Silberschatz <strong v-if="c.page">p. {{ c.page }}</strong> en su biblioteca.
+                {{ c.page ? t('tutor.message.bookHintPage', { page: c.page }) : t('tutor.message.bookHint') }}
               </span>
               <span v-else-if="c.source === 'isa'" class="extract-hint">
-                ISA propio del simulador MODARCH.
+                {{ t('tutor.message.isaHint') }}
               </span>
               <span v-else-if="c.source === 'docs'" class="extract-hint">
-                Documentación del proyecto.
+                {{ t('tutor.message.docsHint') }}
               </span>
             </div>
           </div>
@@ -154,17 +165,43 @@ function decodeHtmlEntities(s: string): string {
       </div>
 
       <div v-if="!isStudent && !isPending && !hasError" class="meta">
-        <TutorCopyButton :text="msg.text" aria-label="Copiar respuesta" />
-        <span v-if="msg.cacheHit" class="badge cache" title="Servido desde caché">
-          <Sparkles :size="10" :stroke-width="2" /> caché
+        <TutorCopyButton :text="msg.text" :aria-label="t('tutor.message.copyAnswer')" />
+        <span v-if="msg.cacheHit" class="badge cache" :title="t('tutor.message.cacheTitle')">
+          <Sparkles :size="10" :stroke-width="2" /> {{ t('tutor.message.cache') }}
         </span>
-        <span v-if="msg.degraded" class="badge degraded" title="LLM no disponible, solo se muestran pasajes">
-          modo offline
+        <span v-if="msg.degraded" class="badge degraded" :title="t('tutor.message.offlineTitle')">
+          {{ t('tutor.message.offline') }}
         </span>
         <span v-if="msg.toolsUsed && msg.toolsUsed.length" class="badge tools" :title="msg.toolsUsed.join(', ')">
-          {{ msg.toolsUsed.length }} tool{{ msg.toolsUsed.length === 1 ? '' : 's' }}
+          {{ t('tutor.message.tools', msg.toolsUsed.length) }}
         </span>
         <span v-if="msg.latencyMs !== undefined" class="latency">{{ msg.latencyMs }} ms</span>
+        <span v-if="canRate" class="rate" role="group" :aria-label="t('tutor.message.feedbackGroup')">
+          <button
+            type="button"
+            class="rate-btn"
+            :class="{ active: msg.rating === 1 }"
+            data-rating="up"
+            :aria-pressed="msg.rating === 1"
+            :title="t('tutor.message.helpful')"
+            :aria-label="t('tutor.message.helpful')"
+            @click="emit('rate', 1)"
+          >
+            <ThumbsUp :size="13" :stroke-width="2" />
+          </button>
+          <button
+            type="button"
+            class="rate-btn"
+            :class="{ active: msg.rating === -1 }"
+            data-rating="down"
+            :aria-pressed="msg.rating === -1"
+            :title="t('tutor.message.notHelpful')"
+            :aria-label="t('tutor.message.notHelpful')"
+            @click="emit('rate', -1)"
+          >
+            <ThumbsDown :size="13" :stroke-width="2" />
+          </button>
+        </span>
       </div>
     </div>
   </div>
@@ -386,6 +423,32 @@ function decodeHtmlEntities(s: string): string {
   margin-top: 0.4rem;
   font-size: 0.7rem;
   color: var(--text-muted);
+}
+.rate {
+  display: inline-flex;
+  gap: 0.2rem;
+  margin-left: auto;
+}
+.rate-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  padding: 0.25rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.rate-btn:hover {
+  color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.4);
+}
+.rate-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.15);
 }
 .badge {
   display: inline-flex;
