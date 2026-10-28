@@ -575,6 +575,5 @@ func (s *Server) handleAdminListSessions(w http.ResponseWriter, _ *http.Request)
 // handleAdminMetrics returns the current telemetry snapshot for the dashboard.
 func (s *Server) handleAdminMetrics(w http.ResponseWriter, r *http.Request) {
 	m := telemetry.Snapshot()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(m)
+	writeJSON(w, http.StatusOK, m)
 }

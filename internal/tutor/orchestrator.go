@@ -761,13 +761,13 @@ func (s *Service) runEagerTools(ctx context.Context, sess *sessions.Session, sna
 // to the same base question from returning the same cached answer.
 func (s *Service) answerCacheKey(question string, snap SnapshotView, history []HistoryTurn) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "v=%d|q=%s|snap=%s",
+	_, _ = fmt.Fprintf(h, "v=%d|q=%s|snap=%s",
 		s.opts.CorpusVersion,
 		strings.ToLower(strings.TrimSpace(question)),
 		snap.Digest(),
 	)
 	for i, t := range history {
-		fmt.Fprintf(h, "|h%d=%s:%s", i, t.Role, t.Text)
+		_, _ = fmt.Fprintf(h, "|h%d=%s:%s", i, t.Role, t.Text)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -851,7 +851,7 @@ func buildCitationsFromText(text string, retrieved []rag.ScoredChunk) []Citation
 	return out
 }
 
-func toLLMMessages(in []promptMessage) []llm.Message {
+func toLLMMessages(in []PromptMessage) []llm.Message {
 	out := make([]llm.Message, len(in))
 	for i, m := range in {
 		out[i] = llm.Message{Role: llm.Role(m.Role), Content: m.Content}

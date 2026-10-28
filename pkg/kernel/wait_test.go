@@ -20,6 +20,7 @@ import (
 //	int 0x80
 //
 // child:
+//
 //	mov ebx, 42
 //	mov eax, 1
 //	int 0x80

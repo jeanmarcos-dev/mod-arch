@@ -167,10 +167,10 @@ type UserActivity struct {
 }
 
 type ActivityByDay struct {
-	Day            string // YYYY-MM-DD UTC
-	Sessions       int
-	ActiveSeconds  int64
-	TutorQueries   int64
+	Day           string // YYYY-MM-DD UTC
+	Sessions      int
+	ActiveSeconds int64
+	TutorQueries  int64
 }
 
 type ActivityByCountry struct {
@@ -188,12 +188,12 @@ func (s *Store) GetUserActivity(ctx context.Context, userID string, from, to int
 
 	// Headline aggregates in one round trip.
 	var (
-		totalSessions  sql.NullInt64
-		totalSeconds   sql.NullInt64
-		totalCommands  sql.NullInt64
-		totalQueries   sql.NullInt64
-		lastSeenAt     sql.NullInt64
-		lastSeenGeo    sql.NullString
+		totalSessions sql.NullInt64
+		totalSeconds  sql.NullInt64
+		totalCommands sql.NullInt64
+		totalQueries  sql.NullInt64
+		lastSeenAt    sql.NullInt64
+		lastSeenGeo   sql.NullString
 	)
 	q := `SELECT COUNT(*), COALESCE(SUM(duration_seconds), 0),
                  COALESCE(SUM(total_commands), 0), COALESCE(SUM(total_tutor_queries), 0),

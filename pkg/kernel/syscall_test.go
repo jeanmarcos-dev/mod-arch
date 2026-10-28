@@ -316,7 +316,7 @@ func TestSyscall_ExitWithInitParent_DoExitPhasesInOrder(t *testing.T) {
 	// Each canonical do_exit step lands on a later Step than the previous.
 	// This is the click-by-click property the refactor delivers — pre-phase
 	// the cascade collapsed all four into one Step.
-	if !(zombieStep < releaseStep && releaseStep < reapStep && reapStep < haltStep) {
+	if zombieStep >= releaseStep || releaseStep >= reapStep || reapStep >= haltStep {
 		t.Errorf("phase Steps: ZOMBIE@%d core_release@%d init_reap@%d HALT@%d — want strictly increasing (each do_exit phase its own Step)", zombieStep, releaseStep, reapStep, haltStep)
 	}
 	// Sibling property of the old "no spurious HALT" assertion: no HALT

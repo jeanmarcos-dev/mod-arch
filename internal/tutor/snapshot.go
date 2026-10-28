@@ -133,7 +133,7 @@ func (v SnapshotView) Render() string {
 // keys so the same question asked in different states does not collide.
 func (v SnapshotView) Digest() string {
 	h := sha256.New()
-	fmt.Fprintf(h, "section=%s|program=%s|mode=%s|pid=%d|cores=%d|running=%v|halted=%v|qtm=%d|tick=%d|eip=%d|esp=%d|eflags=%d|ready=%v|wait=%v",
+	_, _ = fmt.Fprintf(h, "section=%s|program=%s|mode=%s|pid=%d|cores=%d|running=%v|halted=%v|qtm=%d|tick=%d|eip=%d|esp=%d|eflags=%d|ready=%v|wait=%v",
 		v.Section, v.Program, v.Mode, v.CurrentPID, v.NumCores, v.Running, v.Halted,
 		v.TimerQuantum, v.Tick, v.EIP, v.ESP, v.EFLAGS, v.ReadyQueue, v.WaitQueue,
 	)

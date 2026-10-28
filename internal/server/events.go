@@ -26,4 +26,3 @@ type PresenceEvent struct {
 	Focus     sessions.Focus `json:"focus,omitempty"`
 	At        int64          `json:"at,omitempty"`
 }
-

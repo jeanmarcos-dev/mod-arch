@@ -21,7 +21,7 @@ import (
 type Source string
 
 const (
-	SourceGlossary  Source = "glossary"
+	SourceGlossary     Source = "glossary"
 	SourceSilberschatz Source = "silberschatz"
 	// Project-native sources cover what neither the textbook nor the
 	// glossary can: the simulator's own demos, its simplified ISA and the

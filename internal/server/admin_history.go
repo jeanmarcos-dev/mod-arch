@@ -103,18 +103,18 @@ func (s *Server) handleAdminListSessionHistory(w http.ResponseWriter, r *http.Re
 
 // userActivityJSON is the wire shape of /admin/api/users/{id}/activity.
 type userActivityJSON struct {
-	UserID             string                          `json:"user_id"`
-	UserLabel          string                          `json:"user_label,omitempty"`
-	Window             map[string]int64                `json:"window"`
-	TotalSessions      int                             `json:"total_sessions"`
-	TotalActiveSeconds int64                           `json:"total_active_seconds"`
-	AvgSessionMinutes  float64                         `json:"avg_session_minutes"`
-	LastSeenAt         int64                           `json:"last_seen_at"`
-	LastSeenCountry    string                          `json:"last_seen_country,omitempty"`
-	TotalCommands      int64                           `json:"total_commands"`
-	TotalTutorQueries  int64                           `json:"total_tutor_queries"`
-	ByDay              []store.ActivityByDay           `json:"by_day"`
-	ByCountry          []store.ActivityByCountry       `json:"by_country"`
+	UserID             string                    `json:"user_id"`
+	UserLabel          string                    `json:"user_label,omitempty"`
+	Window             map[string]int64          `json:"window"`
+	TotalSessions      int                       `json:"total_sessions"`
+	TotalActiveSeconds int64                     `json:"total_active_seconds"`
+	AvgSessionMinutes  float64                   `json:"avg_session_minutes"`
+	LastSeenAt         int64                     `json:"last_seen_at"`
+	LastSeenCountry    string                    `json:"last_seen_country,omitempty"`
+	TotalCommands      int64                     `json:"total_commands"`
+	TotalTutorQueries  int64                     `json:"total_tutor_queries"`
+	ByDay              []store.ActivityByDay     `json:"by_day"`
+	ByCountry          []store.ActivityByCountry `json:"by_country"`
 }
 
 // handleAdminUserActivity returns the activity report for a single user over

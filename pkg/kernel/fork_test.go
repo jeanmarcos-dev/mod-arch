@@ -9,12 +9,12 @@ import (
 // TestSysFork_CreatesChildAsCopyOfParent exercises the headline behaviour of
 // sys_fork: the parent invokes int 0x80 with EAX=SysFork and the kernel must
 //
-//	- allocate a new PID
-//	- create a PCB whose ParentPID points back at the caller
-//	- copy the parent's user code into the child's code slot
-//	- leave the child in READY with Regs.EAX = 0 (fork returns 0 in child)
-//	- return the child PID in the parent's EAX
-//	- emit an EventFork with both PIDs and IsVfork=false
+//   - allocate a new PID
+//   - create a PCB whose ParentPID points back at the caller
+//   - copy the parent's user code into the child's code slot
+//   - leave the child in READY with Regs.EAX = 0 (fork returns 0 in child)
+//   - return the child PID in the parent's EAX
+//   - emit an EventFork with both PIDs and IsVfork=false
 func TestSysFork_CreatesChildAsCopyOfParent(t *testing.T) {
 	// Parent program:
 	//   mov eax, 2     ; SysFork

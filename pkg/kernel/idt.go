@@ -19,13 +19,13 @@ import (
 // for students; the code keeps "IRQ" as an umbrella because Linux uses the
 // same convention and renaming would churn many callers for little gain.
 const (
-	IRQDivideError  uint8 = 0x00
-	IRQPageFault    uint8 = 0x0E
-	IRQGeneralProt  uint8 = 0x0D // #GP: privileged instruction in user mode, bad segment, etc.
-	IRQTimer        uint8 = 0x20 // PIT
-	IRQKeyboard     uint8 = 0x21
-	IRQSyscall      uint8 = 0x80 // Linux convention
-	IRQSync         uint8 = 0x81 // mutex / semaphore subsystem
+	IRQDivideError uint8 = 0x00
+	IRQPageFault   uint8 = 0x0E
+	IRQGeneralProt uint8 = 0x0D // #GP: privileged instruction in user mode, bad segment, etc.
+	IRQTimer       uint8 = 0x20 // PIT
+	IRQKeyboard    uint8 = 0x21
+	IRQSyscall     uint8 = 0x80 // Linux convention
+	IRQSync        uint8 = 0x81 // mutex / semaphore subsystem
 )
 
 // InstallDefaultIDT writes minimal handlers into kernel memory and registers

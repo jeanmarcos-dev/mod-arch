@@ -33,16 +33,16 @@ const (
 // Config carries everything the sender needs. Values flow from the settings
 // table; the admin panel validates them before they reach this struct.
 type Config struct {
-	Host           string
-	Port           int
-	User           string
-	Password       string
-	FromName       string
-	FromEmail      string
-	ReplyTo        string
-	SubjectPrefix  string
-	BCC            string
-	TLSMode        TLSMode
+	Host          string
+	Port          int
+	User          string
+	Password      string
+	FromName      string
+	FromEmail     string
+	ReplyTo       string
+	SubjectPrefix string
+	BCC           string
+	TLSMode       TLSMode
 }
 
 // Sender is the package's main type. Keep one per active config; rebuild on

@@ -797,11 +797,11 @@ func (k *Kernel) runHandlerLogic(core *Core, vector uint8, source string) []cpu.
 //
 // Phase mapping to do_exit (Robert Love, LKD chap. 3):
 //
-//   1. mark_zombie       → freeze CPU into PCB, ZOMBIE, reparent children
-//   2. notify_parent     → SIGCHLD + wake parent (and/or init for orphans)
-//   3. schedule_out      → final schedule(): context switch off the core
-//   4. reap_cycle        → release_task in the parent's (or init's) context
-//   5. halt              → terminal HALT if the core ends up genuinely idle
+//  1. mark_zombie       → freeze CPU into PCB, ZOMBIE, reparent children
+//  2. notify_parent     → SIGCHLD + wake parent (and/or init for orphans)
+//  3. schedule_out      → final schedule(): context switch off the core
+//  4. reap_cycle        → release_task in the parent's (or init's) context
+//  5. halt              → terminal HALT if the core ends up genuinely idle
 //
 // PRECONDITION: the caller MUST have written pcb.ExitCode with the cause of
 // death before invoking. For sys_exit that is the EBX arg; for page fault

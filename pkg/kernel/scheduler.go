@@ -359,19 +359,6 @@ func (k *Kernel) BindIdleCores() []cpu.Event {
 	return out
 }
 
-// hasNonInitReady reports whether the ready queue has any PID other than
-// init. Used by the eviction pass: the swapper must yield to a real user
-// proc, but not to init (init never occupies a core, it just gets reaped
-// in-kernel and goes back to sleep).
-func (k *Kernel) hasNonInitReady() bool {
-	for _, pid := range k.Ready.Snapshot() {
-		if pid != k.InitPID {
-			return true
-		}
-	}
-	return false
-}
-
 // countDispatchableReady returns how many ready PIDs would actually land on
 // an idle core through DispatchIdleCores's assignment loop. Init is excluded
 // (it goes through runInitReapCycle and never occupies a core); kthreads are

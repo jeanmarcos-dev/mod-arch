@@ -19,7 +19,7 @@ func TestSysPipe_AllocatesTwoDistinctFDs(t *testing.T) {
 	boot := k.BootCore()
 	boot.CurrentPID = pid
 
-	fdPairAddr := uint32(cpu.AddrUserStack + 0x100)
+	fdPairAddr := cpu.AddrUserStack + 0x100
 	result, evs := k.sysPipe(boot, fdPairAddr)
 
 	if result != 0 {
@@ -68,7 +68,7 @@ func TestPipeWriteThenRead_SameProcess(t *testing.T) {
 	boot := k.BootCore()
 	boot.CurrentPID = pid
 
-	fdPairAddr := uint32(cpu.AddrUserStack + 0x100)
+	fdPairAddr := cpu.AddrUserStack + 0x100
 	if r, _ := k.sysPipe(boot, fdPairAddr); r != 0 {
 		t.Fatalf("sys_pipe failed: 0x%X", r)
 	}
@@ -76,7 +76,7 @@ func TestPipeWriteThenRead_SameProcess(t *testing.T) {
 	fdW := readKernelDWORD(boot.CPU, fdPairAddr+4)
 
 	// Place "HOLA" in user-writable memory.
-	bufAddr := uint32(cpu.AddrUserStack + 0x200)
+	bufAddr := cpu.AddrUserStack + 0x200
 	copy(k.Mem.Bytes[bufAddr:], []byte("HOLA"))
 
 	// sys_write(fdW, bufAddr, 4)
@@ -86,7 +86,7 @@ func TestPipeWriteThenRead_SameProcess(t *testing.T) {
 	}
 
 	// sys_read(fdR, otherAddr, 4)
-	otherAddr := uint32(cpu.AddrUserStack + 0x210)
+	otherAddr := cpu.AddrUserStack + 0x210
 	rResult, _ := k.sysRead(boot, fdR, otherAddr, 4)
 	if rResult != 4 {
 		t.Errorf("sys_read from pipe returned %d, want 4", rResult)

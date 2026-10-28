@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jeanmarcos-dev/mod-arch/internal/telemetry"
 	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 	"github.com/jeanmarcos-dev/mod-arch/pkg/kernel"
-	"github.com/jeanmarcos-dev/mod-arch/internal/telemetry"
 )
 
 // Demo is a scenario with one or more processes to load.
@@ -157,13 +157,13 @@ type Simulator struct {
 	clients  map[*Client]struct{}
 	clientMu sync.RWMutex
 
-	running         bool
+	running bool
 	// userPaused tracks whether the most recent stop was an explicit user
 	// pause (cmd:pause) as opposed to an idle autostop (HasWork=false). It is
 	// emitted alongside running in state events so the UI can distinguish
 	// "frozen on purpose" from "system idle waiting for IRQ" and only freeze
 	// visual narrators in the former case.
-	userPaused      bool
+	userPaused bool
 	// autoPauseOnIdle parks the run loop once no user work remains, so a
 	// finished demo settles instead of streaming idle ticks. Default on.
 	autoPauseOnIdle bool
@@ -868,7 +868,7 @@ func (s *Simulator) Reset() {
 func (s *Simulator) Snapshot() map[string]any {
 	start := time.Now()
 	defer telemetry.TrackSnapshotLatency(start)
-	
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.snapshotLocked()
@@ -895,27 +895,27 @@ func (s *Simulator) snapshotLocked() map[string]any {
 			"ESI": r.ESI, "EDI": r.EDI, "ESP": r.ESP, "EBP": r.EBP,
 			"EIP": r.EIP, "EFLAGS": r.EFLAGS,
 		},
-		"segments":      map[string]uint16{"CS": r.CS, "DS": r.DS, "SS": r.SS},
-		"mode":          c.Mode,
-		"halted":        c.Halted,
-		"tick":          s.kernel.Clock,
-		"timer_quantum": s.kernel.TimerQuantum,
-		"current_pid":   boot.CurrentPID,
-		"ready_queue":   s.kernel.Ready.Snapshot(),
-		"wait_queue":    s.waitQueueLocked(),
-		"procs":         s.processListLocked(),
-		"sources":       s.procSources,
-		"source_maps":   s.procSourceMaps,
-		"vars":          s.varsLocked(),
-		"mutexes":       s.mutexesLocked(),
-		"semaphores":    s.semaphoresLocked(),
-		"cores":            cores,
-		"num_cores":        s.kernel.NumCores(),
-		"running":          s.running,
-		"hz":               float64(s.clockHz) * s.speedMul,
-		"clockHz":          s.clockHz,
-		"speedMul":         s.speedMul,
-		"tickIntervalMs":   tickIntervalMs(s.clockHz, s.speedMul),
+		"segments":       map[string]uint16{"CS": r.CS, "DS": r.DS, "SS": r.SS},
+		"mode":           c.Mode,
+		"halted":         c.Halted,
+		"tick":           s.kernel.Clock,
+		"timer_quantum":  s.kernel.TimerQuantum,
+		"current_pid":    boot.CurrentPID,
+		"ready_queue":    s.kernel.Ready.Snapshot(),
+		"wait_queue":     s.waitQueueLocked(),
+		"procs":          s.processListLocked(),
+		"sources":        s.procSources,
+		"source_maps":    s.procSourceMaps,
+		"vars":           s.varsLocked(),
+		"mutexes":        s.mutexesLocked(),
+		"semaphores":     s.semaphoresLocked(),
+		"cores":          cores,
+		"num_cores":      s.kernel.NumCores(),
+		"running":        s.running,
+		"hz":             float64(s.clockHz) * s.speedMul,
+		"clockHz":        s.clockHz,
+		"speedMul":       s.speedMul,
+		"tickIntervalMs": tickIntervalMs(s.clockHz, s.speedMul),
 	}
 }
 

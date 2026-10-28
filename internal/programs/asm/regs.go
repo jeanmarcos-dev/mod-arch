@@ -3,9 +3,9 @@
 //
 //   - Bytes:     opcode stream identical to what a hand-written demo would emit.
 //   - Source:    C-like text supplied verbatim by the author (the DSL never
-//                synthesizes this — pedagogical wording is human work).
+//     synthesizes this — pedagogical wording is human work).
 //   - SourceMap: one entry per instruction, generated automatically from the
-//                builder calls and the .At() / .Comment() context.
+//     builder calls and the .At() / .Comment() context.
 //
 // The DSL targets the ISA implemented in pkg/cpu/isa.go: 32-bit register file,
 // reg-reg ModR/M only, no SIB. Instructions outside that subset are not

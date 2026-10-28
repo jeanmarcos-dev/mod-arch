@@ -210,4 +210,3 @@ func validateStringArrayAgainst(raw string, valid func(string) bool) ([]string, 
 	}
 	return out, true, ""
 }
-

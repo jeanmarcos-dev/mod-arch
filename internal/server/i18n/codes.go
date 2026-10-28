@@ -36,14 +36,14 @@ const (
 
 	CodeRateLimitTooMany = "ratelimit.too_many"
 
-	CodeAdminInvalidJSON            = "admin.invalid_json"
-	CodeAdminInvalidAccessMode      = "admin.invalid_access_mode"
-	CodeAdminInvalidBool            = "admin.invalid_bool"
-	CodeAdminUnknownKey             = "admin.unknown_key"
-	CodeAdminInviteMissingTarget    = "admin.invite_missing_target"
-	CodeAdminInviteInvalidRole      = "admin.invite_invalid_role"
-	CodeAdminInviteNothingToUpdate  = "admin.invite_nothing_to_update"
-	CodeAdminI18nUnsupportedLocale  = "i18n.unsupported_locale"
+	CodeAdminInvalidJSON           = "admin.invalid_json"
+	CodeAdminInvalidAccessMode     = "admin.invalid_access_mode"
+	CodeAdminInvalidBool           = "admin.invalid_bool"
+	CodeAdminUnknownKey            = "admin.unknown_key"
+	CodeAdminInviteMissingTarget   = "admin.invite_missing_target"
+	CodeAdminInviteInvalidRole     = "admin.invite_invalid_role"
+	CodeAdminInviteNothingToUpdate = "admin.invite_nothing_to_update"
+	CodeAdminI18nUnsupportedLocale = "i18n.unsupported_locale"
 
 	CodeSimulatorCoresInvalidMin = "simulator.cores_invalid_min"
 	CodeSimulatorCoresInvalidMax = "simulator.cores_invalid_max"

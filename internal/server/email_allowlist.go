@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"strings"
 
@@ -70,13 +69,6 @@ func (s *Server) loadEmailAllowlist(ctx context.Context) EmailAllowlist {
 func readListSetting(ctx context.Context, st *store.Store, key string, norm func(string) string) []string {
 	raw, err := st.GetSetting(ctx, key)
 	if err != nil || raw == "" {
-		if !errors.Is(err, store.ErrNotFound) && err != nil {
-			// Don't propagate read errors to the auth path; just log via the
-			// fact that the list comes back empty. Settings IO failure is
-			// rare and not a place we want to fail-open silently — but here
-			// the caller (loadEmailAllowlist) treats an empty list as "off",
-			// which is the safest default.
-		}
 		return nil
 	}
 	return parseList(raw, norm)

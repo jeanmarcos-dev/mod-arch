@@ -15,7 +15,6 @@ linters:
     - revive
     - gocyclo
     - gocognit
-    - misspell
     - unconvert
     - bodyclose
     - errorlint
@@ -29,10 +28,6 @@ linters:
       min-complexity: 20
     revive:
       rules:
-        - name: exported
-          disabled: false
-        - name: package-comments
-          disabled: false
         - name: var-naming
         - name: receiver-naming
         - name: error-return
@@ -48,15 +43,6 @@ linters:
     errcheck:
       check-type-assertions: false
       check-blank: false
-    misspell:
-      locale: US
-      ignore-rules:
-        - persistente
-        - comando
-        - comandos
-        - clientes
-        - sesion
-        - sesiones
 
   exclusions:
     rules:

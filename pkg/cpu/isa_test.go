@@ -529,10 +529,10 @@ func TestISA_STI_InUserRaisesGP(t *testing.T) {
 // "taken" row sets SF only and the "not taken" row sets OF only.
 func TestISA_Jcc_FullTable(t *testing.T) {
 	tests := []struct {
-		name     string
-		opcode   byte
-		takeEFL  uint32 // flags that should cause the jump
-		skipEFL  uint32 // flags that should NOT cause the jump
+		name    string
+		opcode  byte
+		takeEFL uint32 // flags that should cause the jump
+		skipEFL uint32 // flags that should NOT cause the jump
 	}{
 		{"JO", 0x70, FlagOF, 0},
 		{"JNO", 0x71, 0, FlagOF},
@@ -571,7 +571,7 @@ func TestISA_Jcc_FullTable(t *testing.T) {
 			if _, err := c.Step(); err != nil {
 				t.Fatalf("step: %v", err)
 			}
-			want := uint32(AddrUserBase + 2)
+			want := AddrUserBase + 2
 			if c.R.EIP != want {
 				t.Errorf("EIP = 0x%X, want 0x%X (fall through)", c.R.EIP, want)
 			}

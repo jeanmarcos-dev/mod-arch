@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -197,7 +198,7 @@ func scanReport(sc scanner) (*UserReport, error) {
 	if err := sc.Scan(&r.ID, &r.TS, &sessionID, &userID, &ipHash,
 		&r.Kind, &r.Title, &r.Body, &r.ContextJSON, &r.Status,
 		&resolvedAt, &resolvedBy); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err

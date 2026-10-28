@@ -108,7 +108,7 @@ func main() {
 		if i == 0 {
 			prefix = "    "
 		}
-		sb.WriteString(fmt.Sprintf("%s%s\n", prefix, name))
+		fmt.Fprintf(&sb, "%s%s\n", prefix, name)
 	}
 	sb.WriteString(";\n")
 
@@ -130,7 +130,7 @@ func main() {
 
 func typeToTS(t reflect.Type) string {
 	switch t.Kind() {
-	case reflect.Ptr:
+	case reflect.Pointer:
 		return typeToTS(t.Elem())
 	case reflect.Slice:
 		elem := t.Elem()
@@ -173,7 +173,7 @@ func typeToTS(t reflect.Type) string {
 
 func generateInterface(t reflect.Type, name string, typeTag string) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("export interface %s {\n", name))
+	fmt.Fprintf(&sb, "export interface %s {\n", name)
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		jsonTag := f.Tag.Get("json")
@@ -188,7 +188,7 @@ func generateInterface(t reflect.Type, name string, typeTag string) string {
 				isOptional = true
 			}
 		}
-		if f.Type.Kind() == reflect.Ptr {
+		if f.Type.Kind() == reflect.Pointer {
 			isOptional = true
 		}
 		tsType := typeToTS(f.Type)
@@ -199,7 +199,7 @@ func generateInterface(t reflect.Type, name string, typeTag string) string {
 		if jsonName == "type" && typeTag != "" {
 			tsType = fmt.Sprintf("'%s'", typeTag)
 		}
-		sb.WriteString(fmt.Sprintf("  %s%s: %s;\n", jsonName, opt, tsType))
+		fmt.Fprintf(&sb, "  %s%s: %s;\n", jsonName, opt, tsType)
 	}
 	sb.WriteString("}\n")
 	return sb.String()
@@ -207,8 +207,8 @@ func generateInterface(t reflect.Type, name string, typeTag string) string {
 
 func generateEventInterface(t reflect.Type, name string, tag string) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("export interface %s {\n", name))
-	sb.WriteString(fmt.Sprintf("  type: '%s';\n", tag))
+	fmt.Fprintf(&sb, "export interface %s {\n", name)
+	fmt.Fprintf(&sb, "  type: '%s';\n", tag)
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		jsonTag := f.Tag.Get("json")
@@ -223,7 +223,7 @@ func generateEventInterface(t reflect.Type, name string, tag string) string {
 				isOptional = true
 			}
 		}
-		if f.Type.Kind() == reflect.Ptr {
+		if f.Type.Kind() == reflect.Pointer {
 			isOptional = true
 		}
 		tsType := typeToTS(f.Type)
@@ -234,7 +234,7 @@ func generateEventInterface(t reflect.Type, name string, tag string) string {
 		if jsonName == "type" && tag != "" {
 			tsType = fmt.Sprintf("'%s'", tag)
 		}
-		sb.WriteString(fmt.Sprintf("  %s%s: %s;\n", jsonName, opt, tsType))
+		fmt.Fprintf(&sb, "  %s%s: %s;\n", jsonName, opt, tsType)
 	}
 	sb.WriteString("}\n")
 	return sb.String()

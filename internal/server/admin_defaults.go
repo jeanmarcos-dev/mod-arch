@@ -43,10 +43,10 @@ var (
 )
 
 const (
-	uiSpeedMin     = 1
-	uiSpeedMax     = 60
-	uiTickMsMax    = 5000
-	uiDefaultTZ    = "UTC"
+	uiSpeedMin  = 1
+	uiSpeedMax  = 60
+	uiTickMsMax = 5000
+	uiDefaultTZ = "UTC"
 )
 
 // defaultUIDefaults mirrors the code defaults in the preferences store so a

@@ -63,17 +63,6 @@ func mustParseTemplate(name, filePath string) *template.Template {
 	return template.Must(template.New(name).Funcs(templateFuncs).Parse(string(b)))
 }
 
-// readStaticAsset returns the raw bytes of a file from templateFS. It panics
-// if the file is missing; the caller is expected to use a path that is known
-// to exist at compile time.
-func readStaticAsset(filePath string) []byte {
-	b, err := fs.ReadFile(templateFS, filePath)
-	if err != nil {
-		panic("server: read static asset " + filePath + ": " + err.Error())
-	}
-	return b
-}
-
 // assetContentTypes maps allowed asset extensions to their HTTP content types.
 // Only entries listed here are served by handleAsset.
 var assetContentTypes = map[string]string{

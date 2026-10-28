@@ -17,7 +17,6 @@ const queryEmbedTimeout = 20 * time.Second
 type Retriever struct {
 	store        *Store
 	embedder     Embedder
-	queryTask    string
 	corpus       []Chunk
 	corpusNorms  []float32 // L2 norm precomputed per chunk
 	corpusVer    int

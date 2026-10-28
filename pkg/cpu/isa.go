@@ -98,7 +98,7 @@ type arithOp int
 
 const (
 	opADD arithOp = iota
-	opSUB // CMP shares the same flag effects as SUB.
+	opSUB         // CMP shares the same flag effects as SUB.
 	opAND
 	opXOR
 	opINC // CF preserved; OF set only when crossing the signed maximum.

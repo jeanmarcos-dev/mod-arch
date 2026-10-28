@@ -10,9 +10,10 @@ import (
 const LangCookie = "lang"
 
 // ResolveLang inspects the request for the active locale, in this order:
-//   1. lang cookie (set by the SPA when the user picks an idiom).
-//   2. Accept-Language header (best-effort: only the first language tag).
-//   3. DefaultLocale (es).
+//  1. lang cookie (set by the SPA when the user picks an idiom).
+//  2. Accept-Language header (best-effort: only the first language tag).
+//  3. DefaultLocale (es).
+//
 // Unknown values fall back to DefaultLocale rather than returning the raw
 // header — we never want the templates to render with a bogus key.
 func ResolveLang(r *http.Request) string {

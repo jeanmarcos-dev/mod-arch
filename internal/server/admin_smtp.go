@@ -148,9 +148,9 @@ func validateSMTPInput(in smtpInput) error {
 		}
 	}
 	for label, addr := range map[string]string{
-		"remitente":  in.FromEmail,
-		"reply-to":   in.ReplyTo,
-		"copia BCC":  in.BCC,
+		"remitente": in.FromEmail,
+		"reply-to":  in.ReplyTo,
+		"copia BCC": in.BCC,
 	} {
 		addr = strings.TrimSpace(addr)
 		if addr == "" {

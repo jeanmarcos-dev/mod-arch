@@ -197,8 +197,8 @@ func TestDuplicateLabelPanics(t *testing.T) {
 // points as immediates.
 func TestLabelOffsetEmbedded(t *testing.T) {
 	b := NewProc("lo").Source("// lo\n").At(1)
-	b.MovImm(EAX, 1)  // 5 bytes
-	b.Label("entry")  // offset 5
+	b.MovImm(EAX, 1) // 5 bytes
+	b.Label("entry") // offset 5
 	b.Nop()
 	if got := b.LabelOffset("entry"); got != 5 {
 		t.Errorf("LabelOffset = %d, want 5", got)

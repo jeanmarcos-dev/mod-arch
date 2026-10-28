@@ -38,12 +38,12 @@ func TestTickInterval_Formula(t *testing.T) {
 // ticker formula); anything above clamps down to 60.
 func TestClampClockHz_Bounds(t *testing.T) {
 	cases := map[int]int{
-		-5: 1,
-		0:  1,
-		1:  1,
-		4:  4,
-		60: 60,
-		61: 60,
+		-5:  1,
+		0:   1,
+		1:   1,
+		4:   4,
+		60:  60,
+		61:  60,
 		999: 60,
 	}
 	for in, want := range cases {

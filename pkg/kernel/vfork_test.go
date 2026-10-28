@@ -18,6 +18,7 @@ import (
 //	int 0x80
 //
 // child:
+//
 //	mov eax, 0xDEADBEEF
 //	mov [0x350000], eax   ; write into parent-visible memory
 //	mov ebx, 42

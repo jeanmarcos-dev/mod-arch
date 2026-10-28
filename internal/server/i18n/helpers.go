@@ -6,7 +6,9 @@ import (
 )
 
 // WriteError emits a JSON response of the form
-//   {"error_code": "<code>", "error": "<translated>"}.
+//
+//	{"error_code": "<code>", "error": "<translated>"}.
+//
 // The frontend prefers error_code (so it can re-translate against its own
 // catalog) and uses error only as a fallback for legacy clients or codes
 // missing from the SPA catalog.

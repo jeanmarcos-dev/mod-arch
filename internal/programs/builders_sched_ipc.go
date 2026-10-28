@@ -250,9 +250,9 @@ int main(void) {
     return reaped;
 }
 `)
-	const fdsAddr uint32 = 0x310000    // fds[0]=fdR, fds[1]=fdW (4 bytes apart)
-	const msgAddr uint32 = 0x310010    // "HOLA" landing slot
-	const childBuf uint32 = 0x310020   // child's read buffer
+	const fdsAddr uint32 = 0x310000  // fds[0]=fdR, fds[1]=fdW (4 bytes apart)
+	const msgAddr uint32 = 0x310010  // "HOLA" landing slot
+	const childBuf uint32 = 0x310020 // child's read buffer
 
 	// sys_pipe(fds)
 	b.At(8).MovImm(asm.EAX, kernel.SysPipe)

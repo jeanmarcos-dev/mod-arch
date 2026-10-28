@@ -118,10 +118,10 @@ type rowScanner interface {
 
 func scanScheduleRule(sc rowScanner) (ScheduleRule, error) {
 	var (
-		r       ScheduleRule
-		endsAt  sql.NullInt64
+		r         ScheduleRule
+		endsAt    sql.NullInt64
 		createdBy sql.NullString
-		enabled int64
+		enabled   int64
 	)
 	if err := sc.Scan(&r.ID, &r.Kind, &r.Target, &r.Action, &r.StartsAt, &endsAt,
 		&r.Timezone, &enabled, &r.CreatedAt, &createdBy, &r.UpdatedAt); err != nil {

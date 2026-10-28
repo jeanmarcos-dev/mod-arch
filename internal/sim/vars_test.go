@@ -52,14 +52,14 @@ func TestFuncFor(t *testing.T) {
 		wantName string
 		wantOK   bool
 	}{
-		{codeBase, "main", true},                  // entry of main
-		{codeBase + 0x40, "main", true},           // middle of main
-		{codeBase + 0x80, "thread_fn", true},      // entry of thread_fn (start is inclusive)
-		{codeBase + 0xAF, "thread_fn", true},      // last byte of thread_fn
-		{codeBase + 0xB0, "", false},              // exactly EndOffset (exclusive)
-		{codeBase + 0x200, "", false},             // past program
-		{codeBase - 1, "", false},                 // before codeBase
-		{0, "", false},                            // EIP zero, codeBase zero → not in
+		{codeBase, "main", true},             // entry of main
+		{codeBase + 0x40, "main", true},      // middle of main
+		{codeBase + 0x80, "thread_fn", true}, // entry of thread_fn (start is inclusive)
+		{codeBase + 0xAF, "thread_fn", true}, // last byte of thread_fn
+		{codeBase + 0xB0, "", false},         // exactly EndOffset (exclusive)
+		{codeBase + 0x200, "", false},        // past program
+		{codeBase - 1, "", false},            // before codeBase
+		{0, "", false},                       // EIP zero, codeBase zero → not in
 	}
 	for _, tc := range cases {
 		fn, ok := funcFor(tc.eip, codeBase, funcs)
@@ -166,10 +166,10 @@ func TestVarsLockedReadsLiveRegistersForRunningThread(t *testing.T) {
 	bytes := []byte{
 		0xB8, 0x0A, 0x00, 0x00, 0x00, // MOV EAX, 10
 		0xBB, 0x20, 0x00, 0x00, 0x00, // MOV EBX, 32
-		0x01, 0xD8,                   // ADD EAX, EBX
-		0x89, 0xC3,                   // MOV EBX, EAX
+		0x01, 0xD8, // ADD EAX, EBX
+		0x89, 0xC3, // MOV EBX, EAX
 		0xB8, 0x01, 0x00, 0x00, 0x00, // MOV EAX, 1 (sys_exit)
-		0xCD, 0x80,                   // INT 0x80
+		0xCD, 0x80, // INT 0x80
 	}
 	s := New(Config{
 		NumCores: 1,
@@ -249,10 +249,10 @@ func TestVarsLockedTracksStepByStep(t *testing.T) {
 	bytes := []byte{
 		0xB8, 0x0A, 0x00, 0x00, 0x00, // 0x00  MOV EAX, 10
 		0xBB, 0x20, 0x00, 0x00, 0x00, // 0x05  MOV EBX, 32
-		0x01, 0xD8,                   // 0x0A  ADD EAX, EBX  → EAX=42
-		0x89, 0xC3,                   // 0x0C  MOV EBX, EAX  → EBX=42
+		0x01, 0xD8, // 0x0A  ADD EAX, EBX  → EAX=42
+		0x89, 0xC3, // 0x0C  MOV EBX, EAX  → EBX=42
 		0xB8, 0x01, 0x00, 0x00, 0x00, // 0x0E  MOV EAX, 1
-		0xCD, 0x80,                   // 0x13  INT 0x80
+		0xCD, 0x80, // 0x13  INT 0x80
 	}
 	s := New(Config{
 		NumCores: 1,
@@ -314,7 +314,7 @@ func TestVarsLockedTracksStepByStep(t *testing.T) {
 		if got["a"] != exp.a || got["b"] != exp.b {
 			t.Errorf("after step %d: a=%q b=%q; want a=%q b=%q (EIP=0x%X)",
 				i+1, got["a"], got["b"], exp.a, exp.b,
-				uint32(th["regs"].(map[string]uint32)["EIP"]))
+				th["regs"].(map[string]uint32)["EIP"])
 		}
 	}
 }
@@ -334,8 +334,8 @@ func TestVarsUpdateBroadcastInOrder(t *testing.T) {
 		Demos: []Demo{{
 			Name: "add_wire",
 			Procs: []Proc{{
-				Name:  "add",
-				Bytes: bytes,
+				Name:   "add",
+				Bytes:  bytes,
 				Source: "int main(void) {\n    register int a = 10;\n    register int b = 32;\n    return a + b;\n}\n",
 				SourceMap: []SourceLine{
 					{Offset: 0, Mnemonic: "MOV EAX, 0xA", CLine: 2},

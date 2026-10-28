@@ -18,7 +18,7 @@ func TestSysMknod_RegistersFIFOByName(t *testing.T) {
 	boot := k.BootCore()
 	boot.CurrentPID = pid
 
-	nameAddr := uint32(cpu.AddrUserStack + 0x100)
+	nameAddr := cpu.AddrUserStack + 0x100
 	copy(k.Mem.Bytes[nameAddr:], []byte("queue\x00"))
 
 	result, evs := k.sysMknod(boot, nameAddr)
@@ -53,7 +53,7 @@ func TestSysOpen_TwoProcessesOneFIFO(t *testing.T) {
 		t.Fatalf("AddProcess B: %v", err)
 	}
 
-	nameAddr := uint32(cpu.AddrUserStack + 0x100)
+	nameAddr := cpu.AddrUserStack + 0x100
 	copy(k.Mem.Bytes[nameAddr:], []byte("q\x00"))
 	// A creates and opens write end
 	boot := k.BootCore()
@@ -75,7 +75,7 @@ func TestSysOpen_TwoProcessesOneFIFO(t *testing.T) {
 
 	// A writes "OK"
 	boot.CurrentPID = pidA
-	bufAddrA := uint32(cpu.AddrUserStack + 0x200)
+	bufAddrA := cpu.AddrUserStack + 0x200
 	copy(k.Mem.Bytes[bufAddrA:], []byte("OK"))
 	if n, _ := k.sysWrite(boot, fdW, bufAddrA, 2); n != 2 {
 		t.Errorf("A's write returned %d, want 2", n)
@@ -83,7 +83,7 @@ func TestSysOpen_TwoProcessesOneFIFO(t *testing.T) {
 
 	// B reads
 	boot.CurrentPID = pidB
-	bufAddrB := uint32(cpu.AddrUserStack + 0x300)
+	bufAddrB := cpu.AddrUserStack + 0x300
 	if n, _ := k.sysRead(boot, fdR, bufAddrB, 2); n != 2 {
 		t.Errorf("B's read returned %d, want 2", n)
 	}

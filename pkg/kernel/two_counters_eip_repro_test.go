@@ -62,12 +62,12 @@ func TestTwoCounters_HandlerEIPStaysAt101020(t *testing.T) {
 	// Capture every event that touches EIP, indexed in arrival order so we can
 	// see exactly what the frontend would consume.
 	type eipTouch struct {
-		tick    uint64
-		coreID  int
-		source  string // "instruction" | "reg_write" | "pcb_save" | "pcb_restore" | "mode_switch"
-		eipOld  uint32
-		eipNew  uint32 // for instruction this is ev.eip + len(ev.bytes)
-		extra   string
+		tick   uint64
+		coreID int
+		source string // "instruction" | "reg_write" | "pcb_save" | "pcb_restore" | "mode_switch"
+		eipOld uint32
+		eipNew uint32 // for instruction this is ev.eip + len(ev.bytes)
+		extra  string
 	}
 	var touches []eipTouch
 
@@ -79,7 +79,7 @@ func TestTwoCounters_HandlerEIPStaysAt101020(t *testing.T) {
 			touches = append(touches, eipTouch{
 				tick: v.Tick, coreID: v.CoreID, source: "instruction",
 				eipNew: next,
-				extra: fmt.Sprintf("eip=0x%08X mnem=%s bytes=%s", v.EIP, v.Mnemonic, formatBytes(v.Bytes)),
+				extra:  fmt.Sprintf("eip=0x%08X mnem=%s bytes=%s", v.EIP, v.Mnemonic, formatBytes(v.Bytes)),
 			})
 		case cpu.EventRegWrite:
 			if v.Reg != "EIP" {
@@ -94,7 +94,7 @@ func TestTwoCounters_HandlerEIPStaysAt101020(t *testing.T) {
 				touches = append(touches, eipTouch{
 					tick: v.Tick, coreID: v.CoreID, source: "pcb_save",
 					eipNew: eip,
-					extra: fmt.Sprintf("pid=%d", v.PID),
+					extra:  fmt.Sprintf("pid=%d", v.PID),
 				})
 			}
 		case cpu.EventPCBRestore:
@@ -102,7 +102,7 @@ func TestTwoCounters_HandlerEIPStaysAt101020(t *testing.T) {
 				touches = append(touches, eipTouch{
 					tick: v.Tick, coreID: v.CoreID, source: "pcb_restore",
 					eipNew: eip,
-					extra: fmt.Sprintf("pid=%d", v.PID),
+					extra:  fmt.Sprintf("pid=%d", v.PID),
 				})
 			}
 		}

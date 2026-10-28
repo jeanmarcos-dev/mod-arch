@@ -103,7 +103,7 @@ func TestKernelWork_CleanExitWithoutSibling(t *testing.T) {
 	if zombieStep < 0 || wakeStep < 0 || releaseStep < 0 || reapStep < 0 || haltStep < 0 {
 		t.Fatalf("phase Steps: ZOMBIE=%d WAKE=%d RELEASE=%d REAP=%d HALT=%d (one or more not found)", zombieStep, wakeStep, releaseStep, reapStep, haltStep)
 	}
-	if !(zombieStep < wakeStep && wakeStep < releaseStep && releaseStep < reapStep && reapStep < haltStep) {
+	if zombieStep >= wakeStep || wakeStep >= releaseStep || releaseStep >= reapStep || reapStep >= haltStep {
 		t.Errorf("phase Steps not strictly increasing: ZOMBIE=%d WAKE=%d RELEASE=%d REAP=%d HALT=%d", zombieStep, wakeStep, releaseStep, reapStep, haltStep)
 	}
 	if !k.BootCPU().Halted {

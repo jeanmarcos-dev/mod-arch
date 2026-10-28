@@ -15,13 +15,13 @@ import (
 // Settings keys persisted in the `settings` table. Prefix keeps tutor entries
 // from clashing with other subsystems.
 const (
-	cfgEnabled            = "tutor.enabled"              // "true" | "false"; false desactiva todo el tutor
-	cfgLLMProvider        = "tutor.llm_provider"         // gemini | deepseek | groq | openai_compat
-	cfgLLMModel           = "tutor.llm_model"            // override del default del provider
-	cfgLLMBaseURL         = "tutor.llm_base_url"         // solo para openai_compat
-	cfgLLMRPM             = "tutor.llm_rpm"              // rate limit por minuto, 0 desactiva
-	cfgMode               = "tutor.mode"                 // direct | socratic (global, controlado por admin)
-	cfgEmbedderProvider   = "tutor.embedder_provider"    // ollama | jina
+	cfgEnabled            = "tutor.enabled"           // "true" | "false"; false desactiva todo el tutor
+	cfgLLMProvider        = "tutor.llm_provider"      // gemini | deepseek | groq | openai_compat
+	cfgLLMModel           = "tutor.llm_model"         // override del default del provider
+	cfgLLMBaseURL         = "tutor.llm_base_url"      // solo para openai_compat
+	cfgLLMRPM             = "tutor.llm_rpm"           // rate limit por minuto, 0 desactiva
+	cfgMode               = "tutor.mode"              // direct | socratic (global, controlado por admin)
+	cfgEmbedderProvider   = "tutor.embedder_provider" // ollama | jina
 	cfgOllamaHost         = "tutor.ollama_host"
 	cfgOllamaEmbedModel   = "tutor.ollama_embed_model"
 	cfgHistoryWindowTurns = "tutor.history_window_turns" // 0..10; 0 desactiva la memoria multi-turno
@@ -39,7 +39,7 @@ const (
 // fields they care about. API keys are stored decrypted in this struct;
 // callers must not log or serialize Config directly — use Mask() for that.
 type Config struct {
-	Enabled          bool   // master switch; false desactiva el tutor entero
+	Enabled          bool // master switch; false desactiva el tutor entero
 	LLMProvider      string
 	LLMModel         string
 	LLMBaseURL       string
@@ -76,16 +76,16 @@ type MaskedConfig struct {
 	OllamaEmbedModel   string `json:"ollama_embed_model"`
 	HistoryWindowTurns int    `json:"history_window_turns"`
 
-	GeminiAPIKey      string `json:"gemini_api_key"`
-	HasGeminiKey      bool   `json:"has_gemini_key"`
-	DeepSeekAPIKey    string `json:"deepseek_api_key"`
-	HasDeepSeekKey    bool   `json:"has_deepseek_key"`
-	GroqAPIKey        string `json:"groq_api_key"`
-	HasGroqKey        bool   `json:"has_groq_key"`
-	OpenAICompatKey   string `json:"openai_compat_api_key"`
-	HasOpenAICompatKey bool  `json:"has_openai_compat_key"`
-	JinaAPIKey        string `json:"jina_api_key"`
-	HasJinaKey        bool   `json:"has_jina_key"`
+	GeminiAPIKey       string `json:"gemini_api_key"`
+	HasGeminiKey       bool   `json:"has_gemini_key"`
+	DeepSeekAPIKey     string `json:"deepseek_api_key"`
+	HasDeepSeekKey     bool   `json:"has_deepseek_key"`
+	GroqAPIKey         string `json:"groq_api_key"`
+	HasGroqKey         bool   `json:"has_groq_key"`
+	OpenAICompatKey    string `json:"openai_compat_api_key"`
+	HasOpenAICompatKey bool   `json:"has_openai_compat_key"`
+	JinaAPIKey         string `json:"jina_api_key"`
+	HasJinaKey         bool   `json:"has_jina_key"`
 }
 
 // Mask returns the masked view safe to send through the admin API.

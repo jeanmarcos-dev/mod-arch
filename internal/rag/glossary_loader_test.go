@@ -51,12 +51,12 @@ func TestLoadGlossaryFromTS(t *testing.T) {
 
 func TestUnquoteTSStringEscapes(t *testing.T) {
 	cases := map[string]string{
-		`'hola'`:           "hola",
-		`'tab\there'`:      "tab\there",
-		`'newline\nhere'`:  "newline\nhere",
-		`'it\'s ok'`:       "it's ok",
-		`"double quoted"`:  "double quoted",
-		"`backtick`":       "backtick",
+		`'hola'`:          "hola",
+		`'tab\there'`:     "tab\there",
+		`'newline\nhere'`: "newline\nhere",
+		`'it\'s ok'`:      "it's ok",
+		`"double quoted"`: "double quoted",
+		"`backtick`":      "backtick",
 	}
 	for in, want := range cases {
 		if got := unquoteTSString(in); got != want {

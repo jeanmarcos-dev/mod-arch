@@ -132,7 +132,7 @@ Solo [Glosario: <término exacto>] o [Silberschatz p. <N>]. Nunca formatos inter
 // "¿y por qué?" without needing the student to repeat themselves. The eager
 // slice carries pre-executed tool outputs so the LLM has the common answers
 // without having to invoke tools — see Service.runEagerTools.
-func BuildMessages(question string, simSnapshot string, eager []EagerResult, retrieved []rag.ScoredChunk, history []HistoryTurn, detectionContext string) []promptMessage {
+func BuildMessages(question string, simSnapshot string, eager []EagerResult, retrieved []rag.ScoredChunk, history []HistoryTurn, detectionContext string) []PromptMessage {
 	var ctxBlock strings.Builder
 	if strings.TrimSpace(simSnapshot) != "" {
 		ctxBlock.WriteString("ESTADO ACTUAL DEL SIMULADOR\n")
@@ -162,19 +162,19 @@ func BuildMessages(question string, simSnapshot string, eager []EagerResult, ret
 		userContent = question
 	}
 
-	out := make([]promptMessage, 0, 2+len(history))
-	out = append(out, promptMessage{Role: "system", Content: systemPrompt})
+	out := make([]PromptMessage, 0, 2+len(history))
+	out = append(out, PromptMessage{Role: "system", Content: systemPrompt})
 	for _, h := range history {
-		out = append(out, promptMessage{Role: h.Role, Content: h.Text})
+		out = append(out, PromptMessage{Role: h.Role, Content: h.Text})
 	}
-	out = append(out, promptMessage{Role: "user", Content: userContent})
+	out = append(out, PromptMessage{Role: "user", Content: userContent})
 	return out
 }
 
-// promptMessage is local to keep the tutor decoupled from the llm package's
+// PromptMessage is local to keep the tutor decoupled from the llm package's
 // concrete types here. The orchestrator translates these into llm.Message
 // before calling the provider.
-type promptMessage struct {
+type PromptMessage struct {
 	Role    string
 	Content string
 }

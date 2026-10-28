@@ -351,14 +351,14 @@ type oaiToolCall struct {
 // We build it manually so the tools array uses the {type, function} envelope
 // OpenAI mandates and we can omit tool_choice when no tools are declared.
 type oaiChatRequest struct {
-	Model       string        `json:"model"`
-	Messages    []oaiMessage  `json:"messages"`
-	Temperature float64       `json:"temperature,omitempty"`
-	MaxTokens   int           `json:"max_tokens,omitempty"`
-	TopP        float64       `json:"top_p,omitempty"`
-	Stop        []string      `json:"stop,omitempty"`
-	Tools       []oaiTool     `json:"tools,omitempty"`
-	ToolChoice  string        `json:"tool_choice,omitempty"`
+	Model       string       `json:"model"`
+	Messages    []oaiMessage `json:"messages"`
+	Temperature float64      `json:"temperature,omitempty"`
+	MaxTokens   int          `json:"max_tokens,omitempty"`
+	TopP        float64      `json:"top_p,omitempty"`
+	Stop        []string     `json:"stop,omitempty"`
+	Tools       []oaiTool    `json:"tools,omitempty"`
+	ToolChoice  string       `json:"tool_choice,omitempty"`
 }
 
 // oaiMessage carries the role-specific fields that may or may not be set
@@ -418,7 +418,7 @@ func buildOAIRequest(req ChatRequest) oaiChatRequest {
 		for i, t := range req.Tools {
 			out.Tools[i] = oaiTool{
 				Type:     "function",
-				Function: oaiToolFunc{Name: t.Name, Description: t.Description, Parameters: t.Parameters},
+				Function: oaiToolFunc(t),
 			}
 		}
 		out.ToolChoice = req.ToolChoice

@@ -65,8 +65,10 @@ func TestPause_MarksPausedTrue(t *testing.T) {
 // TestPause_DuringIdleAutostopStillBroadcasts checks the corner case where
 // the user presses pause while the simulator is already parked in idle
 // autostop (e.g. readkey waiting for a key). The transition is:
-//   running=true, paused=false  → autostop → running=false, paused=false
-//   user presses pause          → running=false, paused=true
+//
+//	running=true, paused=false  → autostop → running=false, paused=false
+//	user presses pause          → running=false, paused=true
+//
 // The second transition must still produce a state event so the frontend
 // can flip the UI from "PAUSE (will run on key)" to "RUN (manually paused)".
 func TestPause_DuringIdleAutostopStillBroadcasts(t *testing.T) {

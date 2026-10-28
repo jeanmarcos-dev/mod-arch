@@ -76,7 +76,10 @@ func setupService(t *testing.T, l llm.Provider) *Service {
 
 type testLogWriter struct{ t *testing.T }
 
-func (w testLogWriter) Write(p []byte) (int, error) { w.t.Log(strings.TrimRight(string(p), "\n")); return len(p), nil }
+func (w testLogWriter) Write(p []byte) (int, error) {
+	w.t.Log(strings.TrimRight(string(p), "\n"))
+	return len(p), nil
+}
 
 func TestAskHappyPath(t *testing.T) {
 	llmStub := &stubLLM{resp: "PL3 es el modo usuario. [Glosario: PL3]"}
