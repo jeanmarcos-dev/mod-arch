@@ -26,13 +26,13 @@ jobs:
         run: mkdir -p internal/staticui/dist && touch internal/staticui/dist/.keep
       - name: golangci-lint (new issues)
         if: github.event_name == 'pull_request'
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
           only-new-issues: true
       - name: golangci-lint (correctness)
         if: github.event_name != 'pull_request'
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
           args: --disable=gocyclo,gocognit
