@@ -7,6 +7,7 @@ Type=simple
 User=modos
 Group=modos
 WorkingDirectory=/opt/modos-cpu
+Environment=MODOS_STATE_DB=/var/lib/modos-cpu/state.db
 ExecStart=/opt/modos-cpu/modos-cpu -addr 127.0.0.1:8080
 Restart=on-failure
 RestartSec=3
@@ -16,7 +17,8 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=/opt/modos-cpu
+StateDirectory=modos-cpu
+StateDirectoryMode=0700
 
 [Install]
 WantedBy=multi-user.target

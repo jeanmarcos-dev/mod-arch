@@ -1,6 +1,6 @@
 # Deploy
 
-`modos-cpu` se distribuye como un único binario Go que embebe el frontend Vue. Sirve por defecto en `:8080` y necesita sólo conectividad de red entrante para HTTP+WebSocket.
+`modos-cpu` se distribuye como un único binario Go que embebe el frontend Vue. El binario escucha por defecto en `:9080`; la imagen Docker y la unidad systemd lo arrancan en `:8080`. Necesita sólo conectividad de red entrante para HTTP+WebSocket y un archivo SQLite persistente.
 
 Tres formas razonables de operarlo, ordenadas por simplicidad.
 
@@ -16,11 +16,12 @@ docker build -t modos-cpu:latest -f deploy/Dockerfile .
 docker run --rm -p 8080:8080 modos-cpu:latest
 curl -s http://127.0.0.1:8080/api/health    # {"ok":true,...}
 
-# Producción (memoria/CPU limitadas)
+# Producción (memoria/CPU limitadas, base de datos en un volumen)
 docker run -d \
   --name modos-cpu \
   --restart=unless-stopped \
   -p 8080:8080 \
+  -v modos-data:/home/nonroot \
   --memory=128m \
   --cpus=0.5 \
   modos-cpu:latest
@@ -48,6 +49,10 @@ docker run -d \
   modos-cpu:latest
 ```
 
+La base SQLite vive en `/home/nonroot/.local/state/modos-cpu/state.db` dentro del contenedor; el volumen `modos-data` la conserva entre recreaciones. Para usar otra ruta, montar un directorio escribible por el UID 65532 y definir `MODOS_STATE_DB`.
+
+Detrás de un dominio real definir también `ALLOWED_ORIGINS` (hosts permitidos para el WebSocket) y `TRUSTED_PROXY_HEADER` (cabecera con la IP real del cliente que pone el proxy: `CF-Connecting-IP` detrás de Cloudflare, `X-Real-IP` con el `nginx.conf` de ejemplo). Sin esa variable las cabeceras reenviadas se ignoran y los límites de intentos usan la IP de la conexión.
+
 Variables opcionales: `MAX_PUBLIC_SESSIONS` (default 10), `MAX_PRIVILEGED_SESSIONS` (default 5), `SESSION_TTL` (default 30m), `INVITE_TTL` (default 24h), `CLEANUP_INTERVAL` (default 60s), `AUTH_LOGIN_LIMIT` (intentos de login de estudiantes por IP cada 15 minutos, default 5; el login del admin queda fijo en 5), `EMBEDDER_MAX_CONCURRENCY` (consultas simultáneas de ARCHIUS al embedder Jina, default 2).
 
 ## Opción B — Binario + systemd
@@ -74,8 +79,9 @@ sudo chown -R modos:modos /opt/modos-cpu
 sudo chmod +x /opt/modos-cpu/modos-cpu
 sudo mv /tmp/modos-cpu.service /etc/systemd/system/
 
-# (Opcional) Editar /etc/systemd/system/modos-cpu.service para configurar
-# las env vars del admin antes de levantar el servicio.
+# (Opcional) Crear /opt/modos-cpu/.env (ver .env.sample) con las variables
+# del admin, ALLOWED_ORIGINS y TRUSTED_PROXY_HEADER. El servidor lo lee al
+# arrancar. La base queda en /var/lib/modos-cpu (StateDirectory de la unit).
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now modos-cpu
@@ -85,7 +91,7 @@ curl http://127.0.0.1:8080/api/health
 
 ## Opción C — Reverse proxy
 
-`deploy/nginx.conf` tiene un server block listo con WebSocket forwarding. Ajustar `server_name` al hostname destino y apuntar `proxy_pass` al backend.
+`deploy/nginx.conf` tiene un server block listo con WebSocket forwarding. Ajustar `server_name` al hostname destino y apuntar `proxy_pass` al backend. El bloque reenvía la IP del cliente en `X-Real-IP`, así que el backend debe arrancar con `TRUSTED_PROXY_HEADER=X-Real-IP` y escuchar solo en `127.0.0.1`.
 
 ```bash
 sudo cp deploy/nginx.conf /etc/nginx/sites-available/modos-cpu
