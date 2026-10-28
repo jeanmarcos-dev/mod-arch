@@ -9,9 +9,9 @@ func TestNormalizeDomain(t *testing.T) {
 	cases := []struct{ in, out string }{
 		{"ucv.edu.ve", "ucv.edu.ve"},
 		{"  UCV.EDU.VE  ", "ucv.edu.ve"},
-		{"@improntus.com", "improntus.com"},
-		{"@@improntus.com", "improntus.com"}, // double-prefix collapses through TrimPrefix once; remaining @ stays
-		{"plain", ""},                        // no dot
+		{"@example.com", "example.com"},
+		{"@@example.com", "example.com"}, // double-prefix collapses through TrimPrefix once; remaining @ stays
+		{"plain", ""},                    // no dot
 		{"with space.com", ""},
 		{"", ""},
 	}
@@ -24,9 +24,9 @@ func TestNormalizeDomain(t *testing.T) {
 }
 
 func TestParseList(t *testing.T) {
-	raw := "ucv.edu.ve, @improntus.com\nfoo.bar\n;\n\nucv.edu.ve\nINVALID NAME"
+	raw := "ucv.edu.ve, @example.com\nfoo.bar\n;\n\nucv.edu.ve\nINVALID NAME"
 	got := parseList(raw, normalizeDomain)
-	want := []string{"ucv.edu.ve", "improntus.com", "foo.bar"}
+	want := []string{"ucv.edu.ve", "example.com", "foo.bar"}
 	if !slices.Equal(got, want) {
 		t.Errorf("parseList = %v, want %v", got, want)
 	}

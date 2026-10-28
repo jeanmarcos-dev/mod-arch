@@ -21,7 +21,7 @@ func TestProfile_UpsertAndGet(t *testing.T) {
 		Institution:       "UCV",
 		Career:            "Sistemas",
 		Bio:               "hola",
-		GitHub:            "jeanmarcos",
+		GitHub:            "octocat",
 		LinkedIn:          "jm",
 		PreferredLanguage: "es",
 		UpdatedAt:         100,

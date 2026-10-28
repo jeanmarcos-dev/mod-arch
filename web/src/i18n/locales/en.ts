@@ -848,7 +848,7 @@ const en: MessageSchema = {
       allowlistOff: 'OFF',
       allowlistHint: 'Restrict sign-in by email to specific domains or explicit addresses. When both lists are empty, any well-formed email is accepted (default).',
       allowlistDomainsLabel: 'Allowed domains',
-      allowlistDomainsPlaceholder: 'one per line or comma-separated:\nucv.edu.ve\nimprontus.com',
+      allowlistDomainsPlaceholder: 'one per line or comma-separated:\nucv.edu.ve\nexample.com',
       allowlistEmailsLabel: 'Allowed emails (explicit exceptions)',
       allowlistEmailsPlaceholder: 'one per line:\nteacher@other.com\ntester@example.org',
       allowlistSaveDomains: 'Save domains',

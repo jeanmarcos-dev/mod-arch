@@ -840,7 +840,7 @@ const pt = {
       allowlistOff: 'INATIVA',
       allowlistHint: 'Restrinja o acesso por e-mail a domínios ou endereços específicos. Se ambas as listas estiverem vazias, qualquer e-mail bem formado é aceito (comportamento padrão).',
       allowlistDomainsLabel: 'Domínios permitidos',
-      allowlistDomainsPlaceholder: 'um por linha ou separados por vírgula:\nucv.edu.ve\nimprontus.com',
+      allowlistDomainsPlaceholder: 'um por linha ou separados por vírgula:\nucv.edu.ve\nexample.com',
       allowlistEmailsLabel: 'E-mails permitidos (exceções explícitas)',
       allowlistEmailsPlaceholder: 'um por linha:\nprofessor@outro.com\ntester@exemplo.org',
       allowlistSaveDomains: 'Salvar domínios',

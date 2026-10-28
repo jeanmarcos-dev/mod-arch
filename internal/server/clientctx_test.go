@@ -60,7 +60,7 @@ func TestExtractReferrerHost(t *testing.T) {
 	}{
 		{"", ""},
 		{"https://example.com/path?q=1", "example.com"},
-		{"http://improntus.com", "improntus.com"},
+		{"http://example.com", "example.com"},
 		{"https://sub.domain.co.uk:8080/x", "sub.domain.co.uk"},
 	}
 	for _, c := range cases {
@@ -79,7 +79,7 @@ func TestWithClientCtx_HashOnly(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux) Firefox/122.0")
-	req.Header.Set("Referer", "https://improntus.com/")
+	req.Header.Set("Referer", "https://example.com/")
 	req.Header.Set("X-Forwarded-For", "203.0.113.42")
 	req.RemoteAddr = "10.0.0.1:1234"
 
@@ -97,8 +97,8 @@ func TestWithClientCtx_HashOnly(t *testing.T) {
 	if !strings.Contains(captured.UAShort, "Firefox") {
 		t.Errorf("UAShort missing browser family, got %q", captured.UAShort)
 	}
-	if captured.ReferrerHost != "improntus.com" {
-		t.Errorf("ReferrerHost = %q, want improntus.com", captured.ReferrerHost)
+	if captured.ReferrerHost != "example.com" {
+		t.Errorf("ReferrerHost = %q, want example.com", captured.ReferrerHost)
 	}
 }
 

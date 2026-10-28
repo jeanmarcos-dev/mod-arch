@@ -845,7 +845,7 @@ const es = {
       allowlistOff: 'INACTIVA',
       allowlistHint: 'Restrinja el ingreso por correo a dominios o direcciones específicas. Si ambas listas están vacías, se acepta cualquier correo bien formado (comportamiento por defecto).',
       allowlistDomainsLabel: 'Dominios permitidos',
-      allowlistDomainsPlaceholder: 'uno por línea o separados por comas:\nucv.edu.ve\nimprontus.com',
+      allowlistDomainsPlaceholder: 'uno por línea o separados por comas:\nucv.edu.ve\nexample.com',
       allowlistEmailsLabel: 'Correos permitidos (excepciones explícitas)',
       allowlistEmailsPlaceholder: 'uno por línea:\nprofesor@otro.com\ntester@ejemplo.org',
       allowlistSaveDomains: 'Guardar dominios',
