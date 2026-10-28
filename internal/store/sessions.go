@@ -16,39 +16,40 @@ var ErrNotFound = errors.New("store: not found")
 // (label, public flag, view_token), timestamps and client tracking metadata
 // captured at session creation.
 type SessionRow struct {
-	ID           string
-	Mode         string
-	Label        string
-	Public       bool
-	ViewToken    string // empty when share is disabled
-	UserID       string // empty when no user is attached
-	CreatedAt    int64  // unix seconds
-	LastActiveAt int64  // unix seconds
-	ClientIPHash string // SHA-256(ip + SESSION_SECRET), truncated hex
-	ClientIP     string // raw IP, only populated when ADMIN_REVEAL_IP=true at session create
-	UAShort      string // parsed "Browser N / OS" form
-	GeoCountry   string // ISO 3166-1 alpha-2 code; empty if geo lookup disabled
-	ReferrerHost string // host portion of HTTP Referer at session create
+	ID             string
+	Mode           string
+	Label          string
+	Public         bool
+	ViewToken      string // empty when share is disabled
+	UserID         string // empty when no user is attached
+	CreatedAt      int64  // unix seconds
+	LastActiveAt   int64  // unix seconds
+	ClientIPHash   string // SHA-256(ip + SESSION_SECRET), truncated hex
+	ClientIP       string // raw IP, only populated when ADMIN_REVEAL_IP=true at session create
+	UAShort        string // parsed "Browser N / OS" form
+	GeoCountry     string // ISO 3166-1 alpha-2 code; empty if geo lookup disabled
+	ReferrerHost   string // host portion of HTTP Referer at session create
+	OwnerTokenHash string
 }
 
 // sessionColumns lists the columns selected by every session read path. Kept
 // as a constant so SELECT statements and the scanner stay in lockstep.
 const sessionColumns = `id, mode, label, public, view_token, user_id, created_at, last_active_at,
-client_ip_hash, client_ip, ua_short, geo_country, referrer_host`
+client_ip_hash, client_ip, ua_short, geo_country, referrer_host, owner_token_hash`
 
 // CreateSession inserts a new row. Caller is responsible for setting
 // CreatedAt and LastActiveAt to the same value.
 func (s *Store) CreateSession(ctx context.Context, r SessionRow) error {
 	_, err := s.db.ExecContext(ctx, `
         INSERT INTO sessions(id, mode, label, public, view_token, user_id, created_at, last_active_at,
-                             client_ip_hash, client_ip, ua_short, geo_country, referrer_host)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             client_ip_hash, client_ip, ua_short, geo_country, referrer_host, owner_token_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.Mode, r.Label, boolToInt(r.Public),
 		nullableString(r.ViewToken), nullableString(r.UserID),
 		r.CreatedAt, r.LastActiveAt,
 		nullableString(r.ClientIPHash), nullableString(r.ClientIP),
 		nullableString(r.UAShort), nullableString(r.GeoCountry),
-		nullableString(r.ReferrerHost))
+		nullableString(r.ReferrerHost), nullableString(r.OwnerTokenHash))
 	if err != nil {
 		return fmt.Errorf("store: insert session: %w", err)
 	}
@@ -229,10 +230,11 @@ func scanSessionRow(sc scanner) (*SessionRow, error) {
 		uaShort      sql.NullString
 		geoCountry   sql.NullString
 		referrerHost sql.NullString
+		ownerHash    sql.NullString
 	)
 	if err := sc.Scan(&r.ID, &r.Mode, &r.Label, &publicInt, &viewToken, &userID,
 		&r.CreatedAt, &r.LastActiveAt,
-		&ipHash, &ipPlain, &uaShort, &geoCountry, &referrerHost); err != nil {
+		&ipHash, &ipPlain, &uaShort, &geoCountry, &referrerHost, &ownerHash); err != nil {
 		return nil, err
 	}
 	r.Public = publicInt != 0
@@ -243,6 +245,7 @@ func scanSessionRow(sc scanner) (*SessionRow, error) {
 	r.UAShort = uaShort.String
 	r.GeoCountry = geoCountry.String
 	r.ReferrerHost = referrerHost.String
+	r.OwnerTokenHash = ownerHash.String
 	return &r, nil
 }
 

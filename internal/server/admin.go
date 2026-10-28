@@ -17,7 +17,6 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/jeanmarcos-dev/mod-arch/internal/sessions"
 	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
@@ -361,7 +360,7 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    signed,
 		Path:     "/admin",
 		HttpOnly: true,
-		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(AdminSessionTTL.Seconds()),
 	})
@@ -454,7 +453,7 @@ func (s *Server) handleAdminSetLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess.SetLabel(label)
-	sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
+	s.broadcastSessionInfo(sess)
 	meta, _ := json.Marshal(map[string]any{"label": label})
 	s.audit(r, "session.label", id, string(meta))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "label": label})
@@ -498,10 +497,10 @@ func (s *Server) handleAdminCreateInvite(w http.ResponseWriter, r *http.Request)
 	s.audit(r, "invite.create", inv.Token, string(meta))
 
 	scheme := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+	if isSecureRequest(r) {
 		scheme = "https"
 	}
-	host := r.Host
+	host := publicHost(r)
 	url := fmt.Sprintf("%s://%s/?t=%s", scheme, host, inv.Token)
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -520,10 +519,10 @@ func (s *Server) handleAdminListInvites(w http.ResponseWriter, r *http.Request) 
 	}
 	list := s.manager.ListInvites()
 	scheme := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+	if isSecureRequest(r) {
 		scheme = "https"
 	}
-	host := r.Host
+	host := publicHost(r)
 	out := make([]inviteJSON, 0, len(list))
 	for _, inv := range list {
 		out = append(out, inviteJSON{

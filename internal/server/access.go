@@ -112,6 +112,13 @@ func (s *Server) writeAccessDeniedHTML(w http.ResponseWriter, r *http.Request, r
 // hasValidViewerPasswordCookie verifies the HMAC signature on the cookie. The
 // secret is the same one used for admin cookies; password gates only make
 // sense when admin is enabled.
+func (s *Server) viewerGatePassed(r *http.Request) bool {
+	if required, _ := s.viewerPasswordRequired(r.Context()); !required {
+		return true
+	}
+	return s.hasValidViewerPasswordCookie(r)
+}
+
 func (s *Server) hasValidViewerPasswordCookie(r *http.Request) bool {
 	if !s.admin.enabled {
 		return false
@@ -195,6 +202,7 @@ func (s *Server) handleViewerAuth(w http.ResponseWriter, r *http.Request) {
 		Value:    value,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int((24 * 7 * 3600)),
 	})

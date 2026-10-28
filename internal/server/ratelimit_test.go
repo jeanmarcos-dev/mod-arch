@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -72,34 +73,46 @@ func TestRateLimiter_PurgeExpired(t *testing.T) {
 	}
 }
 
-func TestClientIP(t *testing.T) {
+func TestResolveClientIP(t *testing.T) {
 	tests := []struct {
-		name     string
-		setup    func(*httptest.ResponseRecorder)
-		remote   string
-		xff      string
-		xreal    string
-		expected string
+		name    string
+		trusted string
+		remote  string
+		headers map[string]string
+		want    string
 	}{
-		{name: "remote only", remote: "1.2.3.4:5678", expected: "1.2.3.4"},
-		{name: "xff single", remote: "10.0.0.1:80", xff: "5.6.7.8", expected: "5.6.7.8"},
-		{name: "xff list takes first", remote: "10.0.0.1:80", xff: "9.9.9.9, 5.6.7.8", expected: "9.9.9.9"},
-		{name: "xreal-ip fallback", remote: "10.0.0.1:80", xreal: "7.7.7.7", expected: "7.7.7.7"},
+		{name: "remote only", remote: "1.2.3.4:5678", want: "1.2.3.4"},
+		{name: "forwarded headers ignored without trusted proxy", remote: "10.0.0.1:80", headers: map[string]string{"X-Forwarded-For": "5.6.7.8", "X-Real-IP": "7.7.7.7", "CF-Connecting-IP": "8.8.8.8"}, want: "10.0.0.1"},
+		{name: "cloudflare header", trusted: "CF-Connecting-IP", remote: "10.0.0.1:80", headers: map[string]string{"CF-Connecting-IP": "203.0.113.9", "X-Forwarded-For": "6.6.6.6"}, want: "203.0.113.9"},
+		{name: "x-forwarded-for keeps the hop added by the trusted proxy", trusted: "X-Forwarded-For", remote: "10.0.0.1:80", headers: map[string]string{"X-Forwarded-For": "6.6.6.6, 203.0.113.9"}, want: "203.0.113.9"},
+		{name: "missing trusted header falls back to remote", trusted: "X-Real-IP", remote: "10.0.0.1:80", want: "10.0.0.1"},
+		{name: "invalid trusted value falls back to remote", trusted: "X-Real-IP", remote: "10.0.0.1:80", headers: map[string]string{"X-Real-IP": "not-an-ip"}, want: "10.0.0.1"},
+		{name: "ipv6", trusted: "CF-Connecting-IP", remote: "[::1]:80", headers: map[string]string{"CF-Connecting-IP": "2001:db8::1"}, want: "2001:db8::1"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			r := httptest.NewRequest("GET", "/", nil)
 			r.RemoteAddr = tc.remote
-			if tc.xff != "" {
-				r.Header.Set("X-Forwarded-For", tc.xff)
+			for k, v := range tc.headers {
+				r.Header.Set(k, v)
 			}
-			if tc.xreal != "" {
-				r.Header.Set("X-Real-IP", tc.xreal)
-			}
-			got := clientIP(r)
-			if got != tc.expected {
-				t.Fatalf("got %q, want %q", got, tc.expected)
+			if got := resolveClientIP(r, tc.trusted); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestClientIPUsesValueResolvedByMiddleware(t *testing.T) {
+	var got string
+	h := WithClientCtx([]byte("salt"), nil, false, "CF-Connecting-IP")(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got = clientIP(r)
+	}))
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "10.0.0.1:80"
+	r.Header.Set("CF-Connecting-IP", "203.0.113.9")
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	if got != "203.0.113.9" {
+		t.Fatalf("clientIP = %q, want the middleware-resolved address", got)
 	}
 }

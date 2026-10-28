@@ -72,6 +72,9 @@ func runServer(args []string) {
 	_ = fs.Parse(args)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	if weakSessionSecret(os.Getenv("SESSION_SECRET")) {
+		logger.Warn("SESSION_SECRET is unset or shorter than 32 characters; generate one with `make session-secret` before exposing the server")
+	}
 
 	demos := make([]sim.Demo, 0)
 	for _, d := range programs.Demos() {
@@ -398,4 +401,8 @@ func flagsString(f uint32) string {
 		s[4] = 'O'
 	}
 	return string(s)
+}
+
+func weakSessionSecret(secret string) bool {
+	return len(secret) < 32
 }

@@ -107,7 +107,7 @@ func TestAdminLive_AccessIsRestrictedToEnvAdmin(t *testing.T) {
 		want    int
 	}{
 		{name: "env admin", cookies: []*http.Cookie{f.envAdminCookie(t)}, want: http.StatusOK},
-		{name: "database admin without env cookie", cookies: []*http.Cookie{{Name: SessionCookie, Value: dbAdminSess.ID}}, want: http.StatusNotFound},
+		{name: "database admin without env cookie", cookies: []*http.Cookie{{Name: SessionCookie, Value: dbAdminSess.OwnerToken()}}, want: http.StatusNotFound},
 		{name: "anonymous", want: http.StatusNotFound},
 		{name: "forged cookie", cookies: []*http.Cookie{{Name: AdminCookie, Value: "abc.def"}}, want: http.StatusNotFound},
 	}

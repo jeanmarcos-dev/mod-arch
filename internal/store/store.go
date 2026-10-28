@@ -52,7 +52,7 @@ var schemaSQL string
 //
 //	(show/hide demos/panels/routes, or apply a defaults blob). Additive;
 //	CREATE TABLE IF NOT EXISTS in schema.sql covers fresh and upgraded DBs.
-const SchemaVersion = 11
+const SchemaVersion = 12
 
 // Store is the database handle. Methods on Store are safe for concurrent use:
 // SQLite serializes writes internally and the connection pool handles reads.
@@ -183,6 +183,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		{"ua_short", "ALTER TABLE sessions ADD COLUMN ua_short TEXT"},
 		{"geo_country", "ALTER TABLE sessions ADD COLUMN geo_country TEXT"},
 		{"referrer_host", "ALTER TABLE sessions ADD COLUMN referrer_host TEXT"},
+		{"owner_token_hash", "ALTER TABLE sessions ADD COLUMN owner_token_hash TEXT"},
 	} {
 		has, err := columnExists(ctx, tx, "sessions", col.name)
 		if err != nil {

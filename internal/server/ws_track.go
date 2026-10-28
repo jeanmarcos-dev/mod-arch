@@ -51,7 +51,7 @@ func (s *Server) wsUserIDFunc(r *http.Request, sess *sessions.Session, role sess
 	if err != nil {
 		return noUser
 	}
-	own := s.manager.Get(c.Value)
+	own := s.manager.GetByOwnerToken(c.Value)
 	if own == nil {
 		return noUser
 	}

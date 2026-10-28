@@ -59,8 +59,8 @@ func TestMigrate_UpgradesFromV10(t *testing.T) {
 	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatalf("user_version: %v", err)
 	}
-	if version != 11 {
-		t.Errorf("user_version = %d, want 11", version)
+	if version != SchemaVersion {
+		t.Errorf("user_version = %d, want %d", version, SchemaVersion)
 	}
 	var value string
 	if err := s.db.QueryRow(`SELECT value FROM settings WHERE key = 'keep'`).Scan(&value); err != nil || value != "me" {

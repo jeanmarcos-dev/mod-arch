@@ -73,7 +73,7 @@ func TestExtractReferrerHost(t *testing.T) {
 func TestWithClientCtx_HashOnly(t *testing.T) {
 	salt := []byte("salt")
 	var captured *ClientCtx
-	handler := WithClientCtx(salt, NoopGeoResolver{}, false)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	handler := WithClientCtx(salt, NoopGeoResolver{}, false, "")(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		captured = ClientCtxFrom(r)
 	}))
 
@@ -104,7 +104,7 @@ func TestWithClientCtx_HashOnly(t *testing.T) {
 
 func TestWithClientCtx_RevealOn(t *testing.T) {
 	var captured *ClientCtx
-	handler := WithClientCtx([]byte("salt"), nil, true)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	handler := WithClientCtx([]byte("salt"), nil, true, "")(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		captured = ClientCtxFrom(r)
 	}))
 	req := httptest.NewRequest("GET", "/", nil)
@@ -159,7 +159,7 @@ func TestCloudflareGeoResolver(t *testing.T) {
 
 func TestWithClientCtx_CapturesCloudflareCountry(t *testing.T) {
 	var captured *ClientCtx
-	handler := WithClientCtx([]byte("salt"), CloudflareGeoResolver{}, false)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	handler := WithClientCtx([]byte("salt"), CloudflareGeoResolver{}, false, "")(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		captured = ClientCtxFrom(r)
 	}))
 	req := httptest.NewRequest("GET", "/", nil)

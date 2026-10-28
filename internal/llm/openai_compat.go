@@ -111,15 +111,6 @@ func (c *OpenAICompat) Chat(ctx context.Context, req ChatRequest) (*ChatResponse
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		// Dump the offending request body on 4xx so misconfigured tools
-		// or messages surface in the logs instead of an opaque 400.
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			snippet := string(body)
-			if len(snippet) > 2000 {
-				snippet = snippet[:2000] + "...[truncated]"
-			}
-			return nil, fmt.Errorf("%w | request: %s", classifyHTTPError(resp.StatusCode, respBody), snippet)
-		}
 		return nil, classifyHTTPError(resp.StatusCode, respBody)
 	}
 

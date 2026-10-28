@@ -37,7 +37,7 @@ func (s *Server) ensureCSRFCookie(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: false,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+		Secure:   isSecureRequest(r),
 	})
 }
 

@@ -133,7 +133,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /ws", s.handleWS)
 	mux.HandleFunc("GET /full", s.handleFull)
 	mux.HandleFunc("GET /v/{token}", s.handleViewer)
-	mux.HandleFunc("POST /v/{token}/auth", s.handleViewerAuth)
+	mux.HandleFunc("POST /v/{token}/auth", s.limitByIP(s.authLimit, s.handleViewerAuth))
 	mux.HandleFunc("POST /v/leave", s.handleViewerLeave)
 	mux.HandleFunc("GET /_assets/{name}", s.handleAsset)
 	mux.HandleFunc("POST /api/i18n/lang", s.handleSetLang)
@@ -257,7 +257,7 @@ func (w *noStoreOn404Writer) WriteHeader(status int) {
 func (s *Server) consumePrivInvite(w http.ResponseWriter, r *http.Request, token string) bool {
 	label, err := s.manager.ConsumeInvite(token)
 	if err != nil {
-		s.logger.Info("invite consume failed", "token", token, "err", err)
+		s.logger.Info("invite consume failed", "err", err)
 		return false
 	}
 	sess, err := s.manager.CreateWithClient(sessions.ModePrivileged, clientInfoFrom(r))
@@ -273,9 +273,10 @@ func (s *Server) consumePrivInvite(w http.ResponseWriter, r *http.Request, token
 	clearCookie(w, ViewCookie)
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookie,
-		Value:    sess.ID,
+		Value:    sess.OwnerToken(),
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.Redirect(w, r, "/", http.StatusFound)
@@ -298,7 +299,7 @@ func isHTMLPath(path string) bool {
 // access tightens — only new-creation is gated.
 func (s *Server) getOrCreateSession(w http.ResponseWriter, r *http.Request) (*sessions.Session, error) {
 	if c, err := r.Cookie(SessionCookie); err == nil {
-		if sess := s.manager.Get(c.Value); sess != nil {
+		if sess := s.manager.GetByOwnerToken(c.Value); sess != nil {
 			sess.Touch()
 			return sess, nil
 		}
@@ -312,9 +313,10 @@ func (s *Server) getOrCreateSession(w http.ResponseWriter, r *http.Request) (*se
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookie,
-		Value:    sess.ID,
+		Value:    sess.OwnerToken(),
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	return sess, nil
@@ -326,12 +328,12 @@ func (s *Server) getOrCreateSession(w http.ResponseWriter, r *http.Request) (*se
 // viewer until they return to /.
 func (s *Server) resolveSessionAndRole(r *http.Request) (*sessions.Session, sessions.Role) {
 	if c, err := r.Cookie(ViewCookie); err == nil {
-		if sess := s.manager.GetByViewToken(c.Value); sess != nil {
+		if sess := s.manager.GetByViewToken(c.Value); sess != nil && s.viewerGatePassed(r) {
 			return sess, sessions.RoleViewer
 		}
 	}
 	if c, err := r.Cookie(SessionCookie); err == nil {
-		if sess := s.manager.Get(c.Value); sess != nil {
+		if sess := s.manager.GetByOwnerToken(c.Value); sess != nil {
 			return sess, sessions.RoleOwner
 		}
 	}
@@ -489,6 +491,7 @@ func (s *Server) handleViewer(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -500,6 +503,10 @@ func (s *Server) handleViewer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.handlePlaceholder(w, r)
+}
+
+func isSecureRequest(r *http.Request) bool {
+	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 }
 
 func clearCookie(w http.ResponseWriter, name string) {
@@ -599,8 +606,9 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	s.Routes(mux)
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           WithClientCtx([]byte(os.Getenv("SESSION_SECRET")), CloudflareGeoResolver{}, RevealIPEnabled())(mux),
+		Handler:           WithClientCtx([]byte(os.Getenv("SESSION_SECRET")), CloudflareGeoResolver{}, RevealIPEnabled(), os.Getenv("TRUSTED_PROXY_HEADER"))(withSecurityHeaders(limitRequestBody(mux))),
 		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
 	}
 	go func() {
 		<-ctx.Done()

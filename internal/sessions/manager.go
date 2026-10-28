@@ -22,6 +22,7 @@ package sessions
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -152,6 +153,9 @@ type Session struct {
 	CreatedAt time.Time
 
 	mgr *Manager // back-reference for persistence
+
+	ownerToken     string
+	ownerTokenHash string
 
 	mu           sync.RWMutex
 	viewToken    string // empty means share is disabled
@@ -310,6 +314,8 @@ func (s *Session) SetPublic(p bool) {
 	}
 }
 
+func (s *Session) OwnerToken() string { return s.ownerToken }
+
 // UserID returns the attached user identifier ("" when none).
 func (s *Session) UserID() string {
 	s.mu.RLock()
@@ -378,9 +384,10 @@ type Invite struct {
 
 // Manager keeps all active sessions indexed by ID and ViewToken.
 type Manager struct {
-	mu          sync.RWMutex
-	sessions    map[string]*Session
-	byViewToken map[string]*Session
+	mu           sync.RWMutex
+	sessions     map[string]*Session
+	byViewToken  map[string]*Session
+	byOwnerToken map[string]*Session
 
 	// invites is only populated when store == nil; otherwise invite state
 	// lives in the database.
@@ -425,6 +432,7 @@ func NewManager(cfg Config) *Manager {
 	m := &Manager{
 		sessions:      make(map[string]*Session),
 		byViewToken:   make(map[string]*Session),
+		byOwnerToken:  make(map[string]*Session),
 		invites:       make(map[string]*Invite),
 		store:         cfg.Store,
 		demos:         cfg.Demos,
@@ -455,7 +463,7 @@ func (m *Manager) hydrateFromStore() {
 	threshold := time.Now().Add(-m.idleTTL).Unix()
 	for i := range rows {
 		row := rows[i]
-		if row.LastActiveAt < threshold {
+		if row.LastActiveAt < threshold || row.OwnerTokenHash == "" {
 			if err := m.store.DeleteSession(ctx, row.ID); err != nil {
 				m.logger.Warn("store: prune idle session at boot", "id", row.ID, "err", err)
 			}
@@ -463,6 +471,7 @@ func (m *Manager) hydrateFromStore() {
 		}
 		sess := m.newSessionFromRow(row)
 		m.sessions[sess.ID] = sess
+		m.byOwnerToken[sess.ownerTokenHash] = sess
 		if sess.viewToken != "" {
 			m.byViewToken[sess.viewToken] = sess
 		}
@@ -472,21 +481,22 @@ func (m *Manager) hydrateFromStore() {
 
 func (m *Manager) newSessionFromRow(row store.SessionRow) *Session {
 	return &Session{
-		ID:           row.ID,
-		Sim:          sim.New(sim.Config{Demos: m.demos, Logger: m.logger, NumCores: m.numCores}),
-		Mode:         modeFromString(row.Mode),
-		CreatedAt:    time.Unix(row.CreatedAt, 0),
-		mgr:          m,
-		viewToken:    row.ViewToken,
-		label:        row.Label,
-		public:       row.Public,
-		userID:       row.UserID,
-		lastActiveAt: time.Unix(row.LastActiveAt, 0),
-		clientIPHash: row.ClientIPHash,
-		clientIP:     row.ClientIP,
-		uaShort:      row.UAShort,
-		geoCountry:   row.GeoCountry,
-		referrerHost: row.ReferrerHost,
+		ID:             row.ID,
+		Sim:            sim.New(sim.Config{Demos: m.demos, Logger: m.logger, NumCores: m.numCores}),
+		Mode:           modeFromString(row.Mode),
+		CreatedAt:      time.Unix(row.CreatedAt, 0),
+		mgr:            m,
+		ownerTokenHash: row.OwnerTokenHash,
+		viewToken:      row.ViewToken,
+		label:          row.Label,
+		public:         row.Public,
+		userID:         row.UserID,
+		lastActiveAt:   time.Unix(row.LastActiveAt, 0),
+		clientIPHash:   row.ClientIPHash,
+		clientIP:       row.ClientIP,
+		uaShort:        row.UAShort,
+		geoCountry:     row.GeoCountry,
+		referrerHost:   row.ReferrerHost,
 	}
 }
 
@@ -527,33 +537,37 @@ func (m *Manager) CreateWithClient(mode Mode, info ClientInfo) (*Session, error)
 		return nil, ErrPrivCapReached
 	}
 	now := time.Now()
+	ownerToken := newToken()
 	sess := &Session{
-		ID:           newID(),
-		Sim:          sim.New(sim.Config{Demos: m.demos, Logger: m.logger, NumCores: m.numCores}),
-		Mode:         mode,
-		CreatedAt:    now,
-		mgr:          m,
-		public:       true,
-		lastActiveAt: now,
-		clientIPHash: info.IPHash,
-		clientIP:     info.IPPlain,
-		uaShort:      info.UAShort,
-		geoCountry:   info.GeoCountry,
-		referrerHost: info.ReferrerHost,
+		ID:             newID(),
+		Sim:            sim.New(sim.Config{Demos: m.demos, Logger: m.logger, NumCores: m.numCores}),
+		Mode:           mode,
+		CreatedAt:      now,
+		mgr:            m,
+		ownerToken:     ownerToken,
+		ownerTokenHash: hashOwnerToken(ownerToken),
+		public:         true,
+		lastActiveAt:   now,
+		clientIPHash:   info.IPHash,
+		clientIP:       info.IPPlain,
+		uaShort:        info.UAShort,
+		geoCountry:     info.GeoCountry,
+		referrerHost:   info.ReferrerHost,
 	}
 	if m.store != nil {
 		err := m.store.CreateSession(context.Background(), store.SessionRow{
-			ID:           sess.ID,
-			Mode:         mode.String(),
-			Label:        "",
-			Public:       true,
-			CreatedAt:    now.Unix(),
-			LastActiveAt: now.Unix(),
-			ClientIPHash: info.IPHash,
-			ClientIP:     info.IPPlain,
-			UAShort:      info.UAShort,
-			GeoCountry:   info.GeoCountry,
-			ReferrerHost: info.ReferrerHost,
+			ID:             sess.ID,
+			Mode:           mode.String(),
+			Label:          "",
+			Public:         true,
+			CreatedAt:      now.Unix(),
+			LastActiveAt:   now.Unix(),
+			ClientIPHash:   info.IPHash,
+			ClientIP:       info.IPPlain,
+			UAShort:        info.UAShort,
+			GeoCountry:     info.GeoCountry,
+			ReferrerHost:   info.ReferrerHost,
+			OwnerTokenHash: sess.ownerTokenHash,
 		})
 		if err != nil {
 			m.logger.Warn("store: persist session failed", "id", sess.ID, "err", err)
@@ -561,6 +575,7 @@ func (m *Manager) CreateWithClient(mode Mode, info ClientInfo) (*Session, error)
 		}
 	}
 	m.sessions[sess.ID] = sess
+	m.byOwnerToken[sess.ownerTokenHash] = sess
 	current := len(m.sessions)
 	m.metricsMu.Lock()
 	m.totalCreated++
@@ -589,6 +604,16 @@ func (m *Manager) Get(id string) *Session {
 	return m.sessions[id]
 }
 
+func (m *Manager) GetByOwnerToken(token string) *Session {
+	if token == "" {
+		return nil
+	}
+	h := hashOwnerToken(token)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.byOwnerToken[h]
+}
+
 // GetByViewToken looks up a Session by its share token.
 func (m *Manager) GetByViewToken(token string) *Session {
 	if token == "" {
@@ -609,7 +634,7 @@ func (m *Manager) ActivateShare(sess *Session) string {
 		sess.mu.Unlock()
 		return token
 	}
-	token := newID()
+	token := newToken()
 	sess.viewToken = token
 	sess.mu.Unlock()
 
@@ -622,7 +647,7 @@ func (m *Manager) ActivateShare(sess *Session) string {
 			m.logger.Warn("store: persist view_token failed", "id", sess.ID, "err", err)
 		}
 	}
-	m.logger.Info("share activated", "session", sess.ID, "token", token)
+	m.logger.Info("share activated", "session", sess.ID, "token", tokenRef(token))
 	return token
 }
 
@@ -645,7 +670,7 @@ func (m *Manager) DeactivateShare(sess *Session) {
 			}
 		}
 		kicked := sess.disconnectAllViewers()
-		m.logger.Info("share deactivated", "session", sess.ID, "token", token, "viewers_kicked", kicked)
+		m.logger.Info("share deactivated", "session", sess.ID, "token", tokenRef(token), "viewers_kicked", kicked)
 	}
 }
 
@@ -704,6 +729,7 @@ func (m *Manager) terminate(id, reason string) {
 		return
 	}
 	delete(m.sessions, id)
+	delete(m.byOwnerToken, sess.ownerTokenHash)
 	if t := sess.viewToken; t != "" {
 		delete(m.byViewToken, t)
 	}
@@ -873,6 +899,24 @@ func newID() string {
 	return hex.EncodeToString(buf[:])
 }
 
+func newToken() string {
+	var buf [16]byte
+	_, _ = rand.Read(buf[:])
+	return hex.EncodeToString(buf[:])
+}
+
+func tokenRef(token string) string {
+	if len(token) <= 6 {
+		return token
+	}
+	return token[:6]
+}
+
+func hashOwnerToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
 // ErrInviteInvalid is the generic error returned when an invite token cannot
 // be consumed (unknown, already used, or expired). The three causes are
 // collapsed into one error so brute-force callers cannot distinguish them.
@@ -883,7 +927,7 @@ var ErrInviteInvalid = errors.New("invite token invalid or expired")
 func (m *Manager) CreateInvite(label string) *Invite {
 	now := time.Now()
 	inv := &Invite{
-		Token:     newID(),
+		Token:     newToken(),
 		Label:     label,
 		CreatedAt: now,
 	}
@@ -895,14 +939,14 @@ func (m *Manager) CreateInvite(label string) *Invite {
 			ExpiresAt: now.Add(m.inviteTTL).Unix(),
 		})
 		if err != nil {
-			m.logger.Warn("store: persist invite failed", "token", inv.Token, "err", err)
+			m.logger.Warn("store: persist invite failed", "token", tokenRef(inv.Token), "err", err)
 		}
 	} else {
 		m.mu.Lock()
 		m.invites[inv.Token] = inv
 		m.mu.Unlock()
 	}
-	m.logger.Info("invite created", "token", inv.Token, "label", label)
+	m.logger.Info("invite created", "token", tokenRef(inv.Token), "label", label)
 	return inv
 }
 
@@ -916,10 +960,10 @@ func (m *Manager) ConsumeInvite(token string) (string, error) {
 			return "", ErrInviteInvalid
 		}
 		if err != nil {
-			m.logger.Warn("store: consume invite failed", "token", token, "err", err)
+			m.logger.Warn("store: consume invite failed", "token", tokenRef(token), "err", err)
 			return "", ErrInviteInvalid
 		}
-		m.logger.Info("invite consumed", "token", token, "label", label)
+		m.logger.Info("invite consumed", "token", tokenRef(token), "label", label)
 		return label, nil
 	}
 
@@ -934,7 +978,7 @@ func (m *Manager) ConsumeInvite(token string) (string, error) {
 	}
 	now := time.Now()
 	inv.UsedAt = &now
-	m.logger.Info("invite consumed", "token", token, "label", inv.Label)
+	m.logger.Info("invite consumed", "token", tokenRef(token), "label", inv.Label)
 	return inv.Label, nil
 }
 
@@ -978,14 +1022,14 @@ func (m *Manager) ListInvites() []*Invite {
 func (m *Manager) RevokeInvite(token string) {
 	if m.store != nil {
 		if err := m.store.RevokeInvite(context.Background(), token); err != nil {
-			m.logger.Warn("store: revoke invite failed", "token", token, "err", err)
+			m.logger.Warn("store: revoke invite failed", "token", tokenRef(token), "err", err)
 		}
 	} else {
 		m.mu.Lock()
 		delete(m.invites, token)
 		m.mu.Unlock()
 	}
-	m.logger.Info("invite revoked", "token", token)
+	m.logger.Info("invite revoked", "token", tokenRef(token))
 }
 
 type liveTouch struct {

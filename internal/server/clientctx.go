@@ -22,6 +22,8 @@ type ClientCtx struct {
 	UAShort      string // "Firefox 122 / Linux", "bot/Googlebot", etc.
 	GeoCountry   string // ISO 3166-1 alpha-2 (or "")
 	ReferrerHost string // host portion of Referer header (or "")
+
+	ip string
 }
 
 type clientCtxKey struct{}
@@ -29,14 +31,15 @@ type clientCtxKey struct{}
 // WithClientCtx is an HTTP middleware that captures IP, UA, referrer and an
 // optional geo lookup, stuffing them into request context.Context. Wire once
 // at the outermost layer of the mux.
-func WithClientCtx(salt []byte, geo GeoResolver, revealIP bool) func(http.Handler) http.Handler {
+func WithClientCtx(salt []byte, geo GeoResolver, revealIP bool, trustedProxyHeader string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := clientIP(r)
+			ip := resolveClientIP(r, trustedProxyHeader)
 			cc := &ClientCtx{
 				IPHash:       hashIP(salt, ip),
 				UAShort:      parseUAShort(r.Header.Get("User-Agent")),
 				ReferrerHost: extractReferrerHost(r.Header.Get("Referer")),
+				ip:           ip,
 			}
 			if revealIP {
 				cc.IPPlain = ip

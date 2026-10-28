@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -54,6 +55,23 @@ func allowedWSOrigins() []string {
 		return defaultAllowedOrigins
 	}
 	return out
+}
+
+func publicHost(r *http.Request) string {
+	fallback := ""
+	for _, p := range allowedWSOrigins() {
+		host := p
+		if i := strings.Index(host, "://"); i >= 0 {
+			host = host[i+3:]
+		}
+		if ok, _ := path.Match(strings.ToLower(host), strings.ToLower(r.Host)); ok {
+			return r.Host
+		}
+		if fallback == "" && !strings.ContainsAny(host, "*?[") {
+			fallback = host
+		}
+	}
+	return fallback
 }
 
 const (
@@ -382,10 +400,18 @@ func (s *Server) sessionInfoMessage(sess *sessions.Session, role sessions.Role) 
 	if err != nil {
 		return msg
 	}
-	msg["user_id"] = u.ID
 	msg["user_name"] = u.Name
+	if role == sessions.RoleViewer {
+		return msg
+	}
+	msg["user_id"] = u.ID
 	msg["user_email"] = u.Email
 	return msg
+}
+
+func (s *Server) broadcastSessionInfo(sess *sessions.Session) {
+	sess.Sim.BroadcastTo(s.sessionInfoMessage(sess, sessions.RoleOwner), sim.RoleOwner)
+	sess.Sim.BroadcastTo(s.sessionInfoMessage(sess, sessions.RoleViewer), sim.RoleViewer)
 }
 
 // wsReadLoop receives commands from the client and dispatches them to the
@@ -551,10 +577,10 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 		sess.Sim.PushKey(cmd.Key)
 	case "share":
 		s.manager.ActivateShare(sess)
-		sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
+		s.broadcastSessionInfo(sess)
 	case "unshare":
 		s.manager.DeactivateShare(sess)
-		sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
+		s.broadcastSessionInfo(sess)
 	case "set_num_cores":
 		if err := sess.Sim.SetNumCores(cmd.Cores); err != nil {
 			c.Send <- map[string]any{"type": "error", "message": err.Error()}
@@ -580,7 +606,7 @@ func (s *Server) dispatch(cmd Command, sess *sessions.Session, role sessions.Rol
 			return
 		}
 		sess.SetLabel(alias)
-		sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
+		s.broadcastSessionInfo(sess)
 	case "presence":
 		s.handlePresence(cmd, sess)
 	case "hand_raise":

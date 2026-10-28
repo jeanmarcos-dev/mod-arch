@@ -100,7 +100,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	if secErr != nil {
 		s.logger.Warn("auth: load security config failed", "err", secErr)
 	}
-	if err := verifyTurnstile(r.Context(), secCfg.TurnstileSecret, req.TurnstileToken, r.RemoteAddr); err != nil {
+	if err := verifyTurnstile(r.Context(), secCfg.TurnstileSecret, req.TurnstileToken, clientIP(r)); err != nil {
 		if errors.Is(err, errTurnstileFailed) {
 			i18n.WriteError(w, r, http.StatusForbidden, i18n.CodeAuthAntibotFailed, nil)
 			return
@@ -110,9 +110,22 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := s.upsertUser(r.Context(), st, name, email, sid)
+	existing, err := findLoginUser(r.Context(), st, email, sid)
 	if err != nil {
-		s.logger.Warn("auth: upsert user failed", "err", err)
+		s.logger.Warn("auth: lookup user failed", "err", err)
+		i18n.WriteError(w, r, http.StatusInternalServerError, i18n.CodeAuthUserCreateFailed, nil)
+		return
+	}
+	smtpOn := s.smtpAvailable(r.Context())
+	verifyByEmail := email != "" && smtpOn
+	if !verifyByEmail && !claimableWithoutVerification(existing, smtpOn) {
+		i18n.WriteError(w, r, http.StatusForbidden, i18n.CodeAuthVerificationRequired, nil)
+		return
+	}
+
+	user, err := saveLoginUser(r.Context(), st, existing, name, email, sid, !verifyByEmail)
+	if err != nil {
+		s.logger.Warn("auth: save user failed", "err", err)
 		i18n.WriteError(w, r, http.StatusInternalServerError, i18n.CodeAuthUserCreateFailed, nil)
 		return
 	}
@@ -142,6 +155,10 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		// Graceful degradation: no mail backend means no way to verify, so
 		// the caller is trusted as before. This keeps the simulator usable
 		// in environments without SMTP (local dev, classroom without mail).
+		if !claimableWithoutVerification(existing, false) {
+			i18n.WriteError(w, r, http.StatusForbidden, i18n.CodeAuthVerificationRequired, nil)
+			return
+		}
 		s.attachLoggedInSession(sess, user)
 		s.auditFromContext(r, "user:"+user.ID, "auth.login", sess.ID, "")
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -184,28 +201,55 @@ func (s *Server) attachLoggedInSession(sess *sessions.Session, user *store.UserR
 	sess.SetUserID(user.ID)
 	sess.SetLabel(user.Name)
 	s.manager.KillOtherUserSessions(user.ID, sess.ID)
-	sess.Sim.Broadcast(s.sessionInfoMessage(sess, sessions.RoleOwner))
+	s.broadcastSessionInfo(sess)
 }
 
-// upsertUser dedupes by email, then by student_id, otherwise creates a fresh
-// row. Always refreshes name and last_login_at.
-func (s *Server) upsertUser(ctx context.Context, st *store.Store, name, email, sid string) (*store.UserRow, error) {
-	now := time.Now().Unix()
-	var existing *store.UserRow
-	var err error
+func findLoginUser(ctx context.Context, st *store.Store, email, sid string) (*store.UserRow, error) {
 	if email != "" {
-		existing, err = st.GetUserByEmail(ctx, email)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
+		u, err := st.GetUserByEmail(ctx, email)
+		if err == nil {
+			return u, nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
 			return nil, err
 		}
 	}
-	if existing == nil && sid != "" {
-		existing, err = st.GetUserByStudentID(ctx, sid)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
+	if sid != "" {
+		u, err := st.GetUserByStudentID(ctx, sid)
+		if err == nil {
+			return u, nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
 			return nil, err
 		}
 	}
+	return nil, nil
+}
+
+func claimableWithoutVerification(u *store.UserRow, smtpOn bool) bool {
+	if u == nil {
+		return true
+	}
+	if u.Role != "" && u.Role != store.RoleStudent {
+		return false
+	}
+	return !smtpOn || u.Email == ""
+}
+
+func (s *Server) smtpAvailable(ctx context.Context) bool {
+	if sendMagicLinkEmailHook != nil {
+		return true
+	}
+	sender, err := s.loadSMTPSender(ctx)
+	return err != nil || sender != nil
+}
+
+func saveLoginUser(ctx context.Context, st *store.Store, existing *store.UserRow, name, email, sid string, trusted bool) (*store.UserRow, error) {
+	now := time.Now().Unix()
 	if existing != nil {
+		if !trusted {
+			return existing, nil
+		}
 		if existing.Name != name {
 			if err := st.UpdateUserName(ctx, existing.ID, name); err != nil {
 				return nil, err
@@ -259,10 +303,10 @@ func (s *Server) issueMagicLink(r *http.Request, email string) (string, error) {
 		return "", err
 	}
 	scheme := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+	if isSecureRequest(r) {
 		scheme = "https"
 	}
-	url := fmt.Sprintf("%s://%s/auth/magic?t=%s", scheme, r.Host, token)
+	url := fmt.Sprintf("%s://%s/auth/magic?t=%s", scheme, publicHost(r), token)
 	s.logger.Info("magic link", "email", maskEmail(email), "expires_in", magicLinkTTL.String())
 
 	if err := s.sendMagicLinkEmail(r.Context(), email, url); err != nil {
@@ -342,7 +386,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 		prevUser := sess.UserID()
 		sess.SetUserID("")
 		sess.SetLabel("")
-		sess.Sim.Broadcast(s.sessionInfoMessage(sess, role))
+		s.broadcastSessionInfo(sess)
 		if prevUser != "" {
 			s.auditFromContext(r, "user:"+prevUser, "auth.logout", sess.ID, "")
 		}

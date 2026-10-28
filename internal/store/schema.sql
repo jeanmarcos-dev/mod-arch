@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     ua_short       TEXT,
     geo_country    TEXT,
     referrer_host  TEXT,
+    owner_token_hash TEXT,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 

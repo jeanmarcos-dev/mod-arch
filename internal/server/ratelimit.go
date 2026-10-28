@@ -117,19 +117,28 @@ func (s *Server) limitByIP(rl *RateLimiter, next http.HandlerFunc) http.HandlerF
 	}
 }
 
-// clientIP extracts the caller's IP, honoring X-Forwarded-For when a trusted
-// reverse proxy sets it. The first value in the list is taken — operators
-// behind multiple proxies should configure their edge to rewrite the header.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if comma := strings.IndexByte(xff, ','); comma >= 0 {
-			return strings.TrimSpace(xff[:comma])
-		}
-		return strings.TrimSpace(xff)
+	if cc, ok := r.Context().Value(clientCtxKey{}).(*ClientCtx); ok && cc != nil && cc.ip != "" {
+		return cc.ip
 	}
-	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
-		return strings.TrimSpace(xrip)
+	return remoteHost(r)
+}
+
+func resolveClientIP(r *http.Request, trustedProxyHeader string) string {
+	if trustedProxyHeader == "" {
+		return remoteHost(r)
 	}
+	v := r.Header.Get(trustedProxyHeader)
+	if comma := strings.LastIndexByte(v, ','); comma >= 0 {
+		v = v[comma+1:]
+	}
+	if ip := net.ParseIP(strings.TrimSpace(v)); ip != nil {
+		return ip.String()
+	}
+	return remoteHost(r)
+}
+
+func remoteHost(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
