@@ -36,7 +36,7 @@ function escapeHtml(s: string): string {
 // html:false makes the renderer drop any raw HTML in the source. The tutor
 // text comes from an LLM and could contain hostile markup, so we never trust
 // it. Without raw HTML the output is XSS-safe without DOMPurify.
-const md: MarkdownIt = new MarkdownIt({
+const md = new MarkdownIt({
   html: false,
   linkify: true,
   breaks: true,
@@ -67,7 +67,7 @@ const defaultLinkRender = md.renderer.rules.link_open
   || ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
 md.renderer.rules.link_open = function (tokens, idx, options, env, self) {
   const token = tokens[idx];
-  const href = token.attrGet('href') || '';
+  const href = String(token.attrGet('href') ?? '');
   if (/^https?:\/\//i.test(href)) {
     token.attrSet('target', '_blank');
     token.attrSet('rel', 'noopener noreferrer');
