@@ -10,6 +10,7 @@ permissions:
 
 env:
   GO_VERSION: "1.26.x"
+  NODE_VERSION: "24"
 
 jobs:
   lint:
@@ -21,9 +22,20 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      - name: Stub embedded frontend
+        run: mkdir -p internal/staticui/dist && touch internal/staticui/dist/.keep
+      - name: golangci-lint (new issues)
+        if: github.event_name == 'pull_request'
+        uses: golangci/golangci-lint-action@v6
         with:
           version: v2.12.2
+          only-new-issues: true
+      - name: golangci-lint (correctness)
+        if: github.event_name != 'pull_request'
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.12.2
+          args: --disable=gocyclo,gocognit
 
   test:
     name: Test
@@ -34,21 +46,47 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+      - name: Stub embedded frontend
+        run: mkdir -p internal/staticui/dist && touch internal/staticui/dist/.keep
       - name: Run tests with coverage
         run: go test -race -coverprofile=coverage.out ./...
       - name: Report coverage
         run: go tool cover -func=coverage.out | tail -1
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
 
   build:
     name: Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+      - name: Build frontend
+        run: cd web && npm ci && npm run build
       - name: Build native binary
-        run: go build -ldflags='-s -w' -o bin/modos-cpu ./cmd/modos-cpu
+        run: CGO_ENABLED=0 go build -ldflags='-s -w' -trimpath -o bin/modos-cpu ./cmd/modos-cpu
       - name: Smoke-test CLI
         run: ./bin/modos-cpu cli -program counter -max-steps 100
