@@ -3,7 +3,7 @@ module github.com/jeanmarcos-dev/mod-arch
 go 1.26.3
 
 require (
-	github.com/coder/websocket v1.8.14
+	github.com/coder/websocket v1.8.15
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	golang.org/x/crypto v0.51.0
 	modernc.org/sqlite v1.50.1
