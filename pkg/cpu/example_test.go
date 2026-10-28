@@ -3,7 +3,7 @@ package cpu_test
 import (
 	"fmt"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // ExampleCPU_Step shows the smallest useful program: load an immediate into

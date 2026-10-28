@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 type settingsResponse struct {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // waitpidBlockedReason formats the BlockedOn label so the UI can tell at a

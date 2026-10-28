@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 // Field budgets for inbound reports. Generous for real feedback, tight enough

@@ -1,7 +1,7 @@
 package server
 
 import (
-	"github.com/jeanmarcos/modos-cpu/internal/telemetry"
+	"github.com/jeanmarcos-dev/mod-arch/internal/telemetry"
 
 	"crypto/hmac"
 	"crypto/sha256"
@@ -17,8 +17,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/jeanmarcos/modos-cpu/internal/sessions"
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sessions"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 // AdminCookie is the name of the signed cookie that authenticates the admin.

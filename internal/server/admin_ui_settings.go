@@ -7,9 +7,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/programs"
-	"github.com/jeanmarcos/modos-cpu/internal/sessions"
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/programs"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sessions"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 // demoCatalogEntry is the slim shape the admin SPA needs to render the

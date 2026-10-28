@@ -1,7 +1,7 @@
 package kernel
 
 import (
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // initProgram is the body of PID 1. Two bytes of `hlt` keep loadCPUFromPCB

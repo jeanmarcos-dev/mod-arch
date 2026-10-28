@@ -1,6 +1,6 @@
 package server
 
-import "github.com/jeanmarcos/modos-cpu/internal/sessions"
+import "github.com/jeanmarcos-dev/mod-arch/internal/sessions"
 
 // SessionInfoEvent is the wire format for session metadata.
 type SessionInfoEvent struct {

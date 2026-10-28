@@ -1,9 +1,9 @@
 package programs
 
 import (
-	"github.com/jeanmarcos/modos-cpu/internal/programs/asm"
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
-	"github.com/jeanmarcos/modos-cpu/pkg/kernel"
+	"github.com/jeanmarcos-dev/mod-arch/internal/programs/asm"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/kernel"
 )
 
 // buildAdd: tiny pedagogical demo — load two registers, add them, exit with

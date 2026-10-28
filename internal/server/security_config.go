@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jeanmarcos/modos-cpu/internal/crypto"
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/crypto"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 // Settings keys for the security namespace. The sitekey is public (lands in

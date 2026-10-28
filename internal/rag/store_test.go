@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"testing"
 
-	storepkg "github.com/jeanmarcos/modos-cpu/internal/store"
+	storepkg "github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 // openTestDB spins up an in-memory SQLite migrated to the latest schema and

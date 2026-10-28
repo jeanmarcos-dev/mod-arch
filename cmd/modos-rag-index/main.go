@@ -27,10 +27,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/envfile"
-	"github.com/jeanmarcos/modos-cpu/internal/programs"
-	"github.com/jeanmarcos/modos-cpu/internal/rag"
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/envfile"
+	"github.com/jeanmarcos-dev/mod-arch/internal/programs"
+	"github.com/jeanmarcos-dev/mod-arch/internal/rag"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 func main() {

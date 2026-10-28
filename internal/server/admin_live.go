@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/store"
-	"github.com/jeanmarcos/modos-cpu/internal/telemetry"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/telemetry"
 )
 
 const (

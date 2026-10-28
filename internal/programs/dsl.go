@@ -1,6 +1,6 @@
 package programs
 
-import "github.com/jeanmarcos/modos-cpu/internal/programs/asm"
+import "github.com/jeanmarcos-dev/mod-arch/internal/programs/asm"
 
 // dslProc adapts an asm.Builder into the local Proc type. The conversion
 // copies SourceMap and variable-metadata entries one-for-one. Demos use this

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // newTestKernel builds a kernel with a single user process and returns it

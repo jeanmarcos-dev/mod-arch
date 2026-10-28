@@ -1,7 +1,7 @@
 package kernel
 
 import (
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // sysFork implements sys_fork() as a thin wrapper around Clone() with no

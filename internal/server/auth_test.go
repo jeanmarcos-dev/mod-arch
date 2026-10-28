@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/crypto"
-	"github.com/jeanmarcos/modos-cpu/internal/programs"
-	"github.com/jeanmarcos/modos-cpu/internal/sessions"
-	"github.com/jeanmarcos/modos-cpu/internal/sim"
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/crypto"
+	"github.com/jeanmarcos-dev/mod-arch/internal/programs"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sessions"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sim"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 // startAuthTestServer brings up a Server with persistence enabled, which

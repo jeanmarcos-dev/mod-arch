@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 // TestPersist_SessionsSurviveRestart is the load-bearing test of A1.2: when a

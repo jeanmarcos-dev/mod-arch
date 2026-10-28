@@ -3,7 +3,7 @@ package kernel
 import (
 	"encoding/binary"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // saveCurrentToPCB captures the running process state of the given core into

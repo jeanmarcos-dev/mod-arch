@@ -1,6 +1,6 @@
 package programs
 
-import "github.com/jeanmarcos/modos-cpu/pkg/cpu"
+import "github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 
 // procStackSize mirrors kernel.ProcStackSize. It is duplicated here (instead of
 // imported) to keep `programs` free of a `pkg/kernel` dependency that would

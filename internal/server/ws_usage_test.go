@@ -12,10 +12,10 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/jeanmarcos/modos-cpu/internal/programs"
-	"github.com/jeanmarcos/modos-cpu/internal/sessions"
-	"github.com/jeanmarcos/modos-cpu/internal/sim"
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/programs"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sessions"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sim"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 func startUsageTestServer(t *testing.T) (*Server, *store.Store, *httptest.Server, string) {

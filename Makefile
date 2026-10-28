@@ -65,7 +65,7 @@ lint:
 
 fmt:
 	gofmt -w .
-	@if command -v goimports >/dev/null 2>&1; then goimports -w -local github.com/jeanmarcos/modos-cpu .; fi
+	@if command -v goimports >/dev/null 2>&1; then goimports -w -local github.com/jeanmarcos-dev/mod-arch .; fi
 
 build: web-build
 	go build -ldflags='-s -w' -o bin/modos-cpu ./cmd/modos-cpu

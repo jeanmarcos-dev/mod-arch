@@ -1,7 +1,7 @@
 package kernel
 
 import (
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // KbdBufCap is the visual capacity of the keyboard buffer reported to the UI.

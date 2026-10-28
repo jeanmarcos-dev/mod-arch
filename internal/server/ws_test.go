@@ -12,9 +12,9 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/jeanmarcos/modos-cpu/internal/programs"
-	"github.com/jeanmarcos/modos-cpu/internal/sessions"
-	"github.com/jeanmarcos/modos-cpu/internal/sim"
+	"github.com/jeanmarcos-dev/mod-arch/internal/programs"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sessions"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sim"
 )
 
 // startTestServer brings up a Server preloaded with demo programs inside an

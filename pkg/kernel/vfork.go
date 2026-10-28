@@ -1,7 +1,7 @@
 package kernel
 
 import (
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // BlockedOn reason for the parent of an outstanding vfork.

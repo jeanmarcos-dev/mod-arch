@@ -73,4 +73,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/jeanmarcos/modos-cpu
+        - github.com/jeanmarcos-dev/mod-arch

@@ -3,7 +3,7 @@ package kernel
 import (
 	"testing"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // helloBytes is a hand-encoded "hello" program. We reuse literal bytes so a

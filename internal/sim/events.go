@@ -1,7 +1,7 @@
 package sim
 
 import (
-	"github.com/jeanmarcos/modos-cpu/internal/programs"
+	"github.com/jeanmarcos-dev/mod-arch/internal/programs"
 )
 
 // SnapshotEvent is the wire format for a simulator snapshot.

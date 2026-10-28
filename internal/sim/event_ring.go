@@ -3,7 +3,7 @@ package sim
 import (
 	"sync"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // DefaultEventRingCapacity is the in-memory history kept for tutor tools.

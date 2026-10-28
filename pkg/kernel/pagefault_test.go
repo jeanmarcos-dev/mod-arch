@@ -3,7 +3,7 @@ package kernel
 import (
 	"testing"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // badmemBytes is hand-encoded: mov eax, 0xDEAD ; mov [0x100000], eax ; hlt

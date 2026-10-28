@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jeanmarcos/modos-cpu/internal/sessions"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sessions"
 )
 
 // SnapshotView is the compact, LLM-friendly summary of the simulator's state

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/server/i18n"
+	"github.com/jeanmarcos-dev/mod-arch/internal/server/i18n"
 )
 
 // RateLimiter is a fixed-window per-IP limiter intended for low-frequency

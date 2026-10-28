@@ -20,12 +20,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/crypto"
-	"github.com/jeanmarcos/modos-cpu/internal/programs"
-	"github.com/jeanmarcos/modos-cpu/internal/server/i18n"
-	"github.com/jeanmarcos/modos-cpu/internal/sessions"
-	"github.com/jeanmarcos/modos-cpu/internal/store"
-	"github.com/jeanmarcos/modos-cpu/internal/tutor"
+	"github.com/jeanmarcos-dev/mod-arch/internal/crypto"
+	"github.com/jeanmarcos-dev/mod-arch/internal/programs"
+	"github.com/jeanmarcos-dev/mod-arch/internal/server/i18n"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sessions"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/tutor"
 )
 
 const (

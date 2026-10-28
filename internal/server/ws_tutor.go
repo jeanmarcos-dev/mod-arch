@@ -6,9 +6,9 @@ import (
 	"maps"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/sessions"
-	"github.com/jeanmarcos/modos-cpu/internal/sim"
-	"github.com/jeanmarcos/modos-cpu/internal/tutor"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sessions"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sim"
+	"github.com/jeanmarcos-dev/mod-arch/internal/tutor"
 )
 
 const (

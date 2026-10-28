@@ -3,7 +3,7 @@ package kernel
 import (
 	"fmt"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // idleProgram is the body of each swapper task: a HLT byte followed by a

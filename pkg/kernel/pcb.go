@@ -1,7 +1,7 @@
 package kernel
 
 import (
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // State is the current state of a process in the operating system.

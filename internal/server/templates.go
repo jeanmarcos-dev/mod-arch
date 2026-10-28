@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jeanmarcos/modos-cpu/internal/server/i18n"
+	"github.com/jeanmarcos-dev/mod-arch/internal/server/i18n"
 )
 
 //go:embed templates/*.html templates/*.css

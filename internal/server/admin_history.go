@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 // historyRowJSON is the wire shape for one session_history entry. Plain IP is

@@ -3,7 +3,7 @@ package kernel
 import (
 	"testing"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // TestHasWork_IdleEnabled_ReturnsTrue covers the run-loop contract: when the

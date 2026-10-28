@@ -10,8 +10,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/jeanmarcos/modos-cpu/internal/server/i18n"
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/server/i18n"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 var (

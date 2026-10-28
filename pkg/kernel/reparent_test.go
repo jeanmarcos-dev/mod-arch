@@ -3,7 +3,7 @@ package kernel
 import (
 	"testing"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // TestSpawnInit_PID1 verifies that when SpawnInit is the first PCB created

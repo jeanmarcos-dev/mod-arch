@@ -17,16 +17,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/envfile"
-	"github.com/jeanmarcos/modos-cpu/internal/programs"
-	"github.com/jeanmarcos/modos-cpu/internal/server"
-	"github.com/jeanmarcos/modos-cpu/internal/sessions"
-	"github.com/jeanmarcos/modos-cpu/internal/sim"
-	"github.com/jeanmarcos/modos-cpu/internal/staticui"
-	"github.com/jeanmarcos/modos-cpu/internal/store"
-	"github.com/jeanmarcos/modos-cpu/internal/tutor"
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
-	"github.com/jeanmarcos/modos-cpu/pkg/kernel"
+	"github.com/jeanmarcos-dev/mod-arch/internal/envfile"
+	"github.com/jeanmarcos-dev/mod-arch/internal/programs"
+	"github.com/jeanmarcos-dev/mod-arch/internal/server"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sessions"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sim"
+	"github.com/jeanmarcos-dev/mod-arch/internal/staticui"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/tutor"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/kernel"
 )
 
 func main() {

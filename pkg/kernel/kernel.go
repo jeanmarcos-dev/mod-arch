@@ -3,7 +3,7 @@ package kernel
 import (
 	"fmt"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // Process memory layout constants.

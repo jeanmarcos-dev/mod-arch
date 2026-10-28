@@ -9,7 +9,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 // EffectiveUI is the UI surface after the admin base settings are combined with

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/crypto"
+	"github.com/jeanmarcos-dev/mod-arch/internal/crypto"
 )
 
 // Settings keys persisted in the `settings` table. Prefix keeps tutor entries

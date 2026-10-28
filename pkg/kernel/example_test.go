@@ -3,7 +3,7 @@ package kernel_test
 import (
 	"fmt"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/kernel"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/kernel"
 )
 
 // ExampleKernel_AddProcess loads a single process whose program writes a

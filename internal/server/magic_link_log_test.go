@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jeanmarcos/modos-cpu/internal/sessions"
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sessions"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 func TestIssueMagicLink_DoesNotLogTokenOrURL(t *testing.T) {

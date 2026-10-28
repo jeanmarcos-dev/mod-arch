@@ -1,7 +1,7 @@
 package server
 
 import (
-	"github.com/jeanmarcos/modos-cpu/internal/telemetry"
+	"github.com/jeanmarcos-dev/mod-arch/internal/telemetry"
 
 	"fmt"
 
@@ -15,11 +15,11 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/jeanmarcos/modos-cpu/internal/server/i18n"
-	"github.com/jeanmarcos/modos-cpu/internal/sessions"
-	"github.com/jeanmarcos/modos-cpu/internal/sim"
-	"github.com/jeanmarcos/modos-cpu/internal/store"
-	"github.com/jeanmarcos/modos-cpu/internal/tutor"
+	"github.com/jeanmarcos-dev/mod-arch/internal/server/i18n"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sessions"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sim"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/tutor"
 )
 
 // defaultAllowedOrigins are the host patterns accepted on WS upgrades when

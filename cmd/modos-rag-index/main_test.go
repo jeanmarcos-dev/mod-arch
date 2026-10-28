@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/jeanmarcos/modos-cpu/internal/rag"
+	"github.com/jeanmarcos-dev/mod-arch/internal/rag"
 )
 
 type scriptedEmbedder struct {

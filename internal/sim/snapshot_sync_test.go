@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/kernel"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/kernel"
 )
 
 // TestSnapshot_IncludesMutexesAndSemaphores ensures a late joiner receives the

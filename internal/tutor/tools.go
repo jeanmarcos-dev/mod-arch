@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jeanmarcos/modos-cpu/internal/llm"
-	"github.com/jeanmarcos/modos-cpu/internal/sessions"
+	"github.com/jeanmarcos-dev/mod-arch/internal/llm"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sessions"
 )
 
 // ToolHandler executes one tool invocation. ctx carries cancellation; sess

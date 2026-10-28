@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 // TestTerminate_WritesHistory exercises the core E4 contract: every session

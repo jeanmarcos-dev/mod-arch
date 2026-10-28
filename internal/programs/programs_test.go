@@ -4,8 +4,8 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
-	"github.com/jeanmarcos/modos-cpu/pkg/kernel"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/kernel"
 )
 
 var (

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/crypto"
-	"github.com/jeanmarcos/modos-cpu/internal/mail"
+	"github.com/jeanmarcos-dev/mod-arch/internal/crypto"
+	"github.com/jeanmarcos-dev/mod-arch/internal/mail"
 )
 
 // Settings keys for the SMTP block. Kept together so the admin handler and

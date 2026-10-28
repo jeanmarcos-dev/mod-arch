@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/tutor"
+	"github.com/jeanmarcos-dev/mod-arch/internal/tutor"
 )
 
 // handleAdminTutorMetrics returns the aggregated tutor metrics for the

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jeanmarcos/modos-cpu/internal/rag"
+	"github.com/jeanmarcos-dev/mod-arch/internal/rag"
 )
 
 // systemPrompt fixes the tutor's voice and constraints. Tested empirically:

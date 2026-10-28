@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jeanmarcos/modos-cpu/internal/programs"
+	"github.com/jeanmarcos-dev/mod-arch/internal/programs"
 )
 
 // LoadDemosAsRawDocs builds one RawDoc per demo with the prose description,

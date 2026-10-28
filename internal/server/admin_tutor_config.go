@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/tutor"
+	"github.com/jeanmarcos-dev/mod-arch/internal/tutor"
 )
 
 // handleAdminTutorConfigGet returns the persisted tutor config with API

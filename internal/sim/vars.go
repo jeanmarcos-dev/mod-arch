@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
-	"github.com/jeanmarcos/modos-cpu/pkg/kernel"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/kernel"
 )
 
 // varsLocked builds the per-program variable payload that ships in every

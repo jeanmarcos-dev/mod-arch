@@ -3,8 +3,8 @@ package sim
 import (
 	"testing"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
-	"github.com/jeanmarcos/modos-cpu/pkg/kernel"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/kernel"
 )
 
 // TestSetNumCores_RebuildsKernel covers the happy path: switching from 1 to 3

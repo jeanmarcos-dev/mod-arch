@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/telemetry"
+	"github.com/jeanmarcos-dev/mod-arch/internal/telemetry"
 )
 
 const (

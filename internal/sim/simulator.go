@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
-	"github.com/jeanmarcos/modos-cpu/pkg/kernel"
-	"github.com/jeanmarcos/modos-cpu/internal/telemetry"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/kernel"
+	"github.com/jeanmarcos-dev/mod-arch/internal/telemetry"
 )
 
 // Demo is a scenario with one or more processes to load.

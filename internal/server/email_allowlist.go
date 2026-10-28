@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 // Settings keys for the email allowlist. Both default to the empty string;

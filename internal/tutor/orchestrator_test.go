@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/llm"
-	"github.com/jeanmarcos/modos-cpu/internal/rag"
-	storepkg "github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/llm"
+	"github.com/jeanmarcos-dev/mod-arch/internal/rag"
+	storepkg "github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 type stubLLM struct {

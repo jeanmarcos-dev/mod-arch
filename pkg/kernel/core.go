@@ -1,6 +1,6 @@
 package kernel
 
-import "github.com/jeanmarcos/modos-cpu/pkg/cpu"
+import "github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 
 // Core is a single execution context inside the kernel. Each core owns its
 // own CPU (registers, kernel stack pointer, pending IRQs) but shares the

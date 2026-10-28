@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jeanmarcos/modos-cpu/internal/sessions"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sessions"
 )
 
 // ClientCtx is the per-request snapshot of the client identity that gets

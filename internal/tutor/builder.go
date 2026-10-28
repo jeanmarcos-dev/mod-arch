@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/llm"
-	"github.com/jeanmarcos/modos-cpu/internal/rag"
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/llm"
+	"github.com/jeanmarcos-dev/mod-arch/internal/rag"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 // BuildDeps groups the long-lived dependencies the builder needs. Mirrored

@@ -1,7 +1,7 @@
 package tutor
 
 import (
-	"github.com/jeanmarcos/modos-cpu/internal/telemetry"
+	"github.com/jeanmarcos-dev/mod-arch/internal/telemetry"
 
 	"context"
 	"crypto/sha256"
@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/llm"
-	"github.com/jeanmarcos/modos-cpu/internal/rag"
-	"github.com/jeanmarcos/modos-cpu/internal/sessions"
+	"github.com/jeanmarcos-dev/mod-arch/internal/llm"
+	"github.com/jeanmarcos-dev/mod-arch/internal/rag"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sessions"
 )
 
 // citationTokenRe matches every label format declared in prompts.go:

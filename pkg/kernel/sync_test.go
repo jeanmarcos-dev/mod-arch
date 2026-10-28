@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 // These unit tests exercise the mutex/semaphore primitives directly. They

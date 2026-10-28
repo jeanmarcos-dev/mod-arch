@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jeanmarcos/modos-cpu/internal/store"
+	"github.com/jeanmarcos-dev/mod-arch/internal/store"
 )
 
 // Setting keys for the admin-curated default experience and scheduling frame.

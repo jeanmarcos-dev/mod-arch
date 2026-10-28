@@ -7,9 +7,9 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/jeanmarcos/modos-cpu/internal/server"
-	"github.com/jeanmarcos/modos-cpu/internal/sim"
-	"github.com/jeanmarcos/modos-cpu/pkg/cpu"
+	"github.com/jeanmarcos-dev/mod-arch/internal/server"
+	"github.com/jeanmarcos-dev/mod-arch/internal/sim"
+	"github.com/jeanmarcos-dev/mod-arch/pkg/cpu"
 )
 
 func main() {
