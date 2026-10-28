@@ -20,10 +20,10 @@ var educationalDocs = []struct {
 	skipHeadings []string
 }{
 	{
-		relPath:      "README.md",
+		relPath:      "README.es.md",
 		docID:        "readme",
 		title:        "README del proyecto",
-		skipHeadings: []string{"quickstart", "stack", "estructura del repositorio", "deploy"},
+		skipHeadings: []string{"stack", "estructura del repositorio", "inicio rápido", "corpus propio", "configuración", "deploy", "seguridad", "licencia"},
 	},
 	{
 		relPath:      "docs/reporte-defensa.md",
