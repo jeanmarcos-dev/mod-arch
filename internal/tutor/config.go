@@ -257,8 +257,8 @@ type Update struct {
 }
 
 // Apply merges patch on top of base, returning the new config.
-func (base Config) Apply(patch Update) Config {
-	out := base
+func (c Config) Apply(patch Update) Config {
+	out := c
 	if patch.Enabled != nil {
 		out.Enabled = *patch.Enabled
 	}
