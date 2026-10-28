@@ -207,21 +207,14 @@ func runServer(args []string) {
 //nolint:gocognit // CLI flag parsing + subcommand dispatch; flat by design.
 func runCLI(args []string) {
 	fs := flag.NewFlagSet("modos-cpu cli", flag.ExitOnError)
-	progName := fs.String("program", "counter", "demo a ejecutar (add, counter, pushpop, callret, soft_int, timer_loop, two_counters)")
+	progName := fs.String("program", "counter", "demo a ejecutar (un nombre desconocido lista los disponibles)")
 	trace := fs.Bool("trace", false, "imprime cada evento emitido")
 	maxSteps := fs.Int("max-steps", 200, "tope de instrucciones a ejecutar")
 	quantum := fs.Int("quantum", 8, "ticks entre fires del timer (0 apaga el timer)")
 	_ = fs.Parse(args)
 
-	var demo *programs.Demo
-	for _, d := range programs.Demos() {
-		if d.Name == *progName {
-			dd := d
-			demo = &dd
-			break
-		}
-	}
-	if demo == nil {
+	demo, ok := findDemo(*progName)
+	if !ok {
 		fmt.Fprintf(os.Stderr, "demo desconocido: %q\n", *progName)
 		fmt.Fprintln(os.Stderr, "disponibles:")
 		for _, d := range programs.Demos() {
@@ -230,48 +223,88 @@ func runCLI(args []string) {
 		os.Exit(2)
 	}
 
-	k := kernel.New(cpu.DefaultMemSize)
-	k.TimerQuantum = *quantum
-	for _, p := range demo.Procs {
-		pid, err := k.AddProcess(p.Name, p.Bytes)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "AddProcess(%s): %v\n", p.Name, err)
-			os.Exit(1)
-		}
-		fmt.Printf("▸ PID=%d  %-16s  %d bytes @ 0x%06X\n", pid, p.Name, len(p.Bytes), 0x200000+(pid-1)*0x40000)
+	var onStep func(int, []cpu.Event)
+	if *trace {
+		onStep = printStep
 	}
-	fmt.Printf("▸ %s — quantum=%d · %d procesos\n", demo.Name, *quantum, len(demo.Procs))
-	fmt.Printf("  %s\n\n", demo.Description)
-
-	bootCPU := k.BootCPU()
-	var consoleOut []byte
-	for step := 0; step < *maxSteps && !bootCPU.Halted; step++ {
-		evs, err := k.Step()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "step %d error: %v\n", step, err)
-			os.Exit(1)
+	res, err := runDemo(demo, *quantum, *maxSteps, func(k *kernel.Kernel, pids []int) {
+		for i, pid := range pids {
+			p := demo.Procs[i]
+			fmt.Printf("▸ PID=%d  %-16s  %d bytes @ 0x%06X\n", pid, p.Name, len(p.Bytes), k.Processes[pid].MemSpace().CodeBase)
 		}
-		for _, e := range evs {
-			if c, ok := e.(cpu.EventConsoleOut); ok {
-				consoleOut = append(consoleOut, c.Bytes...)
-			}
-		}
-		if *trace {
-			printStep(step, evs)
-		}
+		fmt.Printf("▸ %s — quantum=%d · %d procesos\n", demo.Name, *quantum, len(demo.Procs))
+		fmt.Printf("  %s\n\n", demo.Description)
+	}, onStep)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
 	}
-
-	if !bootCPU.Halted {
+	if !res.Halted {
 		fmt.Fprintf(os.Stderr, "\n⚠ no halted tras %d steps\n", *maxSteps)
 		os.Exit(1)
 	}
 
 	fmt.Println()
-	dumpRegs(bootCPU)
-	fmt.Printf("\n▸ HALT @ EIP=0x%08X tras %d ticks\n", bootCPU.R.EIP, bootCPU.Tick)
-	if len(consoleOut) > 0 {
-		fmt.Printf("\n▸ CONSOLE OUTPUT (%d bytes):\n----------\n%s----------\n", len(consoleOut), string(consoleOut))
+	dumpRegs(res.Boot)
+	fmt.Printf("\n▸ HALT @ EIP=0x%08X tras %d ticks\n", res.Boot.R.EIP, res.Boot.Tick)
+	if len(res.Console) > 0 {
+		fmt.Printf("\n▸ CONSOLE OUTPUT (%d bytes):\n----------\n%s----------\n", len(res.Console), string(res.Console))
 	}
+}
+
+func findDemo(name string) (programs.Demo, bool) {
+	for _, d := range programs.Demos() {
+		if d.Name == name {
+			return d, true
+		}
+	}
+	return programs.Demo{}, false
+}
+
+type demoRun struct {
+	Steps   int
+	Halted  bool
+	Console []byte
+	Boot    *cpu.CPU
+}
+
+func runDemo(demo programs.Demo, quantum, maxSteps int, onLoad func(*kernel.Kernel, []int), onStep func(int, []cpu.Event)) (demoRun, error) {
+	k := kernel.NewMulti(cpu.DefaultMemSize, max(demo.Cores, 1))
+	k.TimerQuantum = quantum
+	if _, err := k.SpawnInit(); err != nil {
+		return demoRun{}, fmt.Errorf("SpawnInit: %w", err)
+	}
+	pids := make([]int, 0, len(demo.Procs))
+	for _, p := range demo.Procs {
+		pid, err := k.AddProcess(p.Name, p.Bytes)
+		if err != nil {
+			return demoRun{}, fmt.Errorf("AddProcess(%s): %w", p.Name, err)
+		}
+		k.AdoptUnderInit(pid)
+		pids = append(pids, pid)
+	}
+	if onLoad != nil {
+		onLoad(k, pids)
+	}
+
+	res := demoRun{Boot: k.BootCPU()}
+	k.DispatchIdleCores()
+	for ; res.Steps < maxSteps && !k.AllHalted(); res.Steps++ {
+		evs, err := k.Step()
+		if err != nil {
+			return res, fmt.Errorf("step %d: %w", res.Steps, err)
+		}
+		for _, e := range evs {
+			if c, ok := e.(cpu.EventConsoleOut); ok {
+				res.Console = append(res.Console, c.Bytes...)
+			}
+		}
+		if onStep != nil {
+			onStep(res.Steps, evs)
+		}
+	}
+	res.Halted = k.AllHalted()
+	return res, nil
 }
 
 //nolint:gocyclo // event-type formatter; flat switch over event variants.
