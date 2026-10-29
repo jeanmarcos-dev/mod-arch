@@ -184,7 +184,7 @@ func (s *Server) bootstrapHTMLRequest(w http.ResponseWriter, r *http.Request) bo
 		}
 		return false
 	}
-	if _, err := s.getOrCreateSession(w, r); err != nil {
+	if _, err := s.getOrCreateSession(w, r); err != nil && !errors.Is(err, errCrawlerSession) {
 		return s.handleSessionError(w, r, err)
 	}
 	return false
@@ -306,6 +306,9 @@ func (s *Server) getOrCreateSession(w http.ResponseWriter, r *http.Request) (*se
 			return sess, nil
 		}
 	}
+	if isCrawler(r.UserAgent()) {
+		return nil, errCrawlerSession
+	}
 	if ok, _ := s.canCreateSession(r.Context()); !ok {
 		return nil, ErrAccessDenied
 	}
@@ -365,6 +368,8 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "cap reached"})
 			case errors.Is(err, ErrAccessDenied):
 				writeJSON(w, http.StatusForbidden, map[string]any{"error": "access denied"})
+			case errors.Is(err, errCrawlerSession):
+				writeJSON(w, http.StatusForbidden, map[string]any{"error": "crawler"})
 			default:
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			}

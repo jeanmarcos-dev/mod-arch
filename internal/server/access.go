@@ -38,6 +38,8 @@ const (
 // current access policy. Callers should respond with 503 + an explanation.
 var ErrAccessDenied = errors.New("server: new sessions blocked by access policy")
 
+var errCrawlerSession = errors.New("server: crawlers do not get sessions")
+
 // accessMode reads the current access_mode setting (defaults to "open").
 func (s *Server) accessMode(ctx context.Context) string {
 	st := s.manager.Store()

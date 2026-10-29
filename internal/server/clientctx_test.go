@@ -43,6 +43,7 @@ func TestParseUAShort(t *testing.T) {
 		{"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", "Safari 17 / macOS"},
 		{"Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0", "Firefox 122 / Linux"},
 		{"Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", "bot/Googlebot"},
+		{"Mozilla/5.0 (compatible; Google-InspectionTool/1.0;)", "bot/Google-InspectionTool"},
 		{"curl/8.5.0", "bot/curl"},
 		{"go-http-client/1.1", "bot/go-http-client"},
 	}
@@ -51,6 +52,31 @@ func TestParseUAShort(t *testing.T) {
 		if !strings.Contains(got, c.contains) {
 			t.Errorf("parseUAShort(%q) = %q, want to contain %q", c.ua, got, c.contains)
 		}
+	}
+}
+
+func TestIsCrawler(t *testing.T) {
+	tests := []struct {
+		name string
+		ua   string
+		want bool
+	}{
+		{"googlebot desktop", "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", true},
+		{"googlebot smartphone", "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", true},
+		{"search console url inspection", "Mozilla/5.0 (compatible; Google-InspectionTool/1.0;)", true},
+		{"bingbot", "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)", true},
+		{"link preview", "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)", true},
+		{"desktop browser", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36", false},
+		{"curl is a tool, not a crawler", "curl/8.5.0", false},
+		{"go client is a tool, not a crawler", "Go-http-client/1.1", false},
+		{"empty", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isCrawler(tc.ua); got != tc.want {
+				t.Errorf("isCrawler(%q) = %v, want %v", tc.ua, got, tc.want)
+			}
+		})
 	}
 }
 

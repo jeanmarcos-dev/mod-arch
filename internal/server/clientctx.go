@@ -103,24 +103,44 @@ func parseUAShort(ua string) string {
 	return browser + " / " + os
 }
 
+type uaNeedle struct{ needle, name string }
+
+var crawlerUAs = []uaNeedle{
+	{"googlebot", "Googlebot"},
+	{"google-inspectiontool", "Google-InspectionTool"},
+	{"googleother", "GoogleOther"},
+	{"bingbot", "Bingbot"},
+	{"duckduckbot", "DuckDuckBot"},
+	{"baiduspider", "Baiduspider"},
+	{"yandexbot", "YandexBot"},
+	{"applebot", "Applebot"},
+	{"facebookexternalhit", "FacebookBot"},
+	{"twitterbot", "Twitterbot"},
+	{"slackbot", "Slackbot"},
+	{"discordbot", "Discordbot"},
+	{"telegrambot", "Telegrambot"},
+}
+
+var toolUAs = []uaNeedle{
+	{"curl/", "curl"},
+	{"wget/", "wget"},
+	{"python-requests", "python-requests"},
+	{"go-http-client", "go-http-client"},
+}
+
 func matchBot(lower string) string {
-	for _, b := range []struct{ needle, name string }{
-		{"googlebot", "Googlebot"},
-		{"bingbot", "Bingbot"},
-		{"duckduckbot", "DuckDuckBot"},
-		{"baiduspider", "Baiduspider"},
-		{"yandexbot", "YandexBot"},
-		{"applebot", "Applebot"},
-		{"facebookexternalhit", "FacebookBot"},
-		{"twitterbot", "Twitterbot"},
-		{"slackbot", "Slackbot"},
-		{"discordbot", "Discordbot"},
-		{"telegrambot", "Telegrambot"},
-		{"curl/", "curl"},
-		{"wget/", "wget"},
-		{"python-requests", "python-requests"},
-		{"go-http-client", "go-http-client"},
-	} {
+	if name := matchNeedle(lower, crawlerUAs); name != "" {
+		return name
+	}
+	return matchNeedle(lower, toolUAs)
+}
+
+func isCrawler(ua string) bool {
+	return matchNeedle(strings.ToLower(ua), crawlerUAs) != ""
+}
+
+func matchNeedle(lower string, needles []uaNeedle) string {
+	for _, b := range needles {
 		if strings.Contains(lower, b.needle) {
 			return b.name
 		}
