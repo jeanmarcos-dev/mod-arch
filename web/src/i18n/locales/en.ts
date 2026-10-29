@@ -132,6 +132,9 @@ const en: MessageSchema = {
       expandMenu: 'Expand menu',
       collapseMenu: 'Collapse menu',
       lockedTooltip: 'Section disabled by the administrator.',
+      authorSite: 'Personal site',
+      repoLink: 'Source code on GitHub',
+      projectLink: 'About the project',
     },
     bootSplash: {
       label: 'Booting MODARCH…',

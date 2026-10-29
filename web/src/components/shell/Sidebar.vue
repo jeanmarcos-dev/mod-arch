@@ -2,10 +2,14 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { Lock, PanelLeftClose, PanelLeftOpen } from '@lucide/vue';
+import { BookOpenText, FolderGit2, Lock, PanelLeftClose, PanelLeftOpen } from '@lucide/vue';
 import { usePreferencesStore } from '../../stores/preferences';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
+
+const REPO_URL = 'https://github.com/jeanmarcos-dev/mod-arch';
+const SITE_URL = 'https://www.jeanmarcos.dev';
+const siteBase = computed(() => (locale.value === 'es' ? SITE_URL : `${SITE_URL}/en`));
 
 interface NavItem {
   to: string;
@@ -152,7 +156,38 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
         <span class="sidebar__brand-full">MODARCH</span>
         <span class="sidebar__brand-mark" title="MODARCH">M·A</span>
       </span>
-      <span class="sidebar__author" :aria-hidden="collapsed ? 'true' : undefined">Jeanmarcos Juárez</span>
+      <a
+        class="sidebar__author"
+        data-testid="sidebar-author"
+        :href="siteBase"
+        target="_blank"
+        rel="noopener"
+        :title="t('shell.sidebar.authorSite')"
+      >Jeanmarcos Juárez</a>
+      <span class="sidebar__links">
+        <a
+          class="sidebar__ext"
+          data-testid="sidebar-repo"
+          :href="REPO_URL"
+          target="_blank"
+          rel="noopener"
+          :title="t('shell.sidebar.repoLink')"
+          :aria-label="t('shell.sidebar.repoLink')"
+        >
+          <FolderGit2 :size="13" :stroke-width="2" aria-hidden="true" />
+        </a>
+        <a
+          class="sidebar__ext"
+          data-testid="sidebar-project"
+          :href="`${siteBase}/work/mod-arch`"
+          target="_blank"
+          rel="noopener"
+          :title="t('shell.sidebar.projectLink')"
+          :aria-label="t('shell.sidebar.projectLink')"
+        >
+          <BookOpenText :size="13" :stroke-width="2" aria-hidden="true" />
+        </a>
+      </span>
     </footer>
 
     <button
@@ -452,8 +487,9 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
 }
 
 .sidebar__foot {
+  --a11y-fab-clearance: 64px;
   border-top: 1px dashed var(--border);
-  padding: 0 var(--space-3);
+  padding: var(--space-1) var(--space-3) var(--space-1) var(--a11y-fab-clearance);
   font-size: 11px;
   min-height: 28px;
   overflow: hidden;
@@ -461,7 +497,7 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  gap: 0;
+  gap: 2px;
 }
 
 .sidebar--collapsed .sidebar__foot {
@@ -493,7 +529,31 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
   letter-spacing: 2px;
 }
 
-.sidebar__author { display: none; }
+.sidebar__author {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--transition-fast);
+}
+.sidebar__author:hover,
+.sidebar__author:focus-visible { color: var(--accent); }
+.sidebar--collapsed .sidebar__author { display: none; }
+
+.sidebar__links {
+  display: flex;
+  gap: var(--space-2);
+}
+.sidebar--collapsed .sidebar__links { display: none; }
+.sidebar__ext {
+  display: inline-flex;
+  padding: 2px;
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
+}
+.sidebar__ext:hover,
+.sidebar__ext:focus-visible { color: var(--accent); }
 
 /* Mobile + small tablet: the rail becomes an off-canvas drawer that the
    hamburger opens. Width scales with viewport so it never crowds a 320px
@@ -525,6 +585,10 @@ function onLinkClick(item: NavItem, e: MouseEvent) {
   .sidebar--collapsed .sidebar__brand-full,
   .sidebar--collapsed .sidebar__author { max-width: 200px; opacity: 1; display: inline; }
   .sidebar--collapsed .sidebar__brand-mark { display: none; }
+  .sidebar--collapsed .sidebar__foot {
+    padding: var(--space-1) var(--space-3) var(--space-1) var(--a11y-fab-clearance);
+  }
+  .sidebar--collapsed .sidebar__links { display: flex; }
   .sidebar--collapsed .sidebar__link {
     justify-content: flex-start;
     padding: 0 var(--space-3);

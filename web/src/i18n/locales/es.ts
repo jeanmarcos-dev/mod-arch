@@ -129,6 +129,9 @@ const es = {
       expandMenu: 'Expandir menú',
       collapseMenu: 'Contraer menú',
       lockedTooltip: 'Sección deshabilitada por el administrador.',
+      authorSite: 'Sitio personal',
+      repoLink: 'Código fuente en GitHub',
+      projectLink: 'Sobre el proyecto',
     },
     bootSplash: {
       label: 'Iniciando MODARCH…',
