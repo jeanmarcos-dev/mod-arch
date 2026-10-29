@@ -136,6 +136,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v/{token}/auth", s.limitByIP(s.authLimit, s.handleViewerAuth))
 	mux.HandleFunc("POST /v/leave", s.handleViewerLeave)
 	mux.HandleFunc("GET /_assets/{name}", s.handleAsset)
+	mux.HandleFunc("GET /robots.txt", handleRobots)
+	mux.HandleFunc("GET /sitemap.xml", handleSitemap)
 	mux.HandleFunc("POST /api/i18n/lang", s.handleSetLang)
 	s.registerAdminRoutes(mux)
 	s.registerAuthRoutes(mux)
